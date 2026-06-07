@@ -42,7 +42,7 @@ rv_scheduler/
 ├── scheduler/
 │   ├── pairing.py            # can_pair(a, b) -> None | reason_str; greedy pass
 │   ├── rules.py              # PairingRule dataclass + all concrete rules
-│   └── bnb.py                # branch-and-bound reorder within windows
+│   └── reorder.py            # list scheduling (default) + BnB (--thorough)
 └── output/
     └── annotator.py          # formats annotated assembly output
 ```
@@ -496,12 +496,56 @@ reasons for solo instructions.
 
 ---
 
-## 11. `scheduler/bnb.py` — Branch-and-bound reordering
+## 11. `scheduler/reorder.py` — Instruction reordering
+
+Three scheduling strategies share the same interface:
+
+```python
+def schedule(block: BasicBlock, graph: DepGraph, mode: ScheduleMode) -> list[Instruction]:
+    """Return a topological sort of graph that maximises pair count."""
+```
+
+All three feed their output into the same forward-scan pairing pass (§10).
+
+---
+
+### Mode 1 — Forward-scan (no reordering)
+
+Instructions are emitted in source order.  No dependency graph is needed.
+The forward-scan pairing pass runs directly over the original instruction list.
+O(n).  Default when no scheduling flag is given.
+
+---
+
+### Mode 2 — List scheduling (default reordering)
+
+Maintains a ready queue of instructions whose dependencies are all satisfied.
+At each step:
+
+1. If there is a `free` candidate (an instruction already emitted but not yet
+   paired), check the ready queue for any instruction that pairs with it.
+   - If exactly one candidate pairs with `free`, emit it immediately.
+   - If multiple candidates pair with `free`, prefer the one with the fewest
+     alternative pairing options elsewhere in the ready queue (i.e. the one that
+     would be hardest to pair later).  This is the one-step lookahead that
+     catches the common bad-decision case: A pairs with B, but B could have
+     paired with C while A pairs with D.
+2. If no pairable candidate exists for `free`, emit `free` as solo and pick the
+   next instruction from the ready queue by secondary priority (longest
+   remaining dependency chain first, to avoid creating bottlenecks).
+3. Update the ready queue as new instructions become unblocked.
+
+O(n log n) in queue operations.  Handles the practical failure mode of greedy
+forward-scan (premature commitment to a pair that blocks two better pairs)
+without exhaustive search.
+
+---
+
+### Mode 3 — Branch-and-bound (exhaustive)
 
 The BnB finds the topological sort of the block's dependency graph that
-maximises pair count under the greedy-advance model.
-
-### Key parameters
+maximises pair count under the forward-scan model.  Used to establish an upper
+bound on what any reordering strategy can achieve with the current rule set.
 
 ```python
 WINDOW_SIZE   = 16      # blocks longer than this are split into independent windows
@@ -509,8 +553,7 @@ NODE_BUDGET   = 50_000  # total search nodes before giving up
 STAGNATION    = 5_000   # nodes without improvement before giving up
 ```
 
-### Upper bound
-
+**Upper bound:**
 ```python
 def bound(remaining: int, prev_free: bool) -> int:
     if prev_free:
@@ -519,20 +562,14 @@ def bound(remaining: int, prev_free: bool) -> int:
         return remaining // 2
 ```
 
-### Candidate ordering heuristic
+**Candidate ordering heuristic** (when `prev_free` is True):
+1. Tier 1 — ready instructions that pair with `free` (A=free, B=cand).
+2. Tier 2 — ready instructions that pair with `free` reversed (A=cand, B=free),
+   provided no dependency edge from `free` to `cand`.
+3. Tier 3 — remaining ready instructions in index order.
 
-When `prev_free` is True (a free instruction is waiting for a partner):
-1. Tier 1 — candidates that pair with `free` in forward order (A=free, B=cand).
-2. Tier 2 — candidates that pair with `free` in reverse order (A=cand, B=free),
-   provided there is no dependency edge from `free` to `cand`.  This handles
-   chains where the producer logically precedes the consumer but the consumer
-   benefits from the A slot.
-3. Tier 3 — remaining candidates in index order.
-
-### Fallback
-
-If `NODE_BUDGET` or `STAGNATION` is exceeded, a greedy topological sort with the
-same pairing preference (tier-1 candidates first) is used as the result.
+**Fallback:** if `NODE_BUDGET` or `STAGNATION` is exceeded, the list-scheduling
+result is used instead.
 
 ---
 
@@ -569,31 +606,30 @@ usage: python -m rv_scheduler [options] input.s
 Options:
   --arch rv32 | rv64       Override inferred architecture (error on conflict)
   --output FILE            Output file (default: stdout)
-  --thorough               Use BnB reordering to maximise pairs (slow; default
-                           is forward-scan only)
+  --fast                   Forward-scan only, no reordering (fastest; good for
+                           iterating on rules)
+  --thorough               BnB reordering within windows (slowest; establishes
+                           upper bound on pairs)
   --same-base-reorder      Relax memory ordering between provably-independent
-                           same-base loads/stores (opt-in; implied by --thorough)
+                           same-base loads/stores (opt-in; no effect with --fast)
   --annotate-liveness      Include live-in register sets in comments
   -v, --verbose            Include rejection reasons for all attempted pairs
 ```
 
-### Fast vs thorough mode
+### Scheduling modes
 
-The default mode uses **forward-scan** pairing: a single O(n) pass that tries to
-pair each instruction with the next unpaired instruction it can legally combine
-with.  Instructions are emitted in source order; no reordering occurs.  This is
-fast enough for interactive iteration on pairing rules.
+All three modes use identical `can_pair()` rules.  Only the instruction ordering
+fed into the forward-scan pairing pass differs.
 
-`--thorough` replaces the forward-scan with **BnB + greedy-advance**: the
-dependency graph is built for each basic block, and branch-and-bound searches
-for the topological ordering that maximises the greedy-advance pair count.
-Instructions may be reordered within the block (respecting data dependencies).
-This is the reference result for measuring whether a rule set is leaving pairs on
-the table, but can be significantly slower on large files.
+| Mode | Algorithm | Reorders? | Cost | Use for |
+|---|---|---|---|---|
+| `--fast` | Forward-scan, source order | No | O(n) | Iterating on rules |
+| (default) | List scheduling + lookahead | Yes | O(n log n) | Normal use |
+| `--thorough` | Branch-and-bound | Yes | Exponential (budgeted) | Measuring rule quality |
 
-Both modes use identical `can_pair()` rules — only the instruction ordering fed
-into the pairing pass differs.  Pair counts from `--thorough` are an upper bound
-on what any reordering strategy could achieve with the current rule set.
+`--thorough` pair counts are an upper bound on what any reordering strategy can
+achieve with the current rule set, making it useful for evaluating whether list
+scheduling is leaving significant pairs on the table.
 
 ---
 
@@ -619,8 +655,9 @@ on what any reordering strategy could achieve with the current rule set.
 9. `scheduler/rules.py` + `scheduler/pairing.py` — start with one trivial rule
    (e.g. reject if `a.is_branch`) so the iteration harness exists before real
    rules are authored.
-10. `scheduler/bnb.py` — test on small hand-crafted blocks with known optimal
-    pair counts; verify the greedy-advance model is consistently applied.
+10. `scheduler/reorder.py` — test list scheduling on small hand-crafted blocks
+    with known optimal pair counts; verify BnB agrees with list scheduling on
+    those same blocks.
 11. `output/annotator.py` + `__main__.py` — integration tests with complete
     assembly files; verify output line count equals input line count (modulo
     comment-only changes).
