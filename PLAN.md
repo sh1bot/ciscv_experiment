@@ -569,11 +569,31 @@ usage: python -m rv_scheduler [options] input.s
 Options:
   --arch rv32 | rv64       Override inferred architecture (error on conflict)
   --output FILE            Output file (default: stdout)
+  --thorough               Use BnB reordering to maximise pairs (slow; default
+                           is forward-scan only)
   --same-base-reorder      Relax memory ordering between provably-independent
-                           same-base loads/stores (opt-in)
+                           same-base loads/stores (opt-in; implied by --thorough)
   --annotate-liveness      Include live-in register sets in comments
   -v, --verbose            Include rejection reasons for all attempted pairs
 ```
+
+### Fast vs thorough mode
+
+The default mode uses **forward-scan** pairing: a single O(n) pass that tries to
+pair each instruction with the next unpaired instruction it can legally combine
+with.  Instructions are emitted in source order; no reordering occurs.  This is
+fast enough for interactive iteration on pairing rules.
+
+`--thorough` replaces the forward-scan with **BnB + greedy-advance**: the
+dependency graph is built for each basic block, and branch-and-bound searches
+for the topological ordering that maximises the greedy-advance pair count.
+Instructions may be reordered within the block (respecting data dependencies).
+This is the reference result for measuring whether a rule set is leaving pairs on
+the table, but can be significantly slower on large files.
+
+Both modes use identical `can_pair()` rules — only the instruction ordering fed
+into the pairing pass differs.  Pair counts from `--thorough` are an upper bound
+on what any reordering strategy could achieve with the current rule set.
 
 ---
 
