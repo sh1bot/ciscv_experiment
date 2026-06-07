@@ -91,10 +91,16 @@ Rules (based on the `rd` operand):
 
 | Case | Detection | Implicit uses | Implicit defs | Terminates |
 |---|---|---|---|---|
-| Call with return | `jalr`/`jal` writing `ra` (x1) or `t0` (x5) | `ARG_REGS ∪ FARG_REGS` | `CALLER_SAVED ∪ FCALLER_SAVED` | False |
-| Return | `jalr x0, ra, 0` | `RET_REGS ∪ FRET_REGS` | ∅ | True |
-| Tail call | `jalr x0, rs1` where rs1 ≠ ra | `ARG_REGS ∪ FARG_REGS` | ∅ | True |
-| Indirect jump | `jalr x0, rs1` used as computed goto (within a function, no tail-call heuristic match) | ∅ | ∅ | True (conservative) |
+| Call with return | `jalr`/`jal` writing `ra` (x1) or `t0` (x5) | `ARG_REGS ∪ FARG_REGS ∪ {sp}` | `CALLER_SAVED ∪ FCALLER_SAVED` | False |
+| Return | `jalr x0, ra, 0` | `RET_REGS ∪ FRET_REGS ∪ {sp}` | ∅ | True |
+| Tail call | `jalr x0, rs1` where rs1 ≠ ra | `ARG_REGS ∪ FARG_REGS ∪ {sp}` | ∅ | True |
+| Indirect jump | `jalr x0, rs1` used as computed goto (within a function, no tail-call heuristic match) | `{sp}` | ∅ | True (conservative) |
+
+`sp` (x2) is included as an implicit use for all control-flow instructions that
+transfer out of the current frame.  This creates the necessary dep-graph edge
+from any stack-pointer–modifying instruction (e.g. `addi sp, sp, 16`) to the
+subsequent `ret`, preventing the scheduler from moving the return before the
+stack restore.
 
 The discriminant is `rd`: a non-`x0` link destination means call-with-return, so
 callee-saved registers survive the call.  An `x0` destination means no return
@@ -167,14 +173,24 @@ All are derived from the stored fields; none are stored separately.
 | `is_fence` | FENCE / FENCE.I |
 | `is_atomic` | A-extension instruction |
 | `has_side_effects` | `is_call or is_return or writes_memory or is_csr or is_fence or is_atomic` |
-| `uses_int` | `frozenset` of integer registers read by this instruction |
-| `defs_int` | `frozenset` of integer registers written by this instruction |
+| `uses_int` | `frozenset` of integer registers read by this instruction, **excluding x0** |
+| `defs_int` | `frozenset` of integer registers written by this instruction, **excluding x0** |
 | `uses_float` | `frozenset` of float registers read |
 | `defs_float` | `frozenset` of float registers written |
 | `rvc_eligible` | see §5 |
 | `rs1_in_rvc_range` | `rs1 is not None and rs1 in range(8, 16)` |
 | `rs2_in_rvc_range` | `rs2 is not None and rs2 in range(8, 16)` |
 | `rd_in_rvc_range` | `rd is not None and rd in range(8, 16)` |
+
+**x0 is excluded from `uses_int` and `defs_int`** — writes to x0 are no-ops and
+reads of x0 always produce zero, so x0 participates in no data dependencies and
+must not appear in liveness sets (otherwise it would be "live" everywhere and
+pollute every live_in/live_out set in the file).  However, the raw decoded fields
+`rd`, `rs1`, `rs2` *may* still hold index 0 when the instruction architecturally
+references x0 (e.g. `jalr x0, ra, 0` has `rd = 0`, `jalr x1, x0, target` has
+`rs1 = 0`).  These raw fields are needed for instruction classification (e.g.
+`is_return` checks `rd == 0`) and RVC eligibility checks; they are just excluded
+from the `uses_int`/`defs_int` computed sets.
 
 Helper predicates (used internally by decoders and rules):
 
@@ -199,7 +215,10 @@ instructions:
    `.Ltmp*`) are almost always non-barriers.
 2. **Decode pass:** parse instructions.  Non-barrier labels encountered on their
    own line are accumulated as `prefix_lines` on the immediately following
-   instruction.  Barrier labels split basic blocks.
+   instruction.  Barrier labels split basic blocks.  If a non-barrier label
+   appears at the end of the file with no following instruction (orphaned), it is
+   emitted verbatim at the end of the output as a trailing line — it has nothing
+   to attach to and is not a pairing consideration.
 
 This ordering is necessary because `prefix_lines` attachment requires knowing
 barrier status upfront, and barrier status requires seeing all branch targets
@@ -501,9 +520,26 @@ B_SLOT_DISQUALIFIERS: list[str]  # if any is True on b, b cannot be B-slot
 `can_pair()` checks these lists first, before evaluating any `PairingRule`.  If
 `a` is disqualified, the function returns immediately without examining `b` at
 all — there is no point searching for a B-slot partner when the A-slot candidate
-is already known to be ineligible.  Branches are one example of an A-slot
-disqualifier (`is_branch`), but there may be others, and the list is edited in
-the same place as the rules.
+is already known to be ineligible.
+
+Initial contents (subject to change as rules evolve):
+
+```python
+A_SLOT_DISQUALIFIERS = [
+    "is_branch",    # branch in A-slot: the processor leaves before B executes
+    "is_jump",      # same applies to unconditional jumps and returns
+    "is_return",
+    "is_call",      # calls belong in B-slot only (see below)
+]
+
+B_SLOT_DISQUALIFIERS = [
+    # none initially — to be populated as constraints are discovered
+]
+```
+
+Calls are A-slot disqualified because placing a call in A-slot would transfer
+control before the B-slot instruction executes.  In B-slot a call executes after
+the A-slot instruction completes, which is the intended sequencing.
 
 ### Rule evaluation contract
 
@@ -514,6 +550,43 @@ rule that returns a non-`None` string constitutes a rejection.
 
 Prerequisites are a filtering mechanism, not an approval mechanism.  The overall
 `can_pair()` function approves a pair only when no applicable rule rejects it.
+
+### Example rule — RSD ALU pair
+
+As a worked example, consider pairing two instructions where both have the form
+`{add, sub, and, or, xor} rsd, rs2` — i.e. both are two-register ALU ops where
+the destination is also a source (no immediate, no load/store).  This is the
+simplest non-trivial rule: it expresses that two independent accumulator-style
+operations can share a packet.
+
+The `is_rsd` property is True when `rd` also appears as `rs1` or `rs2`.  The
+mnemonic filter is expressed via a prerequisite property `is_rsd_alu_pair_eligible`
+(or inline in the check lambda).  The only correctness constraint is that neither
+instruction writes a register the other reads or writes (RAW/WAW) — which is
+expressed by the check function:
+
+```python
+PairingRule(
+    name="rsd-alu-pair",
+    a_prerequisites=["is_rsd"],
+    b_prerequisites=["is_rsd"],
+    check=lambda a, b: (
+        None
+        if (a.mnemonic in {"add","sub","and","or","xor",
+                           "addw","subw","andw","orw","xorw"}
+            and b.mnemonic in {"add","sub","and","or","xor",
+                               "addw","subw","andw","orw","xorw"}
+            and not (a.defs_int & b.uses_int)   # no RAW a→b
+            and not (b.defs_int & a.uses_int)   # no RAW b→a
+            and not (a.defs_int & b.defs_int))  # no WAW
+        else "rsd-alu-pair: register conflict or mnemonic mismatch"
+    ),
+)
+```
+
+Note that this rule is intentionally narrow.  Widening it (e.g. allowing one
+side to have an immediate, or allowing load/ALU pairs) is done by adding more
+rules, not by expanding this one.
 
 ### Adding / removing rules
 
@@ -618,8 +691,10 @@ At each step:
      paired with C while A pairs with D.
 2. If no pairable candidate exists for `free`, emit `free` as solo and pick the
    next instruction from the ready queue by secondary priority (longest critical
-   path to the end of the block, computed once on the dependency graph before
-   scheduling begins).
+   path to the end of the block, measured in dependency-graph hops, computed once
+   before scheduling begins).  No instruction latency model is used — all edges
+   are unit weight.  The hop-count is a tie-breaker only; pairing opportunity is
+   the primary objective.
 3. Update the ready queue as new instructions become unblocked.
 
 O(n log n) in queue operations.
