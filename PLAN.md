@@ -100,6 +100,10 @@ The discriminant is `rd`: a non-`x0` link destination means call-with-return, so
 callee-saved registers survive the call.  An `x0` destination means no return
 from the callee's perspective — only return registers matter downstream.
 
+`t0` (x5) is included as a link register because the RISC-V psABI defines x5 as
+the alternate link register, used by some linker-generated call stubs when `ra`
+(x1) is already occupied.  Both are treated identically for ABI purposes.
+
 `call` and `tail` pseudo-instructions are **not** expanded to multi-instruction
 sequences.  They are retained as single instructions and their ABI effects are
 handled entirely by `call_liveness_effect()`.  All argument registers are
@@ -149,8 +153,8 @@ All are derived from the stored fields; none are stored separately.
 
 | Property | Definition |
 |---|---|
-| `is_rsd` | `rd is not None and (rd == rs1 or (is_commutative and rd == rs2))` — for commutative binops, operands are normalised at parse time so the RSD operand is always in rs1 position |
-| `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul`, `feq` and their `*w` variants |
+| `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand; no parse-time operand normalisation is performed |
+| `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul` and their `*w` variants |
 | `reads_rd` | instruction reads `rd` before writing it — i.e. AMO instructions (`amoadd`, `amoswap`, `amoor`, etc.) which atomically read and update their destination |
 | `writes_rd` | `rd is not None` |
 | `writes_memory` | store instruction |
@@ -222,10 +226,18 @@ When no decoder matches a mnemonic, the instruction is decoded as follows:
 - `defs_int` = the first register-like operand, if any.
 - `uses_int` = all remaining register-like operands.
 - `is_unknown = True` — the annotator will emit a `[?]` marker on output.
-- The instruction is **not** treated as a barrier.  It participates in the
-  dependency graph via its inferred `defs_int` / `uses_int` and may be
-  reordered if the graph permits.  If the inferred register effects are wrong,
-  the instruction can be added to the known-instruction tables as needed.
+- The instruction is **not** treated as a barrier in the dependency graph.
+  It participates via its inferred `defs_int` / `uses_int` (RAW/WAR/WAW edges
+  only) and may be reordered if those edges permit.  Side-effect and memory
+  behaviour is unknown, so the instruction is treated as both reading and
+  writing memory (conservative memory ordering edge against all adjacent
+  memory operations), but it does not anchor all other instructions to it the
+  way a true barrier (fence, AMO, ecall) does.
+- A `[?]` annotation appears in the output for every unknown instruction.
+- A warning is emitted on stderr: `warning: unknown mnemonic '<mnemonic>'`
+  on the first occurrence of each unknown mnemonic.  If the inferred register
+  effects are wrong, the instruction should be added to the known-instruction
+  tables.
 
 ### Pseudo-instruction handling
 
@@ -280,7 +292,7 @@ in `range(8, 16)`):
 |---|---|
 | `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, nzuimm nonzero, multiple of 4, ≤ 1020 |
 | `c.lw rd', imm(rs1')` | `lw rd, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
-| `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits |
+| `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
 | `c.sd rs2', imm(rs1')` | RV64: `sd rs2, imm(rs1)` — both in 8–15, uimm fits 8 bits |
 | `c.addi rd, nzimm` | `addi rd, rd, imm` — `is_rsd`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
@@ -343,8 +355,8 @@ class BasicBlock:
 | Terminator | Successors |
 |---|---|
 | Conditional branch | fall-through block + branch-target block |
-| `jal` / `jalr` (not a call) to a known label | one successor |
-| `jalr` to unknown register | no successors (treat as function exit) |
+| `jal` (not a call) | one successor (the target label) |
+| `jalr` (not a call) | no successors — target is register-computed; treat as function exit |
 | `ret` / `jalr x0, ra, 0` | no successors |
 | `call` / `tail` / `jal x1` | fall-through only (callee is opaque) |
 | Fall-through (non-terminator last instruction) | next block |
@@ -401,8 +413,9 @@ purposes regardless of the CFG edge list.
 **ABI seeds for block terminals** (injected as initial `live_out` values before
 dataflow iteration):
 - `ret` / `jalr x0, ra, 0` → `live_out = RET_REGS ∪ CALLEE_SAVED`
-- `tail` / tail-call `jalr` → `live_out = ARG_REGS`
-- `call` / `jal x1` → `live_out = ARG_REGS ∪ CALLEE_SAVED`
+- `tail` / tail-call `jalr` → `live_out = ARG_REGS ∪ FARG_REGS`
+- `call` / `jal x1` → `live_out = RET_REGS ∪ CALLEE_SAVED ∪ FCALLEE_SAVED`
+  (the callee preserves callee-saved regs and may return values in `a0`/`a1` and `fa0`/`fa1`)
 
 ### Local pass
 
@@ -427,10 +440,11 @@ for correctness.
   register is not written between them — and non-overlapping byte ranges (same
   offset ± access width) have this edge dropped.
 - **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, `call`,
-  `tail`, and `is_unknown` instructions get ordering edges from all preceding
-  instructions in the block.  Unknown instructions are treated as barriers
-  because their memory and side-effect behaviour is genuinely unknown, even
-  though their register effects are estimated.
+  and `tail` instructions get ordering edges from all preceding instructions
+  in the block.  Unknown instructions (`is_unknown`) are **not** treated as
+  full barriers; they receive conservative memory ordering edges against all
+  adjacent memory operations, but other non-memory instructions may still be
+  reordered around them if the register-dependency edges permit.
 
 ```python
 @dataclass
@@ -678,8 +692,6 @@ With `--annotate-liveness`, the live-in set is also appended to the comment.
 usage: python -m rv_scheduler [options] input.s
 
 Options:
-  --arch rv32 | rv64       Hint for rvc_eligible annotation (does not affect
-                           pairing; informational only)
   --output FILE            Output file (default: stdout)
   --fast                   Forward-scan only, no reordering (fastest; good for
                            iterating on rules)
