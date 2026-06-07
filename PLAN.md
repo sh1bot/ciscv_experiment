@@ -473,11 +473,23 @@ The A and B slots have fundamentally different constraints and many rules apply
 asymmetrically.  `a_prerequisites` and `b_prerequisites` are separate lists to
 make this a first-class design consideration rather than an afterthought.
 
-**Hard constraint: branches are always B-slot.**  A branch can never be the
-A-slot instruction.  This is enforced as a hard short-circuit at the top of
-`can_pair()` *before* any rule evaluation — if `a.is_branch` is True, `can_pair`
-returns immediately with a rejection string.  There is no point evaluating rules
-when the A-slot is a branch, as every candidate would be prohibited.
+### Per-slot disqualifiers
+
+Some instructions are ineligible for a given slot regardless of what the other
+instruction is.  These are expressed as two configurable lists of instruction
+property names in `rules.py`:
+
+```python
+A_SLOT_DISQUALIFIERS: list[str]  # if any is True on a, a cannot be A-slot
+B_SLOT_DISQUALIFIERS: list[str]  # if any is True on b, b cannot be B-slot
+```
+
+`can_pair()` checks these lists first, before evaluating any `PairingRule`.  If
+`a` is disqualified, the function returns immediately without examining `b` at
+all — there is no point searching for a B-slot partner when the A-slot candidate
+is already known to be ineligible.  Branches are one example of an A-slot
+disqualifier (`is_branch`), but there may be others, and the list is edited in
+the same place as the rules.
 
 ### Rule evaluation contract
 
@@ -491,8 +503,9 @@ Prerequisites are a filtering mechanism, not an approval mechanism.  The overall
 
 ### Adding / removing rules
 
-Each rule is one `PairingRule(...)` entry in the `RULES` list in `rules.py`.
-This is the only file that needs to change when iterating on pairing policy.
+All of `RULES`, `A_SLOT_DISQUALIFIERS`, and `B_SLOT_DISQUALIFIERS` live in
+`rules.py`.  This is the only file that needs to change when iterating on
+pairing policy.
 
 ---
 
@@ -504,9 +517,13 @@ This is the only file that needs to change when iterating on pairing policy.
 def can_pair(a: Instruction, b: Instruction) -> str | None:
     """Return None if a and b may share a 32-bit packet,
     or a short reason string if not."""
-    # Hard constraint: branches can never be A-slot.
-    if a.is_branch:
-        return "branch cannot be A-slot"
+    # Per-slot disqualifiers: fast-out without examining the other instruction.
+    for prop in A_SLOT_DISQUALIFIERS:
+        if getattr(a, prop):
+            return f"A-slot disqualified: {prop}"
+    for prop in B_SLOT_DISQUALIFIERS:
+        if getattr(b, prop):
+            return f"B-slot disqualified: {prop}"
 
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):
