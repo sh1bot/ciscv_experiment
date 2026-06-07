@@ -25,7 +25,7 @@ rv_scheduler/
 │   ├── abi.py                # call_liveness_effect() — ABI-implied use/def sets
 │   ├── instruction.py        # Instruction base class + all computed properties
 │   └── decode/
-│       ├── __init__.py       # public parse_line() factory, arch inference
+│       ├── __init__.py       # public parse_line() factory
 │       ├── rv_i.py           # RV32I / RV64I
 │       ├── rv_m.py           # M extension
 │       ├── rv_a.py           # A extension
@@ -100,6 +100,12 @@ The discriminant is `rd`: a non-`x0` link destination means call-with-return, so
 callee-saved registers survive the call.  An `x0` destination means no return
 from the callee's perspective — only return registers matter downstream.
 
+`call` and `tail` pseudo-instructions are **not** expanded to multi-instruction
+sequences.  They are retained as single instructions and their ABI effects are
+handled entirely by `call_liveness_effect()`.  All argument registers are
+conservatively assumed live at a call site since the precise argument count is
+not known from the assembly text alone.
+
 ---
 
 ## 3. `isa/instruction.py` — `Instruction` base class
@@ -128,6 +134,7 @@ class Instruction:
     frs3: int | None
     imm:  int | None
     branch_target: str | None     # label string for branches / jumps
+    is_unknown:    bool = False   # True for unrecognised mnemonics (best-effort decode)
 
     # Populated by the liveness pass (initially empty):
     live_in:   frozenset[int] = field(default_factory=frozenset)
@@ -142,8 +149,9 @@ All are derived from the stored fields; none are stored separately.
 
 | Property | Definition |
 |---|---|
-| `is_rsd` | `rd is not None and (rd == rs1 or (is_commutative and rd == rs2))` — also True when the instruction is a commutative binop with rd in the rs2 position; operands are normalised at parse time so rs1 always holds the matched source |
-| `reads_rd` | instruction reads `rd` before writing (e.g. atomics with `.aq`/`.rl`) |
+| `is_rsd` | `rd is not None and (rd == rs1 or (is_commutative and rd == rs2))` — for commutative binops, operands are normalised at parse time so the RSD operand is always in rs1 position |
+| `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul`, `feq` and their `*w` variants |
+| `reads_rd` | instruction reads `rd` before writing it — i.e. AMO instructions (`amoadd`, `amoswap`, `amoor`, etc.) which atomically read and update their destination |
 | `writes_rd` | `rd is not None` |
 | `writes_memory` | store instruction |
 | `reads_memory` | load instruction |
@@ -171,13 +179,29 @@ def imm_bits(self, n: int) -> bool:   # imm fits in a signed n-bit field
 def uimm_bits(self, n: int) -> bool:  # imm fits in an unsigned n-bit field
 ```
 
-Each decoder subclass overrides `_decode()` to populate the register and
-immediate fields and sets a `fmt` tag (R / I / S / B / U / J / CR / CI / CSS /
-CIW / CL / CS / CA / CB / CJ).
-
 ---
 
 ## 4. `isa/decode/` — Decoders
+
+### Two-pass parsing
+
+The parser makes two passes over the source file before decoding any
+instructions:
+
+1. **Pre-scan:** collect all label definitions, classify each as a *barrier
+   label* (appears as a branch/jump target anywhere in the file, or declared by
+   `.globl` / `.weak`) or a *non-barrier label* (never a branch target and not
+   globally visible).  Assembler-internal labels (`.Lpcrel_hi*`, `.Lfunc_end*`,
+   `.Ltmp*`) are almost always non-barriers.
+2. **Decode pass:** parse instructions.  Non-barrier labels encountered on their
+   own line are accumulated as `prefix_lines` on the immediately following
+   instruction.  Barrier labels split basic blocks.
+
+This ordering is necessary because `prefix_lines` attachment requires knowing
+barrier status upfront, and barrier status requires seeing all branch targets
+before any instruction is decoded.
+
+### Decoder interface
 
 Each module exports:
 
@@ -185,24 +209,38 @@ Each module exports:
 def match(mnemonic: str) -> type[Instruction] | None
 ```
 
-`decode/__init__.py` calls each module's `match()` in extension-priority order
-and raises `UnknownInstruction` if none matches.  It also maintains a
-module-level `inferred_arch: Literal["rv32", "rv64"] | None` that is updated as
-instructions are parsed:
+`decode/__init__.py` calls each module's `match()` in extension-priority order.
+If no module matches, an `UnknownInstruction` subclass is returned (not raised)
+using best-effort decoding (see below) — unrecognised mnemonics are never fatal.
 
-- Any `addiw`, `slliw`, `sd`, `ld`, or other RV64-only instruction sets it to
-  `"rv64"`.
-- Any RV32-only encoding (e.g. `c.jal`, which reuses the `c.addiw` slot on
-  RV64) sets it to `"rv32"`.
-- A conflict (both seen in the same file) is a hard parse error.
+### Best-effort decoding of unknown instructions
 
-**Pseudo-instruction expansion:** `nop`, `mv`, `li`, `ret`, `call`, `tail`,
-`la`, `not`, `neg`, `seqz`, `snez`, `sltz`, `sgtz` and similar assembler
-pseudo-instructions are expanded to their canonical equivalents during parsing.
-All downstream code sees only real instructions.
+When no decoder matches a mnemonic, the instruction is decoded as follows:
 
-**C-extension mnemonic handling:** C-extension instructions fall into two
-categories:
+- Scan the operand list left-to-right, parsing each token as a register name if
+  possible and ignoring any token that is not a valid register name.
+- `defs_int` = the first register-like operand, if any.
+- `uses_int` = all remaining register-like operands.
+- `is_unknown = True` — the annotator will emit a `[?]` marker on output.
+- The instruction is **not** treated as a barrier.  It participates in the
+  dependency graph via its inferred `defs_int` / `uses_int` and may be
+  reordered if the graph permits.  If the inferred register effects are wrong,
+  the instruction can be added to the known-instruction tables as needed.
+
+### Pseudo-instruction handling
+
+`nop`, `mv`, `li`, `ret`, `neg`, `not`, `seqz`, `snez`, `sltz`, `sgtz` and
+similar single-instruction pseudo-instructions are expanded to their canonical
+equivalents during parsing.  All downstream code sees only real instructions.
+
+`call` and `tail` are **not** expanded — they are retained as single
+instructions.  Their ABI effects (argument registers used, caller-saved registers
+clobbered) are handled by `call_liveness_effect()` in `isa/abi.py`.
+
+### C-extension mnemonic handling
+
+C-extension instructions fall into two categories:
+
 1. *Aliases* (e.g. `c.add`, `c.addi`, `c.srli`): the compressed form implies
    `rd == rs1`.  The decoder splices in the implicit `rs1 = rd` operand and
    delegates to the corresponding base-ISA table entry.
@@ -210,15 +248,8 @@ categories:
    table entries and are renamed to a canonical base-ISA mnemonic after decode
    (`c.mv` → `add`, `c.jr` → `jalr`, etc.).
 
-Both categories ultimately produce a base-ISA `Instruction` with correct
-`defs_int` / `uses_int`; no compressed mnemonic survives past `parse_line`.
-
-**Non-barrier label attachment:** During parsing, assembler-internal labels that
-do not appear as branch targets (`.Lpcrel_hi*`, `.Lfunc_end*`, `.Ltmp*`, etc.)
-are not stored as separate items.  They are accumulated as `prefix_lines` on the
-immediately following instruction.  This keeps them positionally anchored if the
-instruction is reordered (e.g. by the BnB pass).  Labels that DO appear as
-branch targets always split basic blocks regardless.
+Both categories ultimately produce a base-ISA `Instruction`; no compressed
+mnemonic survives past `parse_line`.
 
 ---
 
@@ -233,12 +264,21 @@ at schedule time, so the offset constraints for `c.beqz` (±256 B), `c.bnez`
 (±256 B), `c.j` (±2 KB), and `c.jal` (±2 KB) are skipped.  The annotation is
 therefore an optimistic estimate for branches.
 
+**No architecture gating.**  RV32-only rules (`c.jal`) and RV64-only rules
+(`c.addiw`, `c.ld`, etc.) are checked unconditionally.  Since each RVC rule maps
+to a distinct base-ISA mnemonic, the rules never conflict:  `c.jal` only fires
+for `jal x1, offset` and `c.addiw` only fires for `addiw rd, rd, imm` — these
+are different instructions.  The annotation may be slightly optimistic in edge
+cases (e.g. `jal x1` annotated `[C]` on RV64 code where that encoding slot is
+taken by `c.addiw`), but since `rvc_eligible` is informational only this is
+acceptable.
+
 Key rules (exhaustive list per spec; `rd'`/`rs1'`/`rs2'` means register index
 in `range(8, 16)`):
 
 | RVC encoding | Condition on the base instruction |
 |---|---|
-| `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, uimm ≠ 0, fits 10 unsigned bits |
+| `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, nzuimm nonzero, multiple of 4, ≤ 1020 |
 | `c.lw rd', imm(rs1')` | `lw rd, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits |
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
@@ -272,9 +312,6 @@ in `range(8, 16)`):
 | `c.swsp rs2, imm` | `sw rs2, imm(x2)` — uimm fits 8 bits (4-byte aligned) |
 | `c.sdsp rs2, imm` | RV64: `sd rs2, imm(x2)` — uimm fits 9 bits (8-byte aligned) |
 
-RV32-only rules (`c.jal`) and RV64-only rules (`c.ld`, `c.sd`, `c.ldsp`,
-`c.sdsp`, `c.addiw`, `c.subw`, `c.addw`) are gated on `inferred_arch`.
-
 ---
 
 ## 6. `analysis/cfg.py` — Basic blocks and functions
@@ -284,8 +321,8 @@ RV32-only rules (`c.jal`) and RV64-only rules (`c.ld`, `c.sd`, `c.ldsp`,
 1. Collect all labels and the instruction indices they precede.
 2. Identify *barrier labels*: those that appear as branch/jump targets anywhere
    in the file, or that are globally visible (`.globl` / `.weak`).
-   Assembler-internal labels that are never branch targets (`.Lpcrel_hi*`, etc.)
-   are **not** barrier labels and do not split blocks.
+   Assembler-internal labels that are never branch targets are **not** barrier
+   labels and do not split blocks.  (See §4 two-pass parsing.)
 3. Mark block-start indices: the first instruction, every instruction that
    follows a branch/jump/return, and every instruction preceded by a barrier
    label.
@@ -309,7 +346,7 @@ class BasicBlock:
 | `jal` / `jalr` (not a call) to a known label | one successor |
 | `jalr` to unknown register | no successors (treat as function exit) |
 | `ret` / `jalr x0, ra, 0` | no successors |
-| `call` / `jal x1` | fall-through only (callee is opaque) |
+| `call` / `tail` / `jal x1` | fall-through only (callee is opaque) |
 | Fall-through (non-terminator last instruction) | next block |
 
 ### Function grouping
@@ -337,6 +374,12 @@ label.  This global pass correctly handles conditional branches, loop back-edges
 and fall-throughs.  Per-block scheduling then consults this table for the block's
 `live_out` seed before doing its local backward propagation.
 
+**Liveness must be recomputed after reordering.**  Pairing rules consult
+per-instruction `live_in`/`live_out` (e.g. "rd is dead after B").  After the
+reorder pass changes instruction order, these fields are stale.  The local
+backward pass is re-run on the post-schedule ordered list before the
+greedy-advance pairing pass runs.
+
 ### Global pass
 
 Standard iterative backward dataflow over the CFG, per function, using a
@@ -355,11 +398,11 @@ which `call_liveness_effect()` returns non-empty sets has those sets merged in.
 If `terminates_function` is True, the block has no successors for liveness
 purposes regardless of the CFG edge list.
 
-**ABI seeds for block terminals:**
+**ABI seeds for block terminals** (injected as initial `live_out` values before
+dataflow iteration):
 - `ret` / `jalr x0, ra, 0` → `live_out = RET_REGS ∪ CALLEE_SAVED`
 - `tail` / tail-call `jalr` → `live_out = ARG_REGS`
-- `call` / `jal x1` → `live_out = ARG_REGS ∪ CALLEE_SAVED` (caller resumes with
-  these live); `next_block live_in` seeds `CALLEE_SAVED ∪ {ra, a0, a1}`
+- `call` / `jal x1` → `live_out = ARG_REGS ∪ CALLEE_SAVED`
 
 ### Local pass
 
@@ -380,11 +423,14 @@ for correctness.
 - **WAW** (write-after-write): both write the same register.
 - **Memory ordering**: by default, each memory operation has a dependency edge
   from the previous memory operation in program order (conservative).  With
-  `--same-base-reorder`, two mem-ops with the same unmodified base register and
-  non-overlapping byte ranges have this edge dropped.
+  `--same-base-reorder`, two mem-ops with the same base register — provided that
+  register is not written between them — and non-overlapping byte ranges (same
+  offset ± access width) have this edge dropped.
 - **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, `call`,
-  `tail`, and any unrecognised instruction get ordering edges from all preceding
-  instructions in the block.
+  `tail`, and `is_unknown` instructions get ordering edges from all preceding
+  instructions in the block.  Unknown instructions are treated as barriers
+  because their memory and side-effect behaviour is genuinely unknown, even
+  though their register effects are estimated.
 
 ```python
 @dataclass
@@ -397,8 +443,8 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
     ...
 ```
 
-The scheduler and BnB both operate on a `DepGraph` and only emit orderings that
-are topological sorts of it.
+The list scheduler and BnB both operate on a `DepGraph` and only emit orderings
+that are topological sorts of it.
 
 ---
 
@@ -409,10 +455,12 @@ are topological sorts of it.
 class PairingRule:
     name: str
 
-    # Names of Instruction boolean properties that must be True on BOTH
-    # instructions before check() is called.  If any prerequisite fails on
-    # either instruction the rule is skipped (not applicable — does not reject).
-    prerequisites: list[str]
+    # Properties that must be True on the A-slot instruction (first of pair).
+    # If any fails, this rule is skipped (not applicable — does not reject).
+    a_prerequisites: list[str] = field(default_factory=list)
+
+    # Properties that must be True on the B-slot instruction (second of pair).
+    b_prerequisites: list[str] = field(default_factory=list)
 
     # Returns None  -> this rule does not block the pair.
     # Returns str   -> the pair is rejected; the string is the reason.
@@ -421,28 +469,25 @@ class PairingRule:
 
 ### Slot asymmetry
 
-**Branches may only appear as the B-slot** (second instruction of a pair).  Any
-rule check called with a branch as `a` must return a rejection string.  This
-is enforced by a universal prerequisite rule that runs before all others.
-Similarly, instructions with `has_side_effects` may have additional slot
-restrictions imposed by individual rules.
+The A and B slots have fundamentally different constraints and many rules apply
+asymmetrically.  `a_prerequisites` and `b_prerequisites` are separate lists to
+make this a first-class design consideration rather than an afterthought.
+
+**Hard constraint: branches are always B-slot.**  A branch can never be the
+A-slot instruction.  This is enforced as a hard short-circuit at the top of
+`can_pair()` *before* any rule evaluation — if `a.is_branch` is True, `can_pair`
+returns immediately with a rejection string.  There is no point evaluating rules
+when the A-slot is a branch, as every candidate would be prohibited.
 
 ### Rule evaluation contract
 
-A rule with a non-empty `prerequisites` list is only *applicable* when every
-named property returns `True` on **both** `a` and `b`.  An inapplicable rule is
-silently skipped — it neither approves nor rejects.  Only an applicable rule
-that returns a non-`None` string constitutes a rejection.
+A rule is only *applicable* when every property in `a_prerequisites` is True on
+`a`, and every property in `b_prerequisites` is True on `b`.  An inapplicable
+rule is silently skipped — it neither approves nor rejects.  Only an applicable
+rule that returns a non-`None` string constitutes a rejection.
 
-This means prerequisites are a filtering mechanism, not an approval mechanism.
-The overall `can_pair()` function approves a pair only when no applicable rule
-rejects it (see §10).
-
-### Prerequisite grouping for efficiency
-
-Rules that share the same `prerequisites` list are grouped internally.  The
-property checks for a group are performed once; if any prerequisite fails, the
-entire group is skipped.
+Prerequisites are a filtering mechanism, not an approval mechanism.  The overall
+`can_pair()` function approves a pair only when no applicable rule rejects it.
 
 ### Adding / removing rules
 
@@ -459,9 +504,14 @@ This is the only file that needs to change when iterating on pairing policy.
 def can_pair(a: Instruction, b: Instruction) -> str | None:
     """Return None if a and b may share a 32-bit packet,
     or a short reason string if not."""
-    for rule in _grouped_rules():
-        # Prerequisites evaluated once per group
-        if not all(getattr(a, p) and getattr(b, p) for p in rule.prerequisites):
+    # Hard constraint: branches can never be A-slot.
+    if a.is_branch:
+        return "branch cannot be A-slot"
+
+    for rule in RULES:
+        if not all(getattr(a, p) for p in rule.a_prerequisites):
+            continue
+        if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
         result = rule.check(a, b)
         if result is not None:
@@ -477,22 +527,27 @@ order:
 
 ```
 if free is set and can_pair(free, curr) is None:
-    emit (free, curr) as a pair packet; free = None
+    emit (free, curr) as pair packet; free = None
 else:
-    if free is set: emit free as a solo packet
+    if free is set: emit free as solo packet
     free = curr
-if free is set: emit free as a solo packet
+if free is set: emit free as solo packet
 ```
 
-A solo instruction never blocks the following instruction from pairing.  The BnB
-pass (§11) finds the instruction ordering over the block's dependency graph that
-maximises the number of pairs under this exact model.
+A solo instruction never blocks the following instruction from pairing.  The
+list scheduler and BnB (§11) find the instruction ordering over the block's
+dependency graph that maximises the number of pairs under this exact model.
 
-### Post-schedule greedy pass
+### Rejection reason collection
 
-After the BnB produces an ordered instruction list, the greedy-advance walk is
-applied to that list to assign final packet groupings and collect rejection
-reasons for solo instructions.
+After the reorder pass fixes the instruction order and liveness is recomputed,
+the annotator calls `can_pair()` on each adjacent pair `(insn[i], insn[i+1])` in
+the final ordered output and records the reason string.  The `solo_reasons` for
+each instruction is a **set of strings** so that multiple distinct rejection
+reasons from different adjacent candidates can be accumulated and deduplicated.
+The coverage of reasons naturally varies by scheduling mode (the forward-scan
+mode only ever sees one candidate per instruction; the reorder modes may surface
+more), and that is acceptable.
 
 ---
 
@@ -505,15 +560,15 @@ def schedule(block: BasicBlock, graph: DepGraph, mode: ScheduleMode) -> list[Ins
     """Return a topological sort of graph that maximises pair count."""
 ```
 
-All three feed their output into the same forward-scan pairing pass (§10).
+All three feed their output into the same greedy-advance pairing pass (§10).
 
 ---
 
 ### Mode 1 — Forward-scan (no reordering)
 
-Instructions are emitted in source order.  No dependency graph is needed.
-The forward-scan pairing pass runs directly over the original instruction list.
-O(n).  Default when no scheduling flag is given.
+Instructions are emitted in source order.  The `graph` parameter is ignored; no
+dependency graph needs to be built for this mode.  The greedy-advance pairing
+pass runs directly over the original instruction list.  O(n).
 
 ---
 
@@ -531,20 +586,19 @@ At each step:
      catches the common bad-decision case: A pairs with B, but B could have
      paired with C while A pairs with D.
 2. If no pairable candidate exists for `free`, emit `free` as solo and pick the
-   next instruction from the ready queue by secondary priority (longest
-   remaining dependency chain first, to avoid creating bottlenecks).
+   next instruction from the ready queue by secondary priority (longest critical
+   path to the end of the block, computed once on the dependency graph before
+   scheduling begins).
 3. Update the ready queue as new instructions become unblocked.
 
-O(n log n) in queue operations.  Handles the practical failure mode of greedy
-forward-scan (premature commitment to a pair that blocks two better pairs)
-without exhaustive search.
+O(n log n) in queue operations.
 
 ---
 
 ### Mode 3 — Branch-and-bound (exhaustive)
 
 The BnB finds the topological sort of the block's dependency graph that
-maximises pair count under the forward-scan model.  Used to establish an upper
+maximises pair count under the greedy-advance model.  Used to establish an upper
 bound on what any reordering strategy can achieve with the current rule set.
 
 ```python
@@ -563,9 +617,10 @@ def bound(remaining: int, prev_free: bool) -> int:
 ```
 
 **Candidate ordering heuristic** (when `prev_free` is True):
-1. Tier 1 — ready instructions that pair with `free` (A=free, B=cand).
-2. Tier 2 — ready instructions that pair with `free` reversed (A=cand, B=free),
-   provided no dependency edge from `free` to `cand`.
+1. Tier 1 — ready instructions that pair with `free` as B-slot (A=free, B=cand).
+2. Tier 2 — ready instructions that pair with `free` as A-slot (A=cand, B=free),
+   provided `cand` has no dependency on `free` (i.e. it is safe to emit `cand`
+   before `free`).
 3. Tier 3 — remaining ready instructions in index order.
 
 **Fallback:** if `NODE_BUDGET` or `STAGNATION` is exceeded, the list-scheduling
@@ -581,18 +636,20 @@ preceded by any `prefix_lines`, followed by a comment.  The comment format is:
 ```asm
     add  a0, a1, a2     # [C]  {packet 7a}
     slli t0, t0, 3      # [C]  {packet 7b}
-    lw   s0, 0(sp)      # [C]  {solo: RAW hazard on s0}
+    lw   s0, 0(sp)      # [C]  {solo: RAW hazard on t1, not RSD}
     mul  a1, a2, a3     # [~C] {solo}
+    foo  a0, a1         # [?]  {solo}
 ```
 
 Fields in the comment:
 
-- `[C]` / `[~C]` — RVC eligibility.
+- `[C]` / `[~C]` — RVC eligibility.  `[?]` for unknown instructions.
 - `{packet Nb}` / `{packet Na}` — paired; `a` is the first instruction of the
   packet, `b` the second.
-- `{solo}` — unpaired with no candidate found.
-- `{solo: <reason>}` — unpaired because the best candidate was rejected; the
-  reason string comes from `can_pair()`.
+- `{solo}` — unpaired with no rejection reason recorded.
+- `{solo: reason1, reason2}` — unpaired; the reasons are the deduplicated union
+  of all `can_pair()` rejection strings collected for this instruction across
+  all adjacent candidates examined during the pairing pass.
 
 With `--annotate-liveness`, the live-in set is also appended to the comment.
 
@@ -604,7 +661,8 @@ With `--annotate-liveness`, the live-in set is also appended to the comment.
 usage: python -m rv_scheduler [options] input.s
 
 Options:
-  --arch rv32 | rv64       Override inferred architecture (error on conflict)
+  --arch rv32 | rv64       Hint for rvc_eligible annotation (does not affect
+                           pairing; informational only)
   --output FILE            Output file (default: stdout)
   --fast                   Forward-scan only, no reordering (fastest; good for
                            iterating on rules)
@@ -619,7 +677,7 @@ Options:
 ### Scheduling modes
 
 All three modes use identical `can_pair()` rules.  Only the instruction ordering
-fed into the forward-scan pairing pass differs.
+fed into the greedy-advance pairing pass differs.
 
 | Mode | Algorithm | Reorders? | Cost | Use for |
 |---|---|---|---|---|
@@ -640,24 +698,24 @@ scheduling is leaving significant pairs on the table.
 2. `isa/instruction.py` — base class and properties; test with hand-constructed
    objects.
 3. `isa/decode/rv_i.py` — RV32I/RV64I decoder; test with a corpus of known
-   instruction lines.
+   instruction lines including unknown mnemonics to verify best-effort decode.
 4. Remaining decoders (`rv_m`, `rv_a`, `rv_f`, `rv_d`, `rv_b`, `rv_zicsr`,
    `rv_v`) — add one extension at a time.
 5. `isa/decode/rv_c.py` — RVC eligibility; test against a table of
    known-eligible / known-ineligible examples covering every rule in §5.
 6. `analysis/cfg.py` — test with small synthetic assembly snippets covering
    straight-line, branch, loop, and call patterns; verify non-barrier label
-   attachment.
+   attachment and two-pass label classification.
 7. `analysis/liveness.py` — test with known liveness examples including
    cross-call callee-saved survival and conditional-branch join points.
-8. `analysis/depgraph.py` — test RAW/WAR/WAW edge construction and
-   `--same-base-reorder` independence checks.
+8. `analysis/depgraph.py` — test RAW/WAR/WAW edge construction, barrier edges
+   for unknown instructions, and `--same-base-reorder` independence checks.
 9. `scheduler/rules.py` + `scheduler/pairing.py` — start with one trivial rule
-   (e.g. reject if `a.is_branch`) so the iteration harness exists before real
-   rules are authored.
+   to verify the A-slot branch short-circuit and asymmetric prerequisite
+   evaluation before authoring real rules.
 10. `scheduler/reorder.py` — test list scheduling on small hand-crafted blocks
-    with known optimal pair counts; verify BnB agrees with list scheduling on
-    those same blocks.
+    with known optimal pair counts; verify BnB agrees; verify liveness
+    recomputation after reordering.
 11. `output/annotator.py` + `__main__.py` — integration tests with complete
-    assembly files; verify output line count equals input line count (modulo
-    comment-only changes).
+    assembly files; verify output line count equals input line count; verify
+    `[?]` annotation appears for unknown mnemonics.
