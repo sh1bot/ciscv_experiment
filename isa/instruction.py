@@ -348,8 +348,19 @@ class Instruction:
             return False
         return True
 
-    def uimm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
-        """Unsigned range + alignment + optional nonzero check."""
+    def uimm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
+        """Unsigned range + alignment check.
+
+        nonzero=False   — [0, (2**n - 1) << shift]  (start-inclusive, normal)
+        nonzero=True    — [1<<shift, (2**n-1)<<shift] (both-exclusive, nzuimm)
+        nonzero='remap' — [1<<shift, 2**n<<shift]    (end-inclusive, zero→max+1)
+        """
+        if self.imm is None:
+            return False
+        step = 1 << shift
+        if nonzero == 'remap':
+            # zero bit-pattern encodes 2**n << shift; valid range is [step, 2**n * step]
+            return self.imm != 0 and self.imm_multiple(shift) and 0 < self.imm <= (1 << n) * step
         if not self.uimm_bits(n):
             return False
         if shift > 0 and not self.imm_multiple(shift):

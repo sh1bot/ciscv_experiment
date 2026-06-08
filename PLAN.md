@@ -245,34 +245,51 @@ def imm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
     bits are implicitly zero (the field encodes imm >> shift in n bits).
     nonzero=True is needed for encodings that reserve the all-zero
     immediate for a different meaning (e.g. c.addi nzimm, c.lui nzimm).
+    Signed ranges cannot use 'remap' (see uimm_fits); zero-exclusion is
+    the only non-default option for signed fields.
     Examples:
-      lw/sw:       imm_fits(12)         — 12-bit signed, zero allowed
-      c.addi:      imm_fits(6, nonzero=True)  — 6-bit signed, nzimm
+      lw/sw:       imm_fits(12)               — 12-bit signed, zero allowed
+      c.addi:      imm_fits(6, nonzero=True)  — 6-bit signed, nzimm [-32..-1, 1..31]
       c.lui:       imm_fits(6, nonzero=True)  — 6-bit signed ×4096, nzimm
     For unsigned variants use uimm_fits()."""
 
-def uimm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
-    """Combined unsigned-range + alignment + optional nonzero check.
-    True iff uimm_bits(n) and imm_multiple(shift) and (imm != 0 if nonzero).
-    nonzero=True is needed for encodings that disallow a zero immediate
-    (e.g. c.addi4spn nzuimm, c.slli/c.srli/c.srai nzuimm shamt).
+def uimm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
+    """Combined unsigned-range + alignment + nonzero/remap check.
+
+    For an n-bit unsigned field with the low `shift` bits implicit, the
+    representable byte values are multiples of 2**shift.  There are three
+    range shapes depending on how the all-zero bit-pattern is treated:
+
+      nonzero=False   — start-inclusive  [0,      (2**n - 1) << shift]
+                        Zero is a valid encoding.  Normal case.
+
+      nonzero=True    — both-exclusive   [1<<shift, (2**n - 1) << shift]
+                        Zero bit-pattern is reserved/illegal (nzuimm).
+                        The slot is wasted; the top of the range is unchanged.
+
+      nonzero='remap' — end-inclusive    [1<<shift,  2**n      << shift]
+                        Zero bit-pattern is repurposed to encode the value
+                        2**n << shift (one beyond the normal maximum).
+                        Zero is still unrepresentable, but the top of the
+                        range gains one extra step.
+
     Examples:
-      c.lw/c.sw:   uimm_fits(7, 2)              — 7-bit, 4-aligned, zero ok
-      c.addi4spn:  uimm_fits(10, 2, nonzero=True) — 10-bit, 4-aligned, nzuimm
-      c.slli shamt: uimm_fits(6, nonzero=True)   — 6-bit, nonzero shamt"""
+      c.lw/c.sw:    uimm_fits(7, 2)                — [0..124], 4-aligned, zero ok
+      c.addi4spn:   uimm_fits(10, 2, nonzero=True)  — [4..1020], 4-aligned, nzuimm
+      c.slli shamt: uimm_fits(6, nonzero=True)       — [1..63], nonzero shamt
+      hypothetical: uimm_fits(6, nonzero='remap')    — [1..64], zero→64"""
 ```
 
-The `nonzero` parameter reflects the RISC-V C-extension convention of reserving
-the all-zero immediate encoding for a different instruction or as an illegal
-encoding (`nzimm` / `nzuimm` in the spec).  Zero immediates are valid for most
-load/store offsets but invalid for shift amounts and some arithmetic encodings.
+The three range shapes for unsigned immediates:
 
-The `shift` parameter reflects how memory instructions encode their offsets: a
-`c.lw` with a 4-byte-aligned offset stores `offset >> 2` in 5 bits (the
-C-extension field), reaching a 7-bit unsigned byte range.  Rules that test
-whether two adjacent loads/stores can share an encoding call `imm_fits` /
-`uimm_fits` with the appropriate `n`, `shift`, and `nonzero` for the target
-encoding.
+```
+nonzero=False    [0,       (2**n − 1) × 2**shift]   start-inclusive (normal)
+nonzero=True     [2**shift, (2**n − 1) × 2**shift]   both-exclusive  (nzuimm)
+nonzero='remap'  [2**shift,  2**n      × 2**shift]   end-inclusive   (zero→max+1)
+```
+
+`'remap'` is only meaningful for unsigned fields — signed nzimm encodings simply
+exclude zero from the interior of the range, which `nonzero=True` already captures.
 
 **Access width from opcode.**  Load and store mnemonics encode the access size
 in the opcode (`lb`/`sb` = 1, `lh`/`sh` = 2, `lw`/`sw` = 4, `ld`/`sd` = 8,
