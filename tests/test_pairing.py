@@ -10,9 +10,7 @@ from analysis.pairing import (
 )
 
 
-def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=None,
-              frd=None, frs1=None, frs2=None):
-    # frd/frs1/frs2 are ignored — float operands use rd/rs1/rs2 with indices 32–63
+def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=None):
     return Instruction(
         mnemonic=mnemonic, operands=[], raw=mnemonic,
         rd=rd, rs1=rs1, rs2=rs2, imm=imm,
