@@ -70,13 +70,13 @@ FREG_ALIASES: dict[str, int]  # "ft0"–"ft11","fs0"–"fs11","fa0"–"fa7" -> 0
 
 CALLER_SAVED: frozenset[int]  # ra, t0–t6, a0–a7  (integer)
 CALLEE_SAVED: frozenset[int]  # sp, s0–s11        (integer)
-ARG_REGS:     list[int]       # a0–a7 in order
-RET_REGS:     frozenset[int]  # a0, a1
+ARG_REGS:     frozenset[int]    # a0–a7
+RET_REGS:     frozenset[int]    # a0, a1
 
 FCALLER_SAVED: frozenset[int] # ft0–ft11, fa0–fa7
 FCALLEE_SAVED: frozenset[int] # fs0–fs11
-FARG_REGS:     list[int]      # fa0–fa7 in order
-FRET_REGS:     frozenset[int] # fa0, fa1
+FARG_REGS:     frozenset[int]   # fa0–fa7
+FRET_REGS:     frozenset[int]   # fa0, fa1
 ```
 
 Provide a helper `reg_name(index) -> str` returning the canonical ABI name.
@@ -121,12 +121,22 @@ are the fallback for assembler output that has already expanded pseudo-instructi
 | Return (pseudo) | mnemonic `"ret"` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | ∅ / ∅ | (same as uses) | True |
 | Return (encoded) | `jalr x0, ra, 0` | same | same | same | True |
 | Tail call (pseudo) | mnemonic `"tail"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | ∅ / ∅ | (same as uses) | True |
-| Tail call (encoded) | `jalr x0, rs1` where rs1 ≠ ra | same | same | same | True |
-| Indirect jump | `jalr x0, rs1` (conservative: not a recognisable tail call) | `{sp}` / ∅ | ∅ / ∅ | (same as uses) | True |
+| Tail call / indirect jump (encoded) | `jalr x0, rs1` (any form not matching Return above) | same as tail call pseudo | same | same | True |
 
 `sp` (x2) is in `CALLEE_SAVED` and therefore already present in the return and
-tail-call use sets; it is listed explicitly in the call and indirect-jump rows
-where it would otherwise be absent.
+tail-call use sets; it is listed explicitly in the call row where it would
+otherwise be absent.
+
+Any `jalr x0` that is not an exact `jalr x0, ra, 0` return is treated
+conservatively as a tail call — it may be a computed-goto (switch dispatch) or
+a tail call; we cannot distinguish them from the assembly text alone, and the
+tail-call treatment (ARG_REGS ∪ FARG_REGS ∪ {sp} as uses) is the safer choice.
+
+**Unclassified `jalr`** (rd ≠ x0 and rd ≠ ra and rd ≠ t0): `call_liveness_effect()`
+returns all-empty sets and `terminates_function = True`.  The dep-graph edges from
+the encoded register operands still constrain ordering.  The CFG gives this block
+no successors (register-computed target, treat as function exit), consistent with
+`terminates_function = True`.
 
 **Unclassified `jalr`.**  A `jalr` that writes a register other than `x0`, `ra`,
 or `t0` does not match any row above.  Such instructions are exotic in practice
@@ -188,7 +198,7 @@ All are derived from the stored fields; none are stored separately.
 
 | Property | Definition |
 |---|---|
-| `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand; no parse-time operand normalisation is performed |
+| `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand.  Note: RVC CA-format eligibility checks (c.sub, c.xor, c.or, c.and, c.subw, c.addw, c.srli, c.srai, c.andi) require specifically `rd == rs1`; the `rv_c.py` checks test `rd == rs1` directly rather than relying on the broader `is_rsd`. |
 | `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul` and their `*w` variants |
 | `reads_rd` | instruction reads `rd` before writing it — i.e. AMO instructions (`amoadd`, `amoswap`, `amoor`, etc.) which atomically read and update their destination |
 | `writes_rd` | `rd is not None` |
@@ -196,7 +206,7 @@ All are derived from the stored fields; none are stored separately.
 | `reads_memory` | load instruction |
 | `is_branch` | conditional branch (two CFG successors) |
 | `is_jump` | unconditional jump (JAL, JALR — one or zero successors) |
-| `is_call` | JAL/JALR writing `ra` (x1) or `t0` (x5) |
+| `is_call` | mnemonic `"call"`, or JAL/JALR writing `ra` (x1) or `t0` (x5) — covers both the unexpanded `call` pseudo and the encoded form |
 | `is_return` | `jalr x0, ra, 0` |
 | `is_csr` | accesses a CSR |
 | `is_fence` | FENCE / FENCE.I |
@@ -283,7 +293,7 @@ When no decoder matches a mnemonic, the instruction is decoded as follows:
   behaviour is unknown, so the instruction is treated as both reading and
   writing memory (conservative memory ordering edge against all adjacent
   memory operations), but it does not anchor all other instructions to it the
-  way a true barrier (fence, AMO, ecall) does.
+  way a true barrier (AMO, fence, fence.i, ecall, ebreak, call, tail) does.
 - A `[?]` annotation appears in the output for every unknown instruction.
 - A warning is emitted on stderr: `warning: unknown mnemonic '<mnemonic>'`
   on the first occurrence of each unknown mnemonic.  If the inferred register
@@ -346,25 +356,25 @@ in `range(8, 16)`):
 | `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
 | `c.sd rs2', imm(rs1')` | RV64: `sd rs2, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
-| `c.addi rd, nzimm` | `addi rd, rd, imm` — `is_rsd`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
-| `c.addiw rd, imm` | RV64: `addiw rd, rd, imm` — `is_rsd`, rd ≠ x0, fits 6 signed bits |
+| `c.addi rd, nzimm` | `addi rd, rd, imm` — `rd == rs1`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
+| `c.addiw rd, imm` | RV64: `addiw rd, rd, imm` — `rd == rs1`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
 | `c.li rd, imm` | `addi rd, x0, imm` — rd ≠ x0, fits 6 signed bits |
-| `c.addi16sp imm` | `addi x2, x2, imm` — `is_rsd`, rd = x2, imm ≠ 0, fits 10 signed bits (16-byte aligned) |
+| `c.addi16sp imm` | `addi x2, x2, imm` — `rd == rs1`, rd = x2, imm ≠ 0, fits 10 signed bits (16-byte aligned) |
 | `c.lui rd, nzimm` | `lui rd, nzimm` — rd ≠ x0, rd ≠ x2, nzimm ≠ 0, fits 6 signed bits (×4096) |
-| `c.srli rd', shamt` | `srli rd, rd, shamt` — `is_rsd`, rd' in 8–15, 1 ≤ shamt ≤ 31 |
-| `c.srai rd', shamt` | `srai rd, rd, shamt` — `is_rsd`, rd' in 8–15, 1 ≤ shamt ≤ 31 |
-| `c.andi rd', imm` | `andi rd, rd, imm` — `is_rsd`, rd' in 8–15, fits 6 signed bits |
-| `c.sub rd', rs2'` | `sub rd, rd, rs2` — `is_rsd`, both in 8–15 |
-| `c.xor rd', rs2'` | `xor rd, rd, rs2` — `is_rsd`, both in 8–15 |
-| `c.or  rd', rs2'` | `or rd, rd, rs2` — `is_rsd`, both in 8–15 |
-| `c.and rd', rs2'` | `and rd, rd, rs2` — `is_rsd`, both in 8–15 |
-| `c.subw rd', rs2'` | RV64: `subw rd, rd, rs2` — `is_rsd`, both in 8–15 |
-| `c.addw rd', rs2'` | RV64: `addw rd, rd, rs2` — `is_rsd`, both in 8–15 |
+| `c.srli rd', shamt` | `srli rd, rd, shamt` — `rd == rs1`, rd' in 8–15, 1 ≤ shamt ≤ 63 (RV32: shamt ≤ 31) |
+| `c.srai rd', shamt` | `srai rd, rd, shamt` — `rd == rs1`, rd' in 8–15, 1 ≤ shamt ≤ 63 (RV32: shamt ≤ 31) |
+| `c.andi rd', imm` | `andi rd, rd, imm` — `rd == rs1`, rd' in 8–15, fits 6 signed bits |
+| `c.sub rd', rs2'` | `sub rd, rd, rs2` — `rd == rs1`, both in 8–15 |
+| `c.xor rd', rs2'` | `xor rd, rd, rs2` — `rd == rs1`, both in 8–15 |
+| `c.or  rd', rs2'` | `or rd, rd, rs2` — `rd == rs1`, both in 8–15 |
+| `c.and rd', rs2'` | `and rd, rd, rs2` — `rd == rs1`, both in 8–15 |
+| `c.subw rd', rs2'` | RV64: `subw rd, rd, rs2` — `rd == rs1`, both in 8–15 |
+| `c.addw rd', rs2'` | RV64: `addw rd, rd, rs2` — `rd == rs1`, both in 8–15 |
 | `c.j offset` | `jal x0, offset` — (offset range not checked) |
 | `c.jal offset` | RV32 only: `jal x1, offset` — (offset range not checked) |
 | `c.beqz rs1', offset` | `beq rs1, x0, offset` — rs1' in 8–15 (offset range not checked) |
 | `c.bnez rs1', offset` | `bne rs1, x0, offset` — rs1' in 8–15 (offset range not checked) |
-| `c.slli rd, shamt` | `slli rd, rd, shamt` — `is_rsd`, rd ≠ x0, 1 ≤ shamt ≤ 31 |
+| `c.slli rd, shamt` | `slli rd, rd, shamt` — `rd == rs1`, rd ≠ x0, 1 ≤ shamt ≤ 63 (RV32: shamt ≤ 31) |
 | `c.lwsp rd, imm` | `lw rd, imm(x2)` — rd ≠ x0, uimm fits 8 bits (4-byte aligned) |
 | `c.ldsp rd, imm` | RV64: `ld rd, imm(x2)` — rd ≠ x0, uimm fits 9 bits (8-byte aligned) |
 | `c.jr rs1` | `jalr x0, rs1, 0` — rs1 ≠ x0 |
@@ -372,7 +382,7 @@ in `range(8, 16)`):
 | `c.nop` | `addi x0, x0, 0` — rd = x0, imm = 0 |
 | `c.ebreak` | `ebreak` |
 | `c.jalr rs1` | `jalr x1, rs1, 0` — rs1 ≠ x0 |
-| `c.add rd, rs2` | `add rd, rd, rs2` — `is_rsd`, rd ≠ x0, rs2 ≠ x0 |
+| `c.add rd, rs2` | `add rd, rd, rs2` — `rd == rs1`, rd ≠ x0, rs2 ≠ x0 |
 | `c.swsp rs2, imm` | `sw rs2, imm(x2)` — uimm fits 8 bits (4-byte aligned) |
 | `c.sdsp rs2, imm` | RV64: `sd rs2, imm(x2)` — uimm fits 9 bits (8-byte aligned) |
 
@@ -405,7 +415,7 @@ class BasicBlock:
     instructions:       list[Instruction]
     successors:         list[BasicBlock]
     predecessors:       list[BasicBlock]
-    is_function_entry:  bool           # True when preceded by a .globl directive
+    is_function_entry:  bool           # True when preceded by a .globl or .weak directive
 ```
 
 ### CFG edges
@@ -414,7 +424,8 @@ class BasicBlock:
 |---|---|
 | Conditional branch | fall-through block + branch-target block |
 | `jal` (not a call) | one successor (the target label) |
-| `jalr` (not a call) | no successors — target is register-computed; treat as function exit |
+| `jalr` (not a call, rd = x0) | no successors — treated as tail call or indirect jump (see §2) |
+| `jalr` (not a call, rd ≠ x0) | no successors — register-computed target, unclassified; `terminates_function = True` in §2 |
 | `ret` / `jalr x0, ra, 0` | no successors |
 | `call` / `jal x1` | fall-through only (callee is opaque) |
 | `tail` | no successors — tail call terminates function |
@@ -480,6 +491,13 @@ the block's last instruction (if that instruction has ABI effects).  This
 accounts for registers that are conservatively live after a call or on function
 exit, independent of what the rest of the function observes.  The seed values
 come directly from the §2 table; there is no separate seed specification.
+
+**Mid-block call seeds.**  A `call` instruction may appear in the middle of a
+block (it has a fall-through successor, so the block continues).  Its
+`live_out_seed` (RET_REGS ∪ CALLEE_SAVED / FRET_REGS ∪ FCALLEE_SAVED) is not
+applied at the block level — it is applied in the **local pass** when the
+backward propagation reaches the call instruction.  At that point `live_out` for
+the call is unioned with its `live_out_seed` before propagating further backward.
 
 **Function-entry seed.**  Blocks with `is_function_entry = True` have their
 `live_in` pre-loaded with `ARG_REGS ∪ FARG_REGS` (integer and float argument
@@ -639,8 +657,8 @@ rejected slips through.
 ### Example rule — RSD ALU pair
 
 As a worked example, consider pairing two instructions where both have the form
-`{add, sub, and, or, xor} rsd, rs2` — i.e. both are two-register ALU ops where
-the destination is also a source (no immediate, no load/store).
+`{add, sub, and, or, xor, addw, subw} rsd, rs2` — i.e. both are two-register
+ALU ops where the destination is also a source (no immediate, no load/store).
 
 Because packets execute sequentially, register data-dependencies between A and B
 are not a pairing constraint — they are already handled by the dep-graph.  The
@@ -727,25 +745,22 @@ dependency graph that maximises the number of pairs under this exact model.
 
 ### Rejection reason collection
 
-After the reorder pass and liveness recomputation, the pairing pass runs the
-greedy-advance model and simultaneously populates `solo_reasons` on each
-unpaired instruction.  The accumulation loop is:
+The greedy-advance model always tests `can_pair(free, curr)` — `free` is A-slot
+and `curr` is B-slot.  `solo_reasons` records the rejection reasons from those
+exact calls:
 
 ```
-for each instruction insn emitted solo:
-    # examine all instructions that were considered as pairing candidates
-    for each candidate cand that was tested against insn:
-        reason = can_pair(insn, cand)   # insn as A-slot
-        if reason: insn.solo_reasons.add(reason)
-        reason = can_pair(cand, insn)   # insn as B-slot
-        if reason: insn.solo_reasons.add(reason)
+for each (free, curr) pair tested during the pairing pass:
+    reason = can_pair(free, curr)
+    if reason is not None:
+        free.solo_reasons.add(reason)   # free failed as A-slot against curr
+        curr.solo_reasons.add(reason)   # curr failed as B-slot against free
 ```
 
-In `--fast` (forward-scan) mode each instruction has at most one adjacent
-candidate, so `solo_reasons` holds at most one string.  In list-scheduling and
-BnB modes the ready queue may offer multiple candidates, and all tested
-rejections are accumulated.  Using a set deduplicates identical reasons from
-different candidates.
+In `--fast` (forward-scan) mode each instruction is tested against at most one
+adjacent candidate.  In list-scheduling and BnB modes the ready queue may cause
+an instruction to be tested against multiple candidates, and all rejection
+reasons are accumulated.  Using a set deduplicates identical reasons.
 
 ---
 
@@ -759,9 +774,9 @@ class ScheduleMode(enum.Enum):
     LIST     = "list"      # default: list scheduling with lookahead
     BNB      = "bnb"       # --thorough: branch-and-bound
 
-def schedule(block: BasicBlock, graph: DepGraph, mode: ScheduleMode) -> list[Instruction]:
+def schedule(block: BasicBlock, graph: DepGraph | None, mode: ScheduleMode) -> list[Instruction]:
     """Return a topological sort of graph that maximises pair count.
-    In FORWARD mode, graph is unused and may be None."""
+    graph may be None in FORWARD mode (unused)."""
 ```
 
 All three feed their output into the same greedy-advance pairing pass (§10).
@@ -789,14 +804,20 @@ At each step:
      would be hardest to pair later).  This is the one-step lookahead that
      catches the common bad-decision case: A pairs with B, but B could have
      paired with C while A pairs with D.
-2. If no pairable candidate exists for `free`, emit `free` as solo and pick the
-   next instruction from the ready queue by: **primary criterion** — the
-   instruction with the most pairing candidates currently in the ready queue
-   (i.e. the one most likely to pair soon, chosen greedily); **tie-breaker** —
-   longest critical path to the end of the block, measured in dependency-graph
-   hops, computed once before scheduling begins.  No instruction latency model
-   is used — all hop edges are unit weight.
+2. If no pairable candidate exists for `free`, emit `free` as solo.  The
+   emitted-solo instruction becomes the new `free` only if it came from the
+   ready queue — in practice this step picks the next instruction from the
+   ready queue by: **primary criterion** — the instruction with the **fewest**
+   pairing candidates currently in the ready queue (hardest to pair later,
+   chosen first so easier instructions remain available for it);
+   **tie-breaker** — longest critical path to the end of the block, measured
+   in dependency-graph hops, computed once before scheduling begins.  No
+   instruction latency model is used — all hop edges are unit weight.  The
+   picked instruction becomes the new `free`.
 3. Update the ready queue as new instructions become unblocked.
+
+Liveness is recomputed (local backward pass) after the final instruction
+ordering is determined and before the greedy-advance pairing pass runs.
 
 O(n log n) in queue operations.
 
@@ -826,12 +847,16 @@ def bound(remaining: int, prev_free: bool) -> int:
 **Candidate ordering heuristic** (when `prev_free` is True):
 1. Tier 1 — ready instructions that pair with `free` as B-slot (A=free, B=cand).
 2. Tier 2 — ready instructions that pair with `free` as A-slot (A=cand, B=free),
-   provided `cand` has no dependency on `free` (i.e. it is safe to emit `cand`
-   before `free`).
+   provided there is no dep-graph edge from `free` to `cand` (i.e. `free` does
+   not require `cand` to have already executed — it is safe to emit `cand` before
+   `free` in the output ordering).
 3. Tier 3 — remaining ready instructions in index order.
 
-**Fallback:** if `NODE_BUDGET` or `STAGNATION` is exceeded, the list-scheduling
-result is used instead.
+**Best-seen tracking:** BnB tracks the best solution found so far during search.
+On budget exhaustion (`NODE_BUDGET` or `STAGNATION` exceeded), the best-seen
+solution is returned rather than the list-scheduling result — unless no
+improvement over list scheduling was found, in which case the list-scheduling
+result is returned as the fallback.
 
 **Stale liveness during BnB search:** The per-instruction `live_in`/`live_out`
 fields are computed for the *source* instruction order and become stale as BnB
@@ -874,7 +899,8 @@ Fields in the comment:
 
 - `[C]` / `[~C]` — RVC eligibility.  `[?]` for unknown instructions.
 - `{packet Nb}` / `{packet Na}` — paired; `a` is the first instruction of the
-  packet, `b` the second.
+  packet, `b` the second.  Packet numbers are sequential per output file,
+  starting from 1.
 - `{solo}` — unpaired with no rejection reason recorded.
 - `{solo: reason1, reason2}` — unpaired; the reasons are the deduplicated union
   of all `can_pair()` rejection strings collected for this instruction across
@@ -898,8 +924,12 @@ Options:
   --same-base-reorder      Relax memory ordering between provably-independent
                            same-base loads/stores (opt-in; no effect with --fast)
   --annotate-liveness      Include live-in register sets in comments
-  -v, --verbose            Include rejection reasons for all attempted pairs
+  -v, --verbose            Show all candidate pairs tested during scheduling,
+                           not just the ones that appear in final output
+                           (default: only solo_reasons on unpaired instructions)
 ```
+
+If both `--fast` and `--thorough` are given, `--thorough` takes precedence.
 
 ### Scheduling modes
 
