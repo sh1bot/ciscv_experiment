@@ -748,12 +748,15 @@ rule is silently skipped — it neither approves nor rejects.  Only an applicabl
 rule that returns a non-`None` string constitutes a rejection.
 
 Prerequisites are a filtering mechanism, not an approval mechanism.  The overall
-`can_pair()` function uses a **blocklist model**: a pair is approved unless at
-least one applicable rule explicitly rejects it.  A pair for which no rule's
-prerequisites match is therefore approved by default.  This is intentional —
-the rule set is expected to be complete enough for the instruction combinations
-the project targets, and new rules are added when a pairing that should be
-rejected slips through.
+`can_pair()` function uses an **allowlist model**: a pair is approved only when
+at least one applicable rule's `check` function returns `None` (success).  A
+pair for which no rule's prerequisites match — i.e. no rule is even applicable
+— is rejected by default, because nothing has vouched for it.
+
+`A_SLOT_DISQUALIFIERS` and `B_SLOT_DISQUALIFIERS` are fast-exit short-circuits
+evaluated before any rule: if a disqualifier fires, `can_pair()` returns
+immediately without checking any rule.  They are an optimisation, not the
+primary gate.  The primary gate is "did any rule approve the pair?"
 
 ### Example rule — RSD ALU pair
 
