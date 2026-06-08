@@ -61,25 +61,27 @@ rv_scheduler/
 
 ## 1. `isa/registers.py`
 
-Define integer and float register sets.  Map every ABI name and `x`/`f` numeric
-alias to a canonical integer index (0–31 for each bank).
+Map every ABI name and `x`/`f` numeric alias to a canonical integer index.
+Integer registers occupy indices 0–31 (`x0`–`x31`); float registers occupy
+indices 32–63 (`f0`–`f31`, equivalently `ft0`/`fs0`/`fa0` etc.).  A single flat
+namespace avoids maintaining parallel integer and float domains throughout the
+rest of the tool.
 
 ```python
-REG_ALIASES: dict[str, int]   # "zero","ra","sp",…,"x0"–"x31" -> 0–31
-FREG_ALIASES: dict[str, int]  # "ft0"–"ft11","fs0"–"fs11","fa0"–"fa7" -> 0–31
+REG_ALIASES: dict[str, int]
+# Integer: "zero","ra","sp","gp","tp","t0"–"t6","s0"–"s11","a0"–"a7",
+#          "x0"–"x31"  -> 0–31
+# Float:   "ft0"–"ft11","fs0"–"fs11","fa0"–"fa7",
+#          "f0"–"f31"  -> 32–63
 
-CALLER_SAVED: frozenset[int]  # ra, t0–t6, a0–a7  (integer)
-CALLEE_SAVED: frozenset[int]  # sp, s0–s11        (integer)
-ARG_REGS:     frozenset[int]    # a0–a7
-RET_REGS:     frozenset[int]    # a0, a1
-
-FCALLER_SAVED: frozenset[int] # ft0–ft11, fa0–fa7
-FCALLEE_SAVED: frozenset[int] # fs0–fs11
-FARG_REGS:     frozenset[int]   # fa0–fa7
-FRET_REGS:     frozenset[int]   # fa0, fa1
+CALLER_SAVED: frozenset[int]  # ra, t0–t6, a0–a7, ft0–ft11, fa0–fa7
+CALLEE_SAVED: frozenset[int]  # sp, s0–s11, fs0–fs11
+ARG_REGS:     frozenset[int]  # a0–a7, fa0–fa7
+RET_REGS:     frozenset[int]  # a0, a1, fa0, fa1
 ```
 
-Provide a helper `reg_name(index) -> str` returning the canonical ABI name.
+Provide a helper `reg_name(index) -> str` returning the canonical ABI name
+(`"a0"` for 10, `"fa0"` for 42, etc.).
 
 ---
 
@@ -89,12 +91,9 @@ A single function consumed by the liveness pass:
 
 ```python
 def call_liveness_effect(insn: Instruction) -> tuple[
-    frozenset[int],  # implicit integer uses
-    frozenset[int],  # implicit integer defs (clobbered)
-    frozenset[int],  # implicit float uses
-    frozenset[int],  # implicit float defs
-    frozenset[int],  # live_out_seed: integer registers conservatively live after this insn
-    frozenset[int],  # live_out_seed: float registers conservatively live after this insn
+    frozenset[int],  # implicit uses  (integer indices 0–31, float indices 32–63)
+    frozenset[int],  # implicit defs (clobbered)
+    frozenset[int],  # live_out_seed: registers conservatively live after this insn
     bool,            # terminates_function
 ]:
 ```
@@ -103,7 +102,7 @@ A call is modelled as a single very busy instruction: it reads all argument
 registers (integer and float) and `sp`, clobbers all caller-saved registers
 (integer and float), and after it returns, the caller must assume all
 callee-saved registers and both return registers are live.  The `live_out_seed`
-fields capture this post-call conservative assumption separately from the
+captures this post-call conservative assumption separately from the
 `implicit uses` (which drive dep-graph edges *into* the call, not *out* of it).
 
 For terminating instructions (`terminates_function = True`) there are no
@@ -114,23 +113,26 @@ the post-return live set rather than the pre-call argument set.
 Detection priority: mnemonic is checked first; structural `jalr`/`jal` patterns
 are the fallback for assembler output that has already expanded pseudo-instructions.
 
-| Case | Detection | Implicit int uses / float uses | Implicit int defs / float defs | Live-out seed (int / float) | Terminates |
+| Case | Detection | Implicit uses | Implicit defs | Live-out seed | Terminates |
 |---|---|---|---|---|---|
-| Call (pseudo) | mnemonic `"call"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | `CALLER_SAVED` / `FCALLER_SAVED` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | False |
+| Call (pseudo) | mnemonic `"call"` | `ARG_REGS ∪ {sp}` | `CALLER_SAVED` | `RET_REGS ∪ CALLEE_SAVED` | False |
 | Call (encoded) | `jal`/`jalr` writing `ra` (x1) or `t0` (x5) | same | same | same | False |
-| Return (pseudo) | mnemonic `"ret"` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | ∅ / ∅ | (same as uses) | True |
-| Return (encoded) | `jalr x0, ra, 0` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | ∅ / ∅ | (same as uses) | True |
-| Tail call (pseudo) | mnemonic `"tail"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | ∅ / ∅ | (same as uses) | True |
+| Return (pseudo) | mnemonic `"ret"` | `RET_REGS ∪ CALLEE_SAVED` | ∅ | (same as uses) | True |
+| Return (encoded) | `jalr x0, ra, 0` | `RET_REGS ∪ CALLEE_SAVED` | ∅ | (same as uses) | True |
+| Tail call (pseudo) | mnemonic `"tail"` | `ARG_REGS ∪ {sp}` | ∅ | (same as uses) | True |
 | Tail call / indirect jump (encoded) | `jalr x0, rs1` (any form not matching Return above) | same as tail call pseudo | same | same | True |
 
-`sp` (x2) is in `CALLEE_SAVED` and therefore already present in the return and
-tail-call use sets; it is listed explicitly in the call row where it would
-otherwise be absent.
+`ARG_REGS` includes both `a0–a7` (indices 10–17) and `fa0–fa7` (indices 42–49).
+`CALLER_SAVED` includes both integer caller-saved and float caller-saved.
+`CALLEE_SAVED` includes both integer callee-saved and float callee-saved.
+`sp` (x2, index 2) is in `CALLEE_SAVED` and therefore already present in the
+return and tail-call use sets; it is listed explicitly in the call row where
+it would otherwise be absent.
 
 Any `jalr x0` that is not an exact `jalr x0, ra, 0` return is treated
 conservatively as a tail call — it may be a computed-goto (switch dispatch) or
 a tail call; we cannot distinguish them from the assembly text alone, and the
-tail-call treatment (ARG_REGS ∪ FARG_REGS ∪ {sp} as uses) is the safer choice.
+tail-call treatment (`ARG_REGS ∪ {sp}` as uses) is the safer choice.
 
 **Unclassified `jalr`** (rd ≠ x0 and rd ≠ ra and rd ≠ t0): `call_liveness_effect()`
 returns all-empty sets and `terminates_function = True`.  The dep-graph edges from
@@ -162,23 +164,17 @@ class Instruction:
     prefix_lines:  list[str] = field(default_factory=list)
 
     # Populated by the decoder subclass:
-    rd:   int | None              # integer destination register index
+    rd:   int | None              # destination register index (0–31 int, 32–63 float)
     rs1:  int | None
     rs2:  int | None
     rs3:  int | None              # FMA etc.
-    frd:  int | None              # float destination
-    frs1: int | None
-    frs2: int | None
-    frs3: int | None
     imm:  int | None
     branch_target: str | None     # label string for branches / jumps
     is_unknown:    bool = False   # True for unrecognised mnemonics (best-effort decode)
 
     # Populated by the liveness pass (initially empty):
-    live_in:   frozenset[int] = field(default_factory=frozenset)
+    live_in:   frozenset[int] = field(default_factory=frozenset)   # indices 0–63
     live_out:  frozenset[int] = field(default_factory=frozenset)
-    flive_in:  frozenset[int] = field(default_factory=frozenset)
-    flive_out: frozenset[int] = field(default_factory=frozenset)
 
     # Populated by the pairing pass (initially empty):
     solo_reasons: set[str] = field(default_factory=set)  # rejection strings from can_pair()
@@ -196,6 +192,8 @@ All are derived from the stored fields; none are stored separately.
 | `writes_rd` | `rd is not None` |
 | `writes_memory` | store instruction |
 | `reads_memory` | load instruction |
+| `reads_stack` | load instruction whose base register is `sp` (x2) |
+| `writes_stack` | store instruction whose base register is `sp` (x2) |
 | `access_width` | byte width of the memory access (1/2/4/8), or `None` for non-memory instructions — inferred from the mnemonic (lb/sb=1, lh/sh=2, lw/sw/flw/fsw=4, ld/sd/fld/fsd=8) |
 | `access_shift` | `access_width.bit_length() - 1` when `access_width` is not None, else `None` — the natural alignment shift; use as the `shift` argument to `imm_fits`/`uimm_fits` when checking whether an offset is naturally aligned |
 | `is_branch` | conditional branch (two CFG successors) |
@@ -207,16 +205,14 @@ All are derived from the stored fields; none are stored separately.
 | `is_fence` | FENCE / FENCE.I |
 | `is_atomic` | A-extension instruction |
 | `has_side_effects` | `is_call or is_return or writes_memory or is_csr or is_fence or is_atomic` |
-| `uses_int` | `frozenset` of integer registers read by this instruction, **excluding x0** |
-| `defs_int` | `frozenset` of integer registers written by this instruction, **excluding x0** |
-| `uses_float` | `frozenset` of float registers read |
-| `defs_float` | `frozenset` of float registers written |
+| `uses_regs` | `frozenset` of registers read by this instruction (indices 0–63), **excluding x0** |
+| `defs_regs` | `frozenset` of registers written by this instruction (indices 0–63), **excluding x0** |
 | `rvc_eligible` | see §5 |
 | `rs1_in_rvc_range` | `rs1 is not None and rs1 in range(8, 16)` |
 | `rs2_in_rvc_range` | `rs2 is not None and rs2 in range(8, 16)` |
 | `rd_in_rvc_range` | `rd is not None and rd in range(8, 16)` |
 
-**x0 is excluded from `uses_int` and `defs_int`** — writes to x0 are no-ops and
+**x0 is excluded from `uses_regs` and `defs_regs`** — writes to x0 are no-ops and
 reads of x0 always produce zero, so x0 participates in no data dependencies and
 must not appear in liveness sets (otherwise it would be "live" everywhere and
 pollute every live_in/live_out set in the file).  However, the raw decoded fields
@@ -224,7 +220,7 @@ pollute every live_in/live_out set in the file).  However, the raw decoded field
 references x0 (e.g. `jalr x0, ra, 0` has `rd = 0`, `jalr x1, x0, target` has
 `rs1 = 0`).  These raw fields are needed for instruction classification (e.g.
 `is_return` checks `rd == 0`) and RVC eligibility checks; they are just excluded
-from the `uses_int`/`defs_int` computed sets.
+from the `uses_regs`/`defs_regs` computed sets.
 
 Helper predicates (used internally by decoders and rules):
 
@@ -341,11 +337,11 @@ When no decoder matches a mnemonic, the instruction is decoded as follows:
 
 - Scan the operand list left-to-right, parsing each token as a register name if
   possible and ignoring any token that is not a valid register name.
-- `defs_int` = the first register-like operand, if any, **excluding x0**.
-- `uses_int` = all remaining register-like operands, **excluding x0**.
+- `defs_regs` = the first register-like operand, if any, **excluding x0**.
+- `uses_regs` = all remaining register-like operands, **excluding x0**.
 - `is_unknown = True` — the annotator will emit a `[?]` marker on output.
 - The instruction is **not** treated as a barrier in the dependency graph.
-  It participates via its inferred `defs_int` / `uses_int` (RAW/WAR/WAW edges
+  It participates via its inferred `defs_regs` / `uses_regs` (RAW/WAR/WAW edges
   only) and may be reordered if those edges permit.  Side-effect and memory
   behaviour is unknown, so the instruction is treated as both reading and
   writing memory (conservative memory ordering edge against all adjacent
@@ -567,9 +563,9 @@ post-schedule ordered list before the greedy-advance pairing pass runs.
 
 Standard iterative backward dataflow over the CFG of one `Function`, using a
 worklist.  The worklist is seeded with all blocks in the function; no block
-outside the function is ever touched.  Integer and float register sets are
-maintained as separate parallel `frozenset[int]` domains (`live_in`/`live_out`
-for integer, `flive_in`/`flive_out` for float) and iterated together.
+outside the function is ever touched.  A single `frozenset[int]` domain covers
+all registers (indices 0–31 integer, 32–63 float); there is no separate float
+domain.
 
 ```
 live_in[B]  = use[B]  ∪  (live_out[B] − def[B])  ∪  ENTRY_SEED[B]
@@ -580,7 +576,7 @@ live_out[B] = (⋃  live_in[S]  for S in successors(B))  ∪  EXIT_SEED[B]
 for all ABI-related liveness effects.  It is called on every instruction when
 building `use[B]` / `def[B]`:
 
-- `implicit uses` → merged into `use[B]` (integer and float separately).
+- `implicit uses` → merged into `use[B]`.
 - `implicit defs` → merged into `def[B]`.
 - `terminates_function = True` → the block is treated as having no successors,
   so the `⋃ live_in[S]` term is ∅; `live_out[B]` is determined entirely by
@@ -603,7 +599,7 @@ blocks).  The seed values come directly from the §2 table.
 
 **Mid-block call seeds.**  A `call` instruction may appear in the middle of a
 block (it has a fall-through successor, so the block continues).  Its
-`live_out_seed` (RET_REGS ∪ CALLEE_SAVED / FRET_REGS ∪ FCALLEE_SAVED) is not
+`live_out_seed` (`RET_REGS ∪ CALLEE_SAVED`) is not
 applied at the block level — it is applied in the **local pass** when the
 backward propagation reaches the call instruction.  At that point `live_out` for
 the call is unioned with its `live_out_seed` before propagating further backward.
@@ -611,8 +607,8 @@ the call is unioned with its `live_out_seed` before propagating further backward
 **Function-entry seed.**  `ENTRY_SEED[B]` in the equation above:
 
 ```
-where ENTRY_SEED[B] = ARG_REGS ∪ FARG_REGS   if is_function_entry(B)
-                    = ∅                         otherwise
+where ENTRY_SEED[B] = ARG_REGS   if is_function_entry(B)
+                    = ∅           otherwise
 ```
 
 This permanently unions the argument registers into `live_in` of the entry
@@ -621,7 +617,7 @@ them.  `is_function_entry` is set by the function-identification pass (§6) for
 blocks headed by `.globl`-declared or `.type @function` labels.
 
 **`ret` seed conservatism.**  The `live_out_seed` for a return instruction is
-`CALLEE_SAVED ∪ FCALLEE_SAVED ∪ RET_REGS ∪ FRET_REGS`.  Including the full
+`CALLEE_SAVED ∪ RET_REGS`.  Including the full
 callee-saved sets is intentionally conservative: it ensures that any instruction
 that restores a callee-saved register (e.g. `lw s0, 0(sp)`) has a dep-graph edge
 to the `ret`, preventing reordering that would place the restore after the return.
@@ -1011,7 +1007,7 @@ result is returned as the fallback.
 fields are computed for the *source* instruction order and become stale as BnB
 explores different orderings.  Pairing rules evaluated inside BnB must not
 consult `live_in`/`live_out`.  They may only use register-field properties
-(`uses_int`, `defs_int`, `rd`, `rs1`, etc.) which are order-independent.
+(`uses_regs`, `defs_regs`, `rd`, `rs1`, etc.) which are order-independent.
 Liveness-dependent rules (e.g. "rd is dead after B, so WAW is safe") are only
 applied during the final greedy-advance pass, after liveness has been
 recomputed for the chosen ordering.
