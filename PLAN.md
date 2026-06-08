@@ -740,23 +740,35 @@ redirects control after A has committed — which is correct.  This is why
 and not in `B_SLOT_DISQUALIFIERS`.  Pairing an ALU instruction in A-slot with a
 branch in B-slot is a meaningful optimisation target.
 
-### Rule evaluation contract
+### What a rule represents
 
-A rule is only *applicable* when every property in `a_prerequisites` is True on
-`a`, and every property in `b_prerequisites` is True on `b`.  An inapplicable
-rule is silently skipped — it neither approves nor rejects.  Only an applicable
-rule that returns a non-`None` string constitutes a rejection.
+Each `PairingRule` represents a **hardware packet encoding**: a specific way
+two instructions can share a single 32-bit word.  The packet format defines a
+finite set of such encodings.  A pair of instructions can be placed in a packet
+if and only if at least one encoding exists that can represent both of them.
 
-Prerequisites are a filtering mechanism, not an approval mechanism.  The overall
-`can_pair()` function uses an **allowlist model**: a pair is approved only when
-at least one applicable rule's `check` function returns `None` (success).  A
-pair for which no rule's prerequisites match — i.e. no rule is even applicable
-— is rejected by default, because nothing has vouched for it.
+This framing makes the evaluation model self-evident:
 
-`A_SLOT_DISQUALIFIERS` and `B_SLOT_DISQUALIFIERS` are fast-exit short-circuits
-evaluated before any rule: if a disqualifier fires, `can_pair()` returns
-immediately without checking any rule.  They are an optimisation, not the
-primary gate.  The primary gate is "did any rule approve the pair?"
+- **Prerequisites** describe the instruction types an encoding can hold in each
+  slot.  If an instruction doesn't satisfy the prerequisites, it simply can't go
+  in that slot of that encoding — the encoding doesn't apply.
+- **`check`** verifies any remaining constraints for the encoding (e.g. that an
+  immediate fits in the field width the encoding provides).
+- **`can_pair()` returns success** only when at least one encoding's
+  prerequisites are satisfied and its `check` passes.  If no encoding can
+  represent the pair, it cannot be packed — there is no hardware way to do it.
+- **`A_SLOT_DISQUALIFIERS` / `B_SLOT_DISQUALIFIERS`** are fast-exit checks
+  evaluated before any encoding is tested.  They short-circuit the search when
+  an instruction is structurally incompatible with a slot regardless of encoding
+  (e.g. a branch cannot be in A-slot because the packet format always executes
+  A before B — the hardware would never reach B).  These are an optimisation;
+  the same conclusion would be reached by exhausting all encodings.
+
+A rule is only *applicable* to a pair when every property in `a_prerequisites`
+is True on `a` and every property in `b_prerequisites` is True on `b`.  An
+inapplicable rule is silently skipped — the encoding simply doesn't cover this
+instruction combination.  Only an applicable rule whose `check` returns a
+non-`None` string constitutes a rejection of that specific encoding.
 
 ### Example rule — RSD ALU pair
 
