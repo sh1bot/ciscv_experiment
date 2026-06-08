@@ -119,7 +119,7 @@ are the fallback for assembler output that has already expanded pseudo-instructi
 | Call (pseudo) | mnemonic `"call"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | `CALLER_SAVED` / `FCALLER_SAVED` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | False |
 | Call (encoded) | `jal`/`jalr` writing `ra` (x1) or `t0` (x5) | same | same | same | False |
 | Return (pseudo) | mnemonic `"ret"` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | ∅ / ∅ | (same as uses) | True |
-| Return (encoded) | `jalr x0, ra, 0` | same | same | same | True |
+| Return (encoded) | `jalr x0, ra, 0` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | ∅ / ∅ | (same as uses) | True |
 | Tail call (pseudo) | mnemonic `"tail"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | ∅ / ∅ | (same as uses) | True |
 | Tail call / indirect jump (encoded) | `jalr x0, rs1` (any form not matching Return above) | same as tail call pseudo | same | same | True |
 
@@ -192,7 +192,7 @@ All are derived from the stored fields; none are stored separately.
 |---|---|
 | `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand.  Note: RVC CA-format eligibility checks (c.sub, c.xor, c.or, c.and, c.subw, c.addw, c.srli, c.srai, c.andi) require specifically `rd == rs1`; the `rv_c.py` checks test `rd == rs1` directly rather than relying on the broader `is_rsd`. |
 | `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul` and their `*w` variants |
-| `reads_rd` | instruction reads `rd` before writing it — i.e. AMO instructions (`amoadd`, `amoswap`, `amoor`, etc.) which atomically read and update their destination |
+| `reads_rd` | instruction reads `rd` before writing it — **not** AMO instructions; AMOs write `rd` with the old memory value but do not read `rd` |
 | `writes_rd` | `rd is not None` |
 | `writes_memory` | store instruction |
 | `reads_memory` | load instruction |
@@ -245,6 +245,16 @@ instructions:
    `.globl` / `.weak`) or a *non-barrier label* (never a branch target and not
    globally visible).  Assembler-internal labels (`.Lpcrel_hi*`, `.Lfunc_end*`,
    `.Ltmp*`) are almost always non-barriers.
+
+   **Limitation:** jump-table entries (e.g. `.word .Lcase3` in `.data` or
+   `.rodata`) reference text labels but are not branch/jump instructions; the
+   pre-scan does not read data sections and will not see these references.  A
+   label that is a computed-goto target only via a jump table will be misclassified
+   as non-barrier.  Mitigations: (a) function-boundary hard stops (§6) limit the
+   blast radius — reordering cannot cross functions; (b) any label that is also
+   `.globl` is a barrier; (c) this is a known limitation and may produce incorrect
+   output for code that uses computed-goto / switch-dispatch tables without
+   separate `.globl` labels on each case.
 2. **Decode pass:** parse instructions.  Non-barrier labels encountered on their
    own line are accumulated as `prefix_lines` on the immediately following
    instruction.  Barrier labels split basic blocks.  If a barrier label is
@@ -295,13 +305,17 @@ When no decoder matches a mnemonic, the instruction is decoded as follows:
 
 ### Pseudo-instruction handling
 
-`nop`, `mv`, `li`, `ret`, `neg`, `not`, `seqz`, `snez`, `sltz`, `sgtz` and
+`nop`, `mv`, `li`, `neg`, `not`, `seqz`, `snez`, `sltz`, `sgtz` and
 similar single-instruction pseudo-instructions are expanded to their canonical
 equivalents during parsing.  All downstream code sees only real instructions.
 
-`call` and `tail` are **not** expanded — they are retained as single
-instructions.  Their ABI effects (argument registers used, caller-saved registers
-clobbered) are handled by `call_liveness_effect()` in `isa/abi.py`.
+`ret`, `call`, and `tail` are **not** expanded — they are retained as single
+instructions with their original mnemonic.  Their ABI effects (argument registers
+used, caller-saved registers clobbered) are handled by `call_liveness_effect()`
+in `isa/abi.py`, which detects them by mnemonic first.  Retaining `ret` as-is
+ensures the mnemonic `"ret"` detection in `call_liveness_effect()` remains live
+code, and avoids ambiguity with the `jalr x0, ra, 0` structural form (which is
+also a valid detection path as the encoded fallback row).
 
 ### C-extension mnemonic handling
 
@@ -344,7 +358,7 @@ in `range(8, 16)`):
 
 | RVC encoding | Condition on the base instruction |
 |---|---|
-| `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, nzuimm nonzero, multiple of 4, ≤ 1020 |
+| `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, `4 ≤ imm ≤ 1020`, multiple of 4 (imm must be strictly positive; negative or zero values are not encodable) |
 | `c.lw rd', imm(rs1')` | `lw rd, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
@@ -416,7 +430,8 @@ class BasicBlock:
 | Terminator | Successors |
 |---|---|
 | Conditional branch | fall-through block + branch-target block |
-| `jal` (not a call) | one successor (the target label) |
+| `jal` (not a call, rd = x0) | one successor (the target label) |
+| `jal` (rd ∉ {x0, ra, t0}) | one successor (the target label); treated as a jump saving return address in an unusual register — not a recognised call, no ABI seed |
 | `jalr` (not a call, rd = x0) | no successors — treated as tail call or indirect jump (see §2) |
 | `jalr` (not a call, rd ≠ x0) | no successors — register-computed target, unclassified; `terminates_function = True` in §2 |
 | `ret` / `jalr x0, ra, 0` | no successors |
@@ -435,20 +450,56 @@ class Function:
     blocks:  list[BasicBlock]
 ```
 
-A function begins at each `.globl`-declared label.  Its blocks are all those
-reachable from the entry block before the next `.globl` entry.  Blocks reachable
-from multiple `.globl` entries (e.g. via tail calls) are assigned to all
-reachable functions conservatively.
+**Function boundaries are hard.**  Each function is an independent unit of
+analysis.  No CFG edge, liveness value, or scheduling decision ever crosses a
+function boundary.  This makes analysis idempotent per function and allows all
+functions in a file to be analysed in parallel across multiple threads.
+
+A label is a **function-entry label** if any of the following hold:
+1. It has an explicit `.type <name>, @function` directive in the source.
+2. It is declared `.globl` or `.weak` and is followed by instructions (not data)
+   — i.e. the label appears in a `.text` (or `.text.*`) section.  Data symbols
+   exported as `.globl` (in `.data`/`.bss`/`.rodata` etc.) are not function
+   entries.
+
+A new `Function` begins at each function-entry label.  Its blocks are all those
+reachable from its entry block via CFG edges **within the same function**.
+Function boundaries are hard stops:
+
+- A fall-through from the last block of one function directly into a
+  function-entry label is **not** a CFG edge — it is treated as an implicit
+  unconditional jump to the next function's entry.  The first function terminates
+  there (with no successors from that block); the second function starts fresh.
+  This prevents liveness leaking across functions even when a `ret` is absent.
+- Tail calls (`tail`, `jalr x0, rs1`) that jump to a label in another function
+  have no successors within the calling function (they are terminating by
+  definition).
+- Blocks unreachable from a function's entry (dead code between two functions,
+  orphan blocks after `tail`) are collected into a synthetic anonymous function
+  for scheduling purposes and are not merged into any named function.
+
+Because each function is analysed independently, `compute_liveness` and
+`schedule` accept a single `Function` object.  A driver iterates over all
+functions and may dispatch them to a thread pool:
+
+```python
+functions: list[Function] = identify_functions(blocks)
+# Each function is independent — safe to parallelise:
+results = pool.map(analyse_and_schedule, functions)
+```
 
 ---
 
 ## 7. `analysis/liveness.py` — Register liveness
 
-**Two-phase approach.**  The CFG liveness pass runs once over the whole file
-before per-block scheduling begins, producing a `live_out` table keyed by block.
-This global pass correctly handles conditional branches, loop back-edges,
-and fall-throughs.  Per-block scheduling then consults this table for the block's
-`live_out` seed before doing its local backward propagation.
+**Two-phase approach.**  The CFG liveness pass runs once over the blocks of a
+single `Function` before per-block scheduling begins, producing a `live_out`
+table keyed by block.  Because function boundaries are hard (§6), the global
+pass is strictly intra-function: no liveness information crosses into or out of
+other functions.  This global pass correctly handles conditional branches, loop
+back-edges, and fall-throughs within the function.  Per-block scheduling then
+consults this table for the block's `live_out` seed before doing its local
+backward propagation.
 
 The table is keyed by `BasicBlock` identity (object reference), not by label
 string, so blocks with zero labels or multiple labels are handled uniformly.
@@ -460,10 +511,11 @@ post-schedule ordered list before the greedy-advance pairing pass runs.
 
 ### Global pass
 
-Standard iterative backward dataflow over the CFG, per function, using a
-worklist.  Integer and float register sets are maintained as separate parallel
-`frozenset[int]` domains (`live_in`/`live_out` for integer,
-`flive_in`/`flive_out` for float) and iterated together.
+Standard iterative backward dataflow over the CFG of one `Function`, using a
+worklist.  The worklist is seeded with all blocks in the function; no block
+outside the function is ever touched.  Integer and float register sets are
+maintained as separate parallel `frozenset[int]` domains (`live_in`/`live_out`
+for integer, `flive_in`/`flive_out` for float) and iterated together.
 
 ```
 live_in[B]  = use[B]  ∪  (live_out[B] − def[B])
@@ -544,8 +596,11 @@ for correctness.
   `--same-base-reorder`, two mem-ops with the same base register — provided that
   register is not written between them **and no unknown instruction (`is_unknown`)
   appears between them** (unknown instructions may have undeclared memory effects)
-  — and non-overlapping byte ranges (same offset ± access width) have this edge
-  dropped.
+  — and non-overlapping byte ranges have this edge dropped.  Non-overlap is
+  tested as disjoint half-open intervals: `[off_a, off_a+width_a)` and
+  `[off_b, off_b+width_b)` are disjoint iff `off_a+width_a ≤ off_b` or
+  `off_b+width_b ≤ off_a`.  Access width is inferred from the mnemonic (lb/sb=1,
+  lh/sh=2, lw/sw/flw/fsw=4, ld/sd/fld/fsd=8; default 4 for unrecognised).
 - **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, CSR
   instructions (`is_csr`), `call`, and `tail` instructions get ordering edges
   from all preceding instructions in the block.  Unknown instructions (`is_unknown`) are **not** treated as
@@ -555,9 +610,10 @@ for correctness.
 - **Unknown-instruction memory edges**: `build_dep_graph` checks `is_unknown`
   directly — it does not rely on `reads_memory` or `writes_memory`, which are
   only set for recognised load/store mnemonics.  When an unknown instruction
-  is present, a memory ordering edge is inserted between it and every
+  is present, a memory ordering edge is inserted between it and **every**
   memory operation that precedes or follows it within the block, conservatively
-  treating it as both a load and a store.
+  treating it as both a load and a store.  "Adjacent" is not the right word —
+  it is all preceding and all following memory ops, not just the nearest one.
 
 ```python
 @dataclass
