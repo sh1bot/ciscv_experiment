@@ -477,11 +477,18 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
     current_is_function_entry: bool = False
     prefix_buffer: list[str] = []  # non-barrier labels/lines buffered for next insn
 
+    _anon_counter = [0]
+
     def _flush_block():
         nonlocal current_block_insns, current_block_labels, current_is_function_entry, prefix_buffer
         if current_block_insns or current_block_labels:
+            if current_block_labels:
+                label = current_block_labels[0]
+            else:
+                label = f"<anon_{_anon_counter[0]}>"
+                _anon_counter[0] += 1
             bb = BasicBlock(
-                label=current_block_labels[0] if current_block_labels else None,
+                label=label,
                 labels=list(current_block_labels),
                 instructions=list(current_block_insns),
                 is_function_entry=current_is_function_entry,
@@ -619,26 +626,24 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             # Two successors: branch target + fall-through
             if last.branch_target and last.branch_target in label_to_block:
                 tgt = label_to_block[last.branch_target]
-                if tgt not in bb.successors:
+                if not tgt.is_function_entry and tgt not in bb.successors:
                     bb.successors.append(tgt)
                     tgt.predecessors.append(bb)
-            if next_bb and next_bb not in bb.successors:
+            if next_bb and not next_bb.is_function_entry and next_bb not in bb.successors:
                 bb.successors.append(next_bb)
                 next_bb.predecessors.append(bb)
 
         elif last.is_call:
             # Fall-through only
-            if next_bb and next_bb not in bb.successors:
-                # Function boundary check: don't cross if next is function entry
-                if not (next_bb.is_function_entry and next_bb != blocks[i + 1] if False else True):
-                    bb.successors.append(next_bb)
-                    next_bb.predecessors.append(bb)
+            if next_bb and not next_bb.is_function_entry and next_bb not in bb.successors:
+                bb.successors.append(next_bb)
+                next_bb.predecessors.append(bb)
 
         elif last.is_jump and not last.is_call and not last.is_return:
             # jal x0, target — one successor
             if last.branch_target and last.branch_target in label_to_block:
                 tgt = label_to_block[last.branch_target]
-                if tgt not in bb.successors:
+                if not tgt.is_function_entry and tgt not in bb.successors:
                     bb.successors.append(tgt)
                     tgt.predecessors.append(bb)
             elif last.rd not in (None, 0, 1, 5) and last.mnemonic == "jalr":
@@ -670,6 +675,17 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
 
     # --- Identify functions ---
     functions = identify_functions(blocks)
+
+    # --- Enforce hard function boundaries ---
+    # Any successor/predecessor edges that cross function boundaries must be
+    # removed. This can happen when a branch targets a function-entry label
+    # (e.g. a loop that spans a .globl boundary) — the parser guards new edges
+    # above, but older edges set before function identification are still present.
+    for fn in functions:
+        fn_block_set = set(id(b) for b in fn.blocks)
+        for bb in fn.blocks:
+            bb.successors   = [s for s in bb.successors   if id(s) in fn_block_set]
+            bb.predecessors = [p for p in bb.predecessors if id(p) in fn_block_set]
 
     return blocks, functions
 

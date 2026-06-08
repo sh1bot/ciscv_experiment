@@ -105,7 +105,8 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
         else:
             new_out = exit_seed  # may be empty for non-terminating blocks
             for succ in bb.successors:
-                new_out = new_out | result.live_in[succ.label]
+                if succ.label in result.live_in:
+                    new_out = new_out | result.live_in[succ.label]
 
         # --- Compute live_in ---
         new_in = use | (new_out - defs)
@@ -119,9 +120,9 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
             result.live_in[key]  = new_in
             result.live_out[key] = new_out
 
-            # Re-add predecessors to worklist
+            # Re-add predecessors to worklist (only those in this function)
             for pred in bb.predecessors:
-                if not in_worklist.get(pred.label, False):
+                if pred.label in use_def and not in_worklist.get(pred.label, False):
                     worklist.append(pred)
                     in_worklist[pred.label] = True
 
