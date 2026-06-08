@@ -238,19 +238,19 @@ def imm_multiple(self, shift: int) -> bool:
     shift=1 → 2-byte aligned, shift=2 → 4-byte aligned, etc.
     Note: zero is always a multiple of any power of 2."""
 
-def imm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
-    """Combined signed-range + alignment + optional nonzero check.
-    True iff imm_bits(n) and imm_multiple(shift) and (imm != 0 if nonzero).
-    Equivalent to: imm fits in a signed n-bit field whose low `shift`
-    bits are implicitly zero (the field encodes imm >> shift in n bits).
-    nonzero=True is needed for encodings that reserve the all-zero
-    immediate for a different meaning (e.g. c.addi nzimm, c.lui nzimm).
-    Signed ranges cannot use 'remap' (see uimm_fits); zero-exclusion is
-    the only non-default option for signed fields.
+def imm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
+    """Combined signed-range + alignment check.
+
+    nonzero=False   — [-(2**(n-1))<<shift, (2**(n-1)-1)<<shift]  (normal)
+    nonzero=True    — same range with zero excluded (nzimm)
+    nonzero='remap' — [-(2**(n-1))<<shift, 2**(n-1)<<shift] excluding zero
+                      The all-zero bit pattern encodes 2**(n-1)<<shift,
+                      balancing the range symmetrically around zero.
+
     Examples:
-      lw/sw:       imm_fits(12)               — 12-bit signed, zero allowed
-      c.addi:      imm_fits(6, nonzero=True)  — 6-bit signed, nzimm [-32..-1, 1..31]
-      c.lui:       imm_fits(6, nonzero=True)  — 6-bit signed ×4096, nzimm
+      lw/sw:       imm_fits(12)                — [-2048..2047], zero allowed
+      c.addi:      imm_fits(6, nonzero=True)   — [-32..-1, 1..31], nzimm
+      hypothetical: imm_fits(6, nonzero='remap') — [-32..-1, 1..32], balanced
     For unsigned variants use uimm_fits()."""
 
 def uimm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
@@ -280,16 +280,20 @@ def uimm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool
       hypothetical: uimm_fits(6, nonzero='remap')    — [1..64], zero→64"""
 ```
 
-The three range shapes for unsigned immediates:
+The three range shapes, applicable to both signed and unsigned immediates:
 
 ```
-nonzero=False    [0,       (2**n − 1) × 2**shift]   start-inclusive (normal)
-nonzero=True     [2**shift, (2**n − 1) × 2**shift]   both-exclusive  (nzuimm)
-nonzero='remap'  [2**shift,  2**n      × 2**shift]   end-inclusive   (zero→max+1)
+                 unsigned imm_fits                   signed imm_fits
+nonzero=False    [0,        (2**n−1)×step]           [−half×step, (half−1)×step]
+nonzero=True     [step,     (2**n−1)×step]           [−half×step, (half−1)×step] \ {0}
+nonzero='remap'  [step,      2**n   ×step]           [−half×step,  half   ×step] \ {0}
 ```
+where `step = 2**shift`, `half = 2**(n-1)`.
 
-`'remap'` is only meaningful for unsigned fields — signed nzimm encodings simply
-exclude zero from the interior of the range, which `nonzero=True` already captures.
+For unsigned, `'remap'` repurposes the zero slot to extend the top of the range by
+one step.  For signed, `'remap'` repurposes the zero slot to extend the *positive*
+side by one step, making the range symmetric: both ends reach `half × step` in
+magnitude.
 
 **Access width from opcode.**  Load and store mnemonics encode the access size
 in the opcode (`lb`/`sb` = 1, `lh`/`sh` = 2, `lw`/`sw` = 4, `ld`/`sd` = 8,

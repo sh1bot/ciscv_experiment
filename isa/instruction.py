@@ -338,8 +338,20 @@ class Instruction:
             return True
         return (self.imm & ((1 << shift) - 1)) == 0
 
-    def imm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
-        """Signed range + alignment + optional nonzero check."""
+    def imm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
+        """Signed range + alignment check.
+
+        nonzero=False   — [-(2**(n-1))<<shift, (2**(n-1)-1)<<shift]  (normal)
+        nonzero=True    — same range, zero excluded (nzimm)
+        nonzero='remap' — [-(2**(n-1))<<shift, -(1<<shift)] ∪ [(1<<shift), 2**(n-1)<<shift]
+                          Zero maps to 2**(n-1)<<shift, balancing the range.
+        """
+        if self.imm is None:
+            return False
+        step = 1 << shift
+        half = 1 << (n - 1)
+        if nonzero == 'remap':
+            return self.imm != 0 and self.imm_multiple(shift) and -half * step <= self.imm <= half * step
         if not self.imm_bits(n):
             return False
         if shift > 0 and not self.imm_multiple(shift):
