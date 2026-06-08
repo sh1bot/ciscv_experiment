@@ -215,10 +215,13 @@ instructions:
    `.Ltmp*`) are almost always non-barriers.
 2. **Decode pass:** parse instructions.  Non-barrier labels encountered on their
    own line are accumulated as `prefix_lines` on the immediately following
-   instruction.  Barrier labels split basic blocks.  If a non-barrier label
-   appears at the end of the file with no following instruction (orphaned), it is
-   emitted verbatim at the end of the output as a trailing line — it has nothing
-   to attach to and is not a pairing consideration.
+   instruction.  Barrier labels split basic blocks.  If a barrier label is
+   encountered while a non-barrier prefix buffer is non-empty, the buffered
+   lines are attached as `prefix_lines` on the first instruction of the *new*
+   block (not lost and not associated with the preceding block).  If a
+   non-barrier label appears at the end of the file with no following instruction
+   (orphaned), it is emitted verbatim at the end of the output as a trailing
+   line — it has nothing to attach to and is not a pairing consideration.
 
 This ordering is necessary because `prefix_lines` attachment requires knowing
 barrier status upfront, and barrier status requires seeing all branch targets
@@ -318,9 +321,9 @@ in `range(8, 16)`):
 | `c.addiw rd, imm` | RV64: `addiw rd, rd, imm` — `is_rsd`, rd ≠ x0, fits 6 signed bits |
 | `c.li rd, imm` | `addi rd, x0, imm` — rd ≠ x0, fits 6 signed bits |
 | `c.addi16sp imm` | `addi x2, x2, imm` — `is_rsd`, rd = x2, imm ≠ 0, fits 10 signed bits (16-byte aligned) |
-| `c.lui rd, nzimm` | `lui rd, nzimm` — rd ≠ x0, rd ≠ x2, fits 6 signed bits (×4096) |
-| `c.srli rd', shamt` | `srli rd, rd, shamt` — `is_rsd`, rd' in 8–15, shamt ≠ 0 |
-| `c.srai rd', shamt` | `srai rd, rd, shamt` — `is_rsd`, rd' in 8–15, shamt ≠ 0 |
+| `c.lui rd, nzimm` | `lui rd, nzimm` — rd ≠ x0, rd ≠ x2, nzimm ≠ 0, fits 6 signed bits (×4096) |
+| `c.srli rd', shamt` | `srli rd, rd, shamt` — `is_rsd`, rd' in 8–15, 1 ≤ shamt ≤ 31 |
+| `c.srai rd', shamt` | `srai rd, rd, shamt` — `is_rsd`, rd' in 8–15, 1 ≤ shamt ≤ 31 |
 | `c.andi rd', imm` | `andi rd, rd, imm` — `is_rsd`, rd' in 8–15, fits 6 signed bits |
 | `c.sub rd', rs2'` | `sub rd, rd, rs2` — `is_rsd`, both in 8–15 |
 | `c.xor rd', rs2'` | `xor rd, rd, rs2` — `is_rsd`, both in 8–15 |
@@ -332,16 +335,23 @@ in `range(8, 16)`):
 | `c.jal offset` | RV32 only: `jal x1, offset` — (offset range not checked) |
 | `c.beqz rs1', offset` | `beq rs1, x0, offset` — rs1' in 8–15 (offset range not checked) |
 | `c.bnez rs1', offset` | `bne rs1, x0, offset` — rs1' in 8–15 (offset range not checked) |
-| `c.slli rd, shamt` | `slli rd, rd, shamt` — `is_rsd`, rd ≠ x0, shamt ≠ 0 |
+| `c.slli rd, shamt` | `slli rd, rd, shamt` — `is_rsd`, rd ≠ x0, 1 ≤ shamt ≤ 31 |
 | `c.lwsp rd, imm` | `lw rd, imm(x2)` — rd ≠ x0, uimm fits 8 bits (4-byte aligned) |
 | `c.ldsp rd, imm` | RV64: `ld rd, imm(x2)` — rd ≠ x0, uimm fits 9 bits (8-byte aligned) |
 | `c.jr rs1` | `jalr x0, rs1, 0` — rs1 ≠ x0 |
 | `c.mv rd, rs2` | `add rd, x0, rs2` — rd ≠ x0, rs2 ≠ x0 |
+| `c.nop` | `addi x0, x0, 0` — rd = x0, imm = 0 |
 | `c.ebreak` | `ebreak` |
 | `c.jalr rs1` | `jalr x1, rs1, 0` — rs1 ≠ x0 |
 | `c.add rd, rs2` | `add rd, rd, rs2` — `is_rsd`, rd ≠ x0, rs2 ≠ x0 |
 | `c.swsp rs2, imm` | `sw rs2, imm(x2)` — uimm fits 8 bits (4-byte aligned) |
 | `c.sdsp rs2, imm` | RV64: `sd rs2, imm(x2)` — uimm fits 9 bits (8-byte aligned) |
+
+**Float RVC encodings (`c.flw`, `c.fsw`, `c.fld`, `c.fsd`, `c.flwsp`, `c.fswsp`,
+`c.fldsp`, `c.fsdsp`) are out of scope** — they require float-register range checks
+that interact with the separate float-register bank, and their encoding slots
+overlap with integer RVC encodings in a way that is arch-dependent (RV32D vs RV64C).
+They are not included in `rvc_eligible` computation.
 
 ---
 
@@ -362,7 +372,7 @@ in `range(8, 16)`):
 ```python
 @dataclass
 class BasicBlock:
-    label:              str | None
+    labels:             list[str]      # all labels at this address (may be empty or multiple)
     instructions:       list[Instruction]
     successors:         list[BasicBlock]
     predecessors:       list[BasicBlock]
@@ -377,7 +387,8 @@ class BasicBlock:
 | `jal` (not a call) | one successor (the target label) |
 | `jalr` (not a call) | no successors — target is register-computed; treat as function exit |
 | `ret` / `jalr x0, ra, 0` | no successors |
-| `call` / `tail` / `jal x1` | fall-through only (callee is opaque) |
+| `call` / `jal x1` | fall-through only (callee is opaque) |
+| `tail` | no successors — tail call terminates function |
 | Fall-through (non-terminator last instruction) | next block |
 
 ### Function grouping
@@ -429,12 +440,14 @@ which `call_liveness_effect()` returns non-empty sets has those sets merged in.
 If `terminates_function` is True, the block has no successors for liveness
 purposes regardless of the CFG edge list.
 
-**ABI seeds for block terminals** (injected as initial `live_out` values before
+**ABI seeds for block terminals and entries** (injected as initial values before
 dataflow iteration):
-- `ret` / `jalr x0, ra, 0` → `live_out = RET_REGS ∪ CALLEE_SAVED`
+- `ret` / `jalr x0, ra, 0` → `live_out = RET_REGS ∪ FRET_REGS ∪ CALLEE_SAVED ∪ FCALLEE_SAVED`
 - `tail` / tail-call `jalr` → `live_out = ARG_REGS ∪ FARG_REGS`
 - `call` / `jal x1` → `live_out = RET_REGS ∪ CALLEE_SAVED ∪ FCALLEE_SAVED`
   (the callee preserves callee-saved regs and may return values in `a0`/`a1` and `fa0`/`fa1`)
+- function-entry block (`is_function_entry = True`) → `live_in` seed includes
+  `ARG_REGS ∪ FARG_REGS` (caller may have passed any argument register)
 
 ### Local pass
 
@@ -456,8 +469,10 @@ for correctness.
 - **Memory ordering**: by default, each memory operation has a dependency edge
   from the previous memory operation in program order (conservative).  With
   `--same-base-reorder`, two mem-ops with the same base register — provided that
-  register is not written between them — and non-overlapping byte ranges (same
-  offset ± access width) have this edge dropped.
+  register is not written between them **and no unknown instruction (`is_unknown`)
+  appears between them** (unknown instructions may have undeclared memory effects)
+  — and non-overlapping byte ranges (same offset ± access width) have this edge
+  dropped.
 - **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, `call`,
   and `tail` instructions get ordering edges from all preceding instructions
   in the block.  Unknown instructions (`is_unknown`) are **not** treated as
@@ -731,6 +746,28 @@ def bound(remaining: int, prev_free: bool) -> int:
 
 **Fallback:** if `NODE_BUDGET` or `STAGNATION` is exceeded, the list-scheduling
 result is used instead.
+
+**Stale liveness during BnB search:** The per-instruction `live_in`/`live_out`
+fields are computed for the *source* instruction order and become stale as BnB
+explores different orderings.  Pairing rules evaluated inside BnB must not
+consult `live_in`/`live_out`.  They may only use register-field properties
+(`uses_int`, `defs_int`, `rd`, `rs1`, etc.) which are order-independent.
+Liveness-dependent rules (e.g. "rd is dead after B, so WAW is safe") are only
+applied during the final greedy-advance pass, after liveness has been
+recomputed for the chosen ordering.
+
+**Known limitation — PCREL `auipc`/load pairs:** Assembler-generated
+`.Lpcrel_hi*` labels associated with `auipc`/`lw` or `auipc`/`addi` PCREL
+pairs are non-barrier labels and travel as `prefix_lines` on the `auipc`.  If
+the scheduler separates `auipc` from its paired `lw`/`addi` (which is legal
+from a dependency-graph perspective if no register edge connects them), the
+`.Lpcrel_hi` label will follow the `auipc` while the `lw` remains at its
+original offset — breaking the assembler-internal relocation.  To avoid this,
+`auipc` instructions are conservatively treated as having an implicit data
+dependency on their immediately following instruction when that instruction
+references the same destination register (i.e. when `auipc rd, ...` is
+immediately followed by an instruction reading `rd`), preventing separation.
+This is a best-effort heuristic; a complete fix would require assembler support.
 
 ---
 
