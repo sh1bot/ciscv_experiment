@@ -197,12 +197,12 @@ All are derived from the stored fields; none are stored separately.
 | `writes_memory` | store instruction |
 | `reads_memory` | load instruction |
 | `access_width` | byte width of the memory access (1/2/4/8), or `None` for non-memory instructions — inferred from the mnemonic (lb/sb=1, lh/sh=2, lw/sw/flw/fsw=4, ld/sd/fld/fsd=8) |
-| `access_shift` | `int.bit_length(access_width) - 1` when `access_width` is not None, else `None` — the natural alignment shift; use as the `shift` argument to `imm_fits`/`uimm_fits` when checking whether an offset is naturally aligned |
+| `access_shift` | `access_width.bit_length() - 1` when `access_width` is not None, else `None` — the natural alignment shift; use as the `shift` argument to `imm_fits`/`uimm_fits` when checking whether an offset is naturally aligned |
 | `is_branch` | conditional branch (two CFG successors) |
 | `is_jump` | unconditional jump (JAL, JALR — one or zero successors) |
 | `is_call` | mnemonic `"call"`, or JAL/JALR writing `ra` (x1) or `t0` (x5) — covers both the unexpanded `call` pseudo and the encoded form |
 | `is_tail` | mnemonic `"tail"` — the unexpanded tail-call pseudo; not expanded, not a jump or call in the encoded sense, but transfers control and must not be in A-slot |
-| `is_return` | `jalr x0, ra, 0` |
+| `is_return` | mnemonic `"ret"`, or `jalr x0, ra, 0` (the encoded form) |
 | `is_csr` | accesses a CSR |
 | `is_fence` | FENCE / FENCE.I |
 | `is_atomic` | A-extension instruction |
@@ -249,26 +249,31 @@ def imm_fits(self, n: int, shift: int = 0) -> bool:
     This is the standard RISC-V load/store offset encoding:
       - lw/sw:  imm_fits(12, 0)  — full 12-bit signed, byte granular
       - c.lw:   imm_fits(7, 2)   — 7-bit unsigned × 4 (use uimm_fits)
-    For unsigned variants use uimm_fits()."""
+    For unsigned variants use uimm_fits().
+    Examples:
+      lw/sw:  imm_fits(12, 0)   — 12-bit signed, byte-granular
+      c.lwsp: uimm_fits(8, 2)   — 8-bit unsigned offset, 4-byte aligned"""
 
 def uimm_fits(self, n: int, shift: int = 0) -> bool:
     """Combined unsigned-range + alignment check.
-    True iff uimm_bits(n) and imm_multiple(shift)."""
+    True iff uimm_bits(n) and imm_multiple(shift).
+    Examples:
+      c.lw:   uimm_fits(7, 2)   — 7-bit unsigned offset, 4-byte aligned
+      c.ld:   uimm_fits(8, 3)   — 8-bit unsigned offset, 8-byte aligned"""
 ```
 
 The `shift` parameter reflects how memory instructions encode their offsets: a
-`lw` with a 4-byte-aligned offset can store `offset >> 2` in fewer bits (as in
-the C-extension encodings) while still representing a wider byte range.  Rules
-that test whether two adjacent loads/stores can share an encoding call
-`imm_fits` / `uimm_fits` with the appropriate `n` and `shift` for the target
-encoding.
+`c.lw` with a 4-byte-aligned offset stores `offset >> 2` in 5 bits (the
+C-extension field), reaching a 7-bit unsigned byte range.  Rules that test
+whether two adjacent loads/stores can share an encoding call `imm_fits` /
+`uimm_fits` with the appropriate `n` and `shift` for the target encoding.
 
 **Access width from opcode.**  Load and store mnemonics encode the access size
 in the opcode (`lb`/`sb` = 1, `lh`/`sh` = 2, `lw`/`sw` = 4, `ld`/`sd` = 8,
 etc.).  An `access_width` property returns this as an integer, or `None` for
 non-memory instructions.  Pairing rules that need the natural alignment shift
-use `int.bit_length(access_width) - 1` to derive `shift` (e.g. width 4 →
-shift 2).
+use `access_width.bit_length() - 1` to derive `shift` (e.g. width 4 →
+`(4).bit_length() - 1` = 2).
 
 ---
 
@@ -557,8 +562,8 @@ maintained as separate parallel `frozenset[int]` domains (`live_in`/`live_out`
 for integer, `flive_in`/`flive_out` for float) and iterated together.
 
 ```
-live_in[B]  = use[B]  ∪  (live_out[B] − def[B])
-live_out[B] = ⋃  live_in[S]   for S in successors(B)
+live_in[B]  = use[B]  ∪  (live_out[B] − def[B])  ∪  ENTRY_SEED[B]
+live_out[B] = (⋃  live_in[S]  for S in successors(B))  ∪  EXIT_SEED[B]
 ```
 
 **ABI injection.**  `call_liveness_effect()` (§2) is the single source of truth
@@ -568,14 +573,23 @@ building `use[B]` / `def[B]`:
 - `implicit uses` → merged into `use[B]` (integer and float separately).
 - `implicit defs` → merged into `def[B]`.
 - `terminates_function = True` → the block is treated as having no successors,
-  so `live_out[B]` is determined entirely by its seed (see below).
+  so the `⋃ live_in[S]` term is ∅; `live_out[B]` is determined entirely by
+  `EXIT_SEED[B]` (see below).
 
-**Initial seeds.**  Before iteration begins, each block's `live_out` is
-pre-loaded with the `live_out_seed` from `call_liveness_effect()` applied to
-the block's last instruction (if that instruction has ABI effects).  This
-accounts for registers that are conservatively live after a call or on function
-exit, independent of what the rest of the function observes.  The seed values
-come directly from the §2 table; there is no separate seed specification.
+**Exit seeds (terminating blocks).**  For blocks whose last instruction has
+`terminates_function = True` (returns, tail calls, unclassified jalr), the
+`live_out_seed` from `call_liveness_effect()` is an **additive per-iteration
+term** unioned into `live_out[B]` on every dataflow iteration:
+
+```
+EXIT_SEED[B] = live_out_seed from last instruction   if terminates_function
+             = ∅                                      otherwise
+```
+
+This must be re-applied each iteration — not pre-loaded once — for exactly the
+same reason as `ENTRY_SEED`: the dataflow equation would overwrite a one-time
+pre-load to ∅ on the first pass (since `⋃ live_in[S]` = ∅ for no-successor
+blocks).  The seed values come directly from the §2 table.
 
 **Mid-block call seeds.**  A `call` instruction may appear in the middle of a
 block (it has a fall-through successor, so the block continues).  Its
@@ -584,24 +598,17 @@ applied at the block level — it is applied in the **local pass** when the
 backward propagation reaches the call instruction.  At that point `live_out` for
 the call is unioned with its `live_out_seed` before propagating further backward.
 
-**Function-entry seed.**  Blocks with `is_function_entry = True` permanently
-union `ARG_REGS` (integer) and `FARG_REGS` (float) into their `live_in` on
-every dataflow iteration, since the caller may have passed values in any of
-them.  This is an additive term in the fixed-point equation, not a one-time
-pre-load:
+**Function-entry seed.**  `ENTRY_SEED[B]` in the equation above:
 
 ```
-live_in[B] = use[B]  ∪  (live_out[B] − def[B])  ∪  ENTRY_SEED[B]
-
 where ENTRY_SEED[B] = ARG_REGS ∪ FARG_REGS   if is_function_entry(B)
                     = ∅                         otherwise
 ```
 
-Pre-loading would be overwritten on convergence; the union must be re-applied
-each iteration so the seed is never lost.  `is_function_entry` is set for
-blocks headed by `.globl`-declared labels.  `.weak` symbols are also treated as
-function entries for this purpose, since weak aliases are commonly used as
-alternate entry points with the same calling convention.
+This permanently unions the argument registers into `live_in` of the entry
+block on every iteration, since the caller may have passed values in any of
+them.  `is_function_entry` is set by the function-identification pass (§6) for
+blocks headed by `.globl`-declared or `.type @function` labels.
 
 **`ret` seed conservatism.**  The `live_out_seed` for a return instruction is
 `CALLEE_SAVED ∪ FCALLEE_SAVED ∪ RET_REGS ∪ FRET_REGS`.  Including the full
@@ -686,8 +693,9 @@ class PairingRule:
     # Properties that must be True on the B-slot instruction (second of pair).
     b_prerequisites: list[str] = field(default_factory=list)
 
-    # Returns None  -> this rule does not block the pair.
-    # Returns str   -> the pair is rejected; the string is the reason.
+    # Returns None  -> this encoding accepts the pair (success).
+    # Returns str   -> this encoding cannot represent the pair; the string
+    #                  is the reason.  Other encodings (rules) may still accept.
     check: Callable[[Instruction, Instruction], str | None]
 ```
 
@@ -825,15 +833,21 @@ def can_pair(a: Instruction, b: Instruction) -> str | None:
         if getattr(b, prop):
             return f"B-slot disqualified: {prop}"
 
+    reasons: list[str] = []
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
+        # This encoding applies.  Check whether it can represent the pair.
         result = rule.check(a, b)
-        if result is not None:
-            return result
-    return None
+        if result is None:
+            return None          # encoding accepts — the pair is valid
+        reasons.append(f"{rule.name}: {result}")
+    # No encoding could represent this pair.
+    if reasons:
+        return "; ".join(reasons)
+    return "no applicable encoding"
 ```
 
 ### Greedy-advance pairing model
@@ -869,14 +883,18 @@ exact calls:
 for each (free, curr) pair tested during the pairing pass:
     reason = can_pair(free, curr)
     if reason is not None:
-        free.solo_reasons.add(reason)   # always: free was rejected in this attempt
+        if reason not from B_SLOT_DISQUALIFIERS:
+            free.solo_reasons.add(reason)   # describes free or the encoding mismatch
         if reason not from A_SLOT_DISQUALIFIERS:
-            curr.solo_reasons.add(reason)  # only when the reason is not A-slot-specific
+            curr.solo_reasons.add(reason)   # describes curr or the encoding mismatch
 ```
 
-A-slot disqualifier reasons (e.g. `"is_call"`, `"is_tail"`) describe a property
-of `free`, not of `curr`.  Adding them to `curr.solo_reasons` would falsely
-imply that `curr` was itself the problem.
+- A-slot disqualifier reasons (`"A-slot disqualified: is_call"` etc.) describe
+  a property of `free`; they should not be added to `curr.solo_reasons`.
+- B-slot disqualifier reasons (`"B-slot disqualified: …"`) describe a property
+  of `curr`; they should not be added to `free.solo_reasons`.
+- Rule-check rejections (encoding mismatches) describe the pair and are added
+  to both.
 
 In `--fast` (forward-scan) mode each instruction is tested against at most one
 adjacent candidate.  In list-scheduling and BnB modes the ready queue may cause
