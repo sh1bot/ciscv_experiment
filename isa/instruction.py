@@ -18,58 +18,37 @@ class Instruction:
     prefix_lines:  list[str] = field(default_factory=list)
 
     # Populated by decoder:
-    rd:   Optional[int] = None
+    rd:   Optional[int] = None   # destination register index (0–31 int, 32–63 float)
     rs1:  Optional[int] = None
     rs2:  Optional[int] = None
-    rs3:  Optional[int] = None
-    frd:  Optional[int] = None
-    frs1: Optional[int] = None
-    frs2: Optional[int] = None
-    frs3: Optional[int] = None
+    rs3:  Optional[int] = None   # FMA etc.
     imm:  Optional[int] = None
     branch_target: Optional[str] = None
     is_unknown:    bool = False
 
-    # Populated by liveness pass:
+    # Populated by liveness pass (indices 0–63):
     live_in:   frozenset = field(default_factory=frozenset)
     live_out:  frozenset = field(default_factory=frozenset)
-    flive_in:  frozenset = field(default_factory=frozenset)
-    flive_out: frozenset = field(default_factory=frozenset)
 
     # Populated by pairing pass:
     solo_reasons: set = field(default_factory=set)
 
     # -----------------------------------------------------------------------
-    # Register use/def sets (excluding x0)
+    # Register use/def sets (excluding x0, indices 0–63)
     # -----------------------------------------------------------------------
 
     @property
-    def uses_int(self) -> frozenset:
+    def uses_regs(self) -> frozenset:
         regs = set()
         for r in (self.rs1, self.rs2, self.rs3):
             if r is not None and r != 0:
                 regs.add(r)
-        # Implicit uses for call/return/tail are handled by abi.py
         return frozenset(regs)
 
     @property
-    def defs_int(self) -> frozenset:
+    def defs_regs(self) -> frozenset:
         if self.rd is not None and self.rd != 0:
             return frozenset({self.rd})
-        return frozenset()
-
-    @property
-    def uses_float(self) -> frozenset:
-        regs = set()
-        for r in (self.frs1, self.frs2, self.frs3):
-            if r is not None:
-                regs.add(r)
-        return frozenset(regs)
-
-    @property
-    def defs_float(self) -> frozenset:
-        if self.frd is not None:
-            return frozenset({self.frd})
         return frozenset()
 
     # -----------------------------------------------------------------------
@@ -152,6 +131,16 @@ class Instruction:
             "flw", "fld",
             "c.lw", "c.ld", "c.lwsp", "c.ldsp",
         }
+
+    @property
+    def reads_stack(self) -> bool:
+        """Load instruction whose base register is sp (x2)."""
+        return self.reads_memory and self.rs1 == 2
+
+    @property
+    def writes_stack(self) -> bool:
+        """Store instruction whose base register is sp (x2)."""
+        return self.writes_memory and self.rs1 == 2
 
     @property
     def access_width(self) -> Optional[int]:

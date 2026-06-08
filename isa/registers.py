@@ -1,8 +1,12 @@
 """
 isa/registers.py — Register indices, ABI names, and calling-convention sets.
+
+Flat namespace: integer registers 0–31, float registers 32–63.
 """
 
-# Integer register ABI names → index 0–31
+# Single flat register namespace
+# Integer: zero/ra/sp/... x0–x31 → 0–31
+# Float:   ft0–ft11/fs0–fs11/fa0–fa7 f0–f31 → 32–63
 REG_ALIASES: dict[str, int] = {
     "zero": 0, "ra": 1, "sp": 2, "gp": 3, "tp": 4,
     "t0": 5, "t1": 6, "t2": 7,
@@ -13,58 +17,57 @@ REG_ALIASES: dict[str, int] = {
     "s6": 22, "s7": 23, "s8": 24, "s9": 25,
     "s10": 26, "s11": 27,
     "t3": 28, "t4": 29, "t5": 30, "t6": 31,
+    # Float ABI names → 32–63
+    "ft0": 32, "ft1": 33, "ft2": 34, "ft3": 35, "ft4": 36, "ft5": 37,
+    "ft6": 38, "ft7": 39,
+    "fs0": 40, "fs1": 41,
+    "fa0": 42, "fa1": 43, "fa2": 44, "fa3": 45,
+    "fa4": 46, "fa5": 47, "fa6": 48, "fa7": 49,
+    "fs2": 50, "fs3": 51, "fs4": 52, "fs5": 53,
+    "fs6": 54, "fs7": 55, "fs8": 56, "fs9": 57,
+    "fs10": 58, "fs11": 59,
+    "ft8": 60, "ft9": 61, "ft10": 62, "ft11": 63,
 }
 # Add x0–x31 aliases
 for _i in range(32):
     REG_ALIASES[f"x{_i}"] = _i
-
-# Float register ABI names → index 0–31
-FREG_ALIASES: dict[str, int] = {
-    "ft0": 0, "ft1": 1, "ft2": 2, "ft3": 3, "ft4": 4, "ft5": 5,
-    "ft6": 6, "ft7": 7,
-    "fs0": 8, "fs1": 9,
-    "fa0": 10, "fa1": 11, "fa2": 12, "fa3": 13,
-    "fa4": 14, "fa5": 15, "fa6": 16, "fa7": 17,
-    "fs2": 18, "fs3": 19, "fs4": 20, "fs5": 21,
-    "fs6": 22, "fs7": 23, "fs8": 24, "fs9": 25,
-    "fs10": 26, "fs11": 27,
-    "ft8": 28, "ft9": 29, "ft10": 30, "ft11": 31,
-}
-# Add f0–f31 aliases
+# Add f0–f31 aliases (offset by 32)
 for _i in range(32):
-    FREG_ALIASES[f"f{_i}"] = _i
+    REG_ALIASES[f"f{_i}"] = _i + 32
 
-# Calling-convention register sets (integer)
+# Calling-convention register sets (unified int+float)
+# Integer caller-saved: ra, t0–t6, a0–a7
+# Float caller-saved:   ft0–ft11, fa0–fa7
 CALLER_SAVED: frozenset[int] = frozenset({
     1,   # ra
     5, 6, 7,   # t0, t1, t2
     10, 11, 12, 13, 14, 15, 16, 17,  # a0–a7
     28, 29, 30, 31,  # t3–t6
+    # float caller-saved: ft0–ft7 (32–39), fa0–fa7 (42–49), ft8–ft11 (60–63)
+    32, 33, 34, 35, 36, 37, 38, 39,   # ft0–ft7
+    42, 43, 44, 45, 46, 47, 48, 49,   # fa0–fa7
+    60, 61, 62, 63,                    # ft8–ft11
 })
 
+# Integer callee-saved: sp, s0–s11
+# Float callee-saved:   fs0–fs11
 CALLEE_SAVED: frozenset[int] = frozenset({
     2,   # sp
     8, 9,  # s0, s1
     18, 19, 20, 21, 22, 23, 24, 25, 26, 27,  # s2–s11
+    # float callee-saved: fs0–fs1 (40–41), fs2–fs11 (50–59)
+    40, 41,          # fs0, fs1
+    50, 51, 52, 53, 54, 55, 56, 57, 58, 59,  # fs2–fs11
 })
 
-ARG_REGS: frozenset[int] = frozenset({10, 11, 12, 13, 14, 15, 16, 17})  # a0–a7
-RET_REGS: frozenset[int] = frozenset({10, 11})  # a0, a1
-
-# Float calling-convention register sets
-FCALLER_SAVED: frozenset[int] = frozenset({
-    0, 1, 2, 3, 4, 5, 6, 7,   # ft0–ft7
-    10, 11, 12, 13, 14, 15, 16, 17,  # fa0–fa7
-    28, 29, 30, 31,  # ft8–ft11
+# ARG_REGS: a0–a7 (10–17) and fa0–fa7 (42–49)
+ARG_REGS: frozenset[int] = frozenset({
+    10, 11, 12, 13, 14, 15, 16, 17,   # a0–a7
+    42, 43, 44, 45, 46, 47, 48, 49,   # fa0–fa7
 })
 
-FCALLEE_SAVED: frozenset[int] = frozenset({
-    8, 9,  # fs0, fs1
-    18, 19, 20, 21, 22, 23, 24, 25, 26, 27,  # fs2–fs11
-})
-
-FARG_REGS: frozenset[int] = frozenset({10, 11, 12, 13, 14, 15, 16, 17})  # fa0–fa7
-FRET_REGS: frozenset[int] = frozenset({10, 11})  # fa0, fa1
+# RET_REGS: a0, a1 (10–11) and fa0, fa1 (42–43)
+RET_REGS: frozenset[int] = frozenset({10, 11, 42, 43})
 
 _INT_REG_NAMES = [
     "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
@@ -82,10 +85,7 @@ _FLOAT_REG_NAMES = [
 
 
 def reg_name(index: int) -> str:
-    """Return the canonical ABI name for an integer register index."""
-    return _INT_REG_NAMES[index]
-
-
-def freg_name(index: int) -> str:
-    """Return the canonical ABI name for a float register index."""
-    return _FLOAT_REG_NAMES[index]
+    """Return the canonical ABI name for a register index (0–63)."""
+    if index < 32:
+        return _INT_REG_NAMES[index]
+    return _FLOAT_REG_NAMES[index - 32]
