@@ -83,38 +83,46 @@ def call_liveness_effect(insn: Instruction) -> tuple[
     frozenset[int],  # implicit integer defs (clobbered)
     frozenset[int],  # implicit float uses
     frozenset[int],  # implicit float defs
+    frozenset[int],  # live_out_seed: integer registers conservatively live after this insn
+    frozenset[int],  # live_out_seed: float registers conservatively live after this insn
     bool,            # terminates_function
 ]:
 ```
 
-Rules (based on the `rd` operand):
+A call is modelled as a single very busy instruction: it reads all argument
+registers (integer and float) and `sp`, clobbers all caller-saved registers
+(integer and float), and after it returns, the caller must assume all
+callee-saved registers and both return registers are live.  The `live_out_seed`
+fields capture this post-call conservative assumption separately from the
+`implicit uses` (which drive dep-graph edges *into* the call, not *out* of it).
 
-| Case | Detection | Implicit uses | Implicit defs | Terminates |
-|---|---|---|---|---|
-| Call with return | `jalr`/`jal` writing `ra` (x1) or `t0` (x5) | `ARG_REGS ∪ FARG_REGS ∪ {sp}` | `CALLER_SAVED ∪ FCALLER_SAVED` | False |
-| Return | `jalr x0, ra, 0` | `RET_REGS ∪ FRET_REGS ∪ {sp}` | ∅ | True |
-| Tail call | `jalr x0, rs1` where rs1 ≠ ra | `ARG_REGS ∪ FARG_REGS ∪ {sp}` | ∅ | True |
-| Indirect jump | `jalr x0, rs1` used as computed goto (within a function, no tail-call heuristic match) | `{sp}` | ∅ | True (conservative) |
+For terminating instructions (`terminates_function = True`) there are no
+successors and `live_out_seed` equals `implicit uses` — what the frame reads
+on exit is what must be live.  For non-terminating calls, `live_out_seed` is
+the post-return live set rather than the pre-call argument set.
 
-`sp` (x2) is included as an implicit use for all control-flow instructions that
-transfer out of the current frame.  This creates the necessary dep-graph edge
-from any stack-pointer–modifying instruction (e.g. `addi sp, sp, 16`) to the
-subsequent `ret`, preventing the scheduler from moving the return before the
-stack restore.
+Detection priority: mnemonic is checked first; structural `jalr`/`jal` patterns
+are the fallback for assembler output that has already expanded pseudo-instructions.
 
-The discriminant is `rd`: a non-`x0` link destination means call-with-return, so
-callee-saved registers survive the call.  An `x0` destination means no return
-from the callee's perspective — only return registers matter downstream.
+| Case | Detection | Implicit int uses / float uses | Implicit int defs / float defs | Live-out seed (int / float) | Terminates |
+|---|---|---|---|---|---|
+| Call (pseudo) | mnemonic `"call"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | `CALLER_SAVED` / `FCALLER_SAVED` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | False |
+| Call (encoded) | `jal`/`jalr` writing `ra` (x1) or `t0` (x5) | same | same | same | False |
+| Return (pseudo) | mnemonic `"ret"` | `RET_REGS ∪ CALLEE_SAVED` / `FRET_REGS ∪ FCALLEE_SAVED` | ∅ / ∅ | (same as uses) | True |
+| Return (encoded) | `jalr x0, ra, 0` | same | same | same | True |
+| Tail call (pseudo) | mnemonic `"tail"` | `ARG_REGS ∪ {sp}` / `FARG_REGS` | ∅ / ∅ | (same as uses) | True |
+| Tail call (encoded) | `jalr x0, rs1` where rs1 ≠ ra | same | same | same | True |
+| Indirect jump | `jalr x0, rs1` (conservative: not a recognisable tail call) | `{sp}` / ∅ | ∅ / ∅ | (same as uses) | True |
 
-`t0` (x5) is included as a link register because the RISC-V psABI defines x5 as
-the alternate link register, used by some linker-generated call stubs when `ra`
-(x1) is already occupied.  Both are treated identically for ABI purposes.
+`sp` (x2) is in `CALLEE_SAVED` and therefore already present in the return and
+tail-call use sets; it is listed explicitly in the call and indirect-jump rows
+where it would otherwise be absent.
 
-`call` and `tail` pseudo-instructions are **not** expanded to multi-instruction
-sequences.  They are retained as single instructions and their ABI effects are
-handled entirely by `call_liveness_effect()`.  All argument registers are
-conservatively assumed live at a call site since the precise argument count is
-not known from the assembly text alone.
+`t0` (x5) is treated as a link register alongside `ra` (x1) because the RISC-V
+psABI designates it as the alternate link register for linker call stubs.
+
+All argument registers are conservatively assumed live at every call site since
+the precise argument count is not known from assembly text alone.
 
 ---
 
@@ -151,6 +159,9 @@ class Instruction:
     live_out:  frozenset[int] = field(default_factory=frozenset)
     flive_in:  frozenset[int] = field(default_factory=frozenset)
     flive_out: frozenset[int] = field(default_factory=frozenset)
+
+    # Populated by the pairing pass (initially empty):
+    solo_reasons: set[str] = field(default_factory=set)  # rejection strings from can_pair()
 ```
 
 ### Computed properties
@@ -245,8 +256,8 @@ When no decoder matches a mnemonic, the instruction is decoded as follows:
 
 - Scan the operand list left-to-right, parsing each token as a register name if
   possible and ignoring any token that is not a valid register name.
-- `defs_int` = the first register-like operand, if any.
-- `uses_int` = all remaining register-like operands.
+- `defs_int` = the first register-like operand, if any, **excluding x0**.
+- `uses_int` = all remaining register-like operands, **excluding x0**.
 - `is_unknown = True` — the annotator will emit a `[?]` marker on output.
 - The instruction is **not** treated as a barrier in the dependency graph.
   It participates via its inferred `defs_int` / `uses_int` (RAW/WAR/WAW edges
@@ -316,7 +327,7 @@ in `range(8, 16)`):
 | `c.lw rd', imm(rs1')` | `lw rd, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
-| `c.sd rs2', imm(rs1')` | RV64: `sd rs2, imm(rs1)` — both in 8–15, uimm fits 8 bits |
+| `c.sd rs2', imm(rs1')` | RV64: `sd rs2, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
 | `c.addi rd, nzimm` | `addi rd, rd, imm` — `is_rsd`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
 | `c.addiw rd, imm` | RV64: `addiw rd, rd, imm` — `is_rsd`, rd ≠ x0, fits 6 signed bits |
 | `c.li rd, imm` | `addi rd, x0, imm` — rd ≠ x0, fits 6 signed bits |
@@ -365,8 +376,8 @@ They are not included in `rvc_eligible` computation.
    Assembler-internal labels that are never branch targets are **not** barrier
    labels and do not split blocks.  (See §4 two-pass parsing.)
 3. Mark block-start indices: the first instruction, every instruction that
-   follows a branch/jump/return, and every instruction preceded by a barrier
-   label.
+   follows a branch, jump, return, `call`, or `tail`, and every instruction
+   preceded by a barrier label.
 4. Group consecutive instructions between boundaries into `BasicBlock` objects.
 
 ```python
@@ -411,49 +422,57 @@ reachable functions conservatively.
 ## 7. `analysis/liveness.py` — Register liveness
 
 **Two-phase approach.**  The CFG liveness pass runs once over the whole file
-before per-block scheduling begins, producing a `live_out` table keyed by block
-label.  This global pass correctly handles conditional branches, loop back-edges,
+before per-block scheduling begins, producing a `live_out` table keyed by block.
+This global pass correctly handles conditional branches, loop back-edges,
 and fall-throughs.  Per-block scheduling then consults this table for the block's
 `live_out` seed before doing its local backward propagation.
 
+The table is keyed by `BasicBlock` identity (object reference), not by label
+string, so blocks with zero labels or multiple labels are handled uniformly.
+
 **Liveness must be recomputed after reordering.**  Pairing rules consult
-per-instruction `live_in`/`live_out` (e.g. "rd is dead after B").  After the
-reorder pass changes instruction order, these fields are stale.  The local
-backward pass is re-run on the post-schedule ordered list before the
-greedy-advance pairing pass runs.
+per-instruction `live_in`/`live_out`.  After the reorder pass changes instruction
+order, these fields are stale.  The local backward pass is re-run on the
+post-schedule ordered list before the greedy-advance pairing pass runs.
 
 ### Global pass
 
 Standard iterative backward dataflow over the CFG, per function, using a
-worklist.
+worklist.  Integer and float register sets are maintained as separate parallel
+`frozenset[int]` domains (`live_in`/`live_out` for integer,
+`flive_in`/`flive_out` for float) and iterated together.
 
 ```
 live_in[B]  = use[B]  ∪  (live_out[B] − def[B])
 live_out[B] = ⋃  live_in[S]   for S in successors(B)
 ```
 
-Integer and float register sets are maintained as parallel `frozenset[int]`
-domains and updated together.
+**ABI injection.**  `call_liveness_effect()` (§2) is the single source of truth
+for all ABI-related liveness effects.  It is called on every instruction when
+building `use[B]` / `def[B]`:
 
-**ABI injection:** When computing `use[B]` / `def[B]`, any instruction in B for
-which `call_liveness_effect()` returns non-empty sets has those sets merged in.
-If `terminates_function` is True, the block has no successors for liveness
-purposes regardless of the CFG edge list.
+- `implicit uses` → merged into `use[B]` (integer and float separately).
+- `implicit defs` → merged into `def[B]`.
+- `terminates_function = True` → the block is treated as having no successors,
+  so `live_out[B]` is determined entirely by its seed (see below).
 
-**ABI seeds for block terminals and entries** (injected as initial values before
-dataflow iteration):
-- `ret` / `jalr x0, ra, 0` → `live_out = RET_REGS ∪ FRET_REGS ∪ CALLEE_SAVED ∪ FCALLEE_SAVED`
-- `tail` / tail-call `jalr` → `live_out = ARG_REGS ∪ FARG_REGS`
-- `call` / `jal x1` → `live_out = RET_REGS ∪ CALLEE_SAVED ∪ FCALLEE_SAVED`
-  (the callee preserves callee-saved regs and may return values in `a0`/`a1` and `fa0`/`fa1`)
-- function-entry block (`is_function_entry = True`) → `live_in` seed includes
-  `ARG_REGS ∪ FARG_REGS` (caller may have passed any argument register)
+**Initial seeds.**  Before iteration begins, each block's `live_out` is
+pre-loaded with the `live_out_seed` from `call_liveness_effect()` applied to
+the block's last instruction (if that instruction has ABI effects).  This
+accounts for registers that are conservatively live after a call or on function
+exit, independent of what the rest of the function observes.  The seed values
+come directly from the §2 table; there is no separate seed specification.
+
+**Function-entry seed.**  Blocks with `is_function_entry = True` have their
+`live_in` pre-loaded with `ARG_REGS ∪ FARG_REGS` (integer and float argument
+registers respectively), since the caller may have passed values in any of them.
 
 ### Local pass
 
 After global fixed-point, a backward pass within each block assigns `live_in` /
 `live_out` to every individual `Instruction`, using the block's global `live_out`
-as the seed.
+as the seed.  The same `call_liveness_effect()` injection is applied at the
+instruction level during this pass.
 
 ---
 
@@ -564,7 +583,12 @@ rule is silently skipped — it neither approves nor rejects.  Only an applicabl
 rule that returns a non-`None` string constitutes a rejection.
 
 Prerequisites are a filtering mechanism, not an approval mechanism.  The overall
-`can_pair()` function approves a pair only when no applicable rule rejects it.
+`can_pair()` function uses a **blocklist model**: a pair is approved unless at
+least one applicable rule explicitly rejects it.  A pair for which no rule's
+prerequisites match is therefore approved by default.  This is intentional —
+the rule set is expected to be complete enough for the instruction combinations
+the project targets, and new rules are added when a pairing that should be
+rejected slips through.
 
 ### Example rule — RSD ALU pair
 
@@ -588,11 +612,11 @@ PairingRule(
     check=lambda a, b: (
         None
         if (a.mnemonic in {"add","sub","and","or","xor",
-                           "addw","subw","andw","orw","xorw"}
+                           "addw","subw"}
             and b.mnemonic in {"add","sub","and","or","xor",
-                               "addw","subw","andw","orw","xorw"}
+                               "addw","subw"}
             and not (a.defs_int & b.uses_int)   # no RAW a→b
-            and not (b.defs_int & a.uses_int)   # no RAW b→a
+            and not (b.defs_int & a.uses_int)   # no WAR b→a
             and not (a.defs_int & b.defs_int))  # no WAW
         else "rsd-alu-pair: register conflict or mnemonic mismatch"
     ),
@@ -641,16 +665,20 @@ def can_pair(a: Instruction, b: Instruction) -> str | None:
 ### Greedy-advance pairing model
 
 The fundamental pairing model is *greedy-advance*: maintain a single `free`
-candidate (the last unmatched instruction).  For each instruction `curr` in
-order:
+candidate (the last unmatched instruction).
 
 ```
-if free is set and can_pair(free, curr) is None:
-    emit (free, curr) as pair packet; free = None
-else:
-    if free is set: emit free as solo packet
-    free = curr
-if free is set: emit free as solo packet
+free = None
+for curr in instructions:               # ← loop over ordered instruction list
+    if free is not None and can_pair(free, curr) is None:
+        emit (free, curr) as pair packet
+        free = None
+    else:
+        if free is not None:
+            emit free as solo packet
+        free = curr
+if free is not None:                    # ← after loop: flush last unmatched
+    emit free as solo packet
 ```
 
 A solo instruction never blocks the following instruction from pairing.  The
@@ -675,8 +703,14 @@ more), and that is acceptable.
 Three scheduling strategies share the same interface:
 
 ```python
+class ScheduleMode(enum.Enum):
+    FORWARD  = "forward"   # --fast: source order, no reordering
+    LIST     = "list"      # default: list scheduling with lookahead
+    BNB      = "bnb"       # --thorough: branch-and-bound
+
 def schedule(block: BasicBlock, graph: DepGraph, mode: ScheduleMode) -> list[Instruction]:
-    """Return a topological sort of graph that maximises pair count."""
+    """Return a topological sort of graph that maximises pair count.
+    In FORWARD mode, graph is unused and may be None."""
 ```
 
 All three feed their output into the same greedy-advance pairing pass (§10).
@@ -705,11 +739,12 @@ At each step:
      catches the common bad-decision case: A pairs with B, but B could have
      paired with C while A pairs with D.
 2. If no pairable candidate exists for `free`, emit `free` as solo and pick the
-   next instruction from the ready queue by secondary priority (longest critical
-   path to the end of the block, measured in dependency-graph hops, computed once
-   before scheduling begins).  No instruction latency model is used — all edges
-   are unit weight.  The hop-count is a tie-breaker only; pairing opportunity is
-   the primary objective.
+   next instruction from the ready queue by: **primary criterion** — the
+   instruction with the most pairing candidates currently in the ready queue
+   (i.e. the one most likely to pair soon, chosen greedily); **tie-breaker** —
+   longest critical path to the end of the block, measured in dependency-graph
+   hops, computed once before scheduling begins.  No instruction latency model
+   is used — all hop edges are unit weight.
 3. Update the ready queue as new instructions become unblocked.
 
 O(n log n) in queue operations.
