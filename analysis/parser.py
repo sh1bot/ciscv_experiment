@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from isa.instruction import Instruction
-from isa.registers import REG_ALIASES, FREG_ALIASES
+from isa.registers import REG_ALIASES
 from analysis.cfg import BasicBlock, Function
 
 
@@ -65,20 +65,9 @@ _KNOWN_MNEMONICS_WARNED: set = set()
 
 
 def _parse_reg(tok: str) -> Optional[int]:
-    """Parse a register name token, return index or None."""
+    """Parse a register name token (int or float), return unified index or None."""
     t = tok.strip().rstrip(",").lower()
-    if t in REG_ALIASES:
-        return REG_ALIASES[t]
-    if t in FREG_ALIASES:
-        return None  # float register — handled separately
-    return None
-
-
-def _parse_freg(tok: str) -> Optional[int]:
-    t = tok.strip().rstrip(",").lower()
-    if t in FREG_ALIASES:
-        return FREG_ALIASES[t]
-    return None
+    return REG_ALIASES.get(t)
 
 
 def _parse_imm(tok: str) -> Optional[int]:
@@ -259,9 +248,7 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
         # --- Load instructions ---
         if m in _MEMORY_READS:
             if len(ops) >= 2:
-                insn.rd = REG_ALIASES.get(ops[0].lower())
-                if insn.rd is None and ops[0].lower() in FREG_ALIASES:
-                    insn.frd = FREG_ALIASES[ops[0].lower()]
+                insn.rd = _parse_reg(ops[0])
                 imm, rs1 = _parse_mem_operand(ops[1])
                 insn.imm = imm
                 insn.rs1 = rs1
@@ -270,9 +257,7 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
         # --- Store instructions ---
         if m in _MEMORY_WRITES:
             if len(ops) >= 2:
-                insn.rs2 = REG_ALIASES.get(ops[0].lower())
-                if insn.rs2 is None and ops[0].lower() in FREG_ALIASES:
-                    insn.frs2 = FREG_ALIASES[ops[0].lower()]
+                insn.rs2 = _parse_reg(ops[0])
                 imm, rs1 = _parse_mem_operand(ops[1])
                 insn.imm = imm
                 insn.rs1 = rs1
@@ -325,28 +310,13 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                                        "fmv.x.w", "fmv.x.d", "fle.s", "flt.s", "feq.s",
                                        "fle.d", "flt.d", "feq.d"):
             if len(ops) >= 1:
-                # Try float dest first
-                frd = _parse_freg(ops[0])
-                if frd is not None:
-                    insn.frd = frd
-                else:
-                    insn.rd = REG_ALIASES.get(ops[0].lower())
+                insn.rd = _parse_reg(ops[0])
                 if len(ops) >= 2:
-                    frs1 = _parse_freg(ops[1])
-                    if frs1 is not None:
-                        insn.frs1 = frs1
-                    else:
-                        insn.rs1 = REG_ALIASES.get(ops[1].lower())
+                    insn.rs1 = _parse_reg(ops[1])
                 if len(ops) >= 3:
-                    frs2 = _parse_freg(ops[2])
-                    if frs2 is not None:
-                        insn.frs2 = frs2
-                    else:
-                        insn.rs2 = REG_ALIASES.get(ops[2].lower())
+                    insn.rs2 = _parse_reg(ops[2])
                 if len(ops) >= 4:
-                    frs3 = _parse_freg(ops[3])
-                    if frs3 is not None:
-                        insn.frs3 = frs3
+                    insn.rs3 = _parse_reg(ops[3])
             return insn
 
         # --- Fence ---
@@ -490,7 +460,7 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
                 for tok in reversed(parts[1:]):
                     t = tok.strip().rstrip(",")
                     if t and t[0].isalpha() or (t and t[0] == '.') or (t and t[0] == '_'):
-                        if t not in REG_ALIASES and t not in FREG_ALIASES:
+                        if t not in REG_ALIASES:
                             branch_targets.add(t)
                             break
 

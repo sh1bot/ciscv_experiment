@@ -33,11 +33,9 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
         if i < j:
             edges[i].add(j)
 
-    # Track last writer and readers for each register
-    last_int_writer: dict = {}   # reg -> last writer index
-    last_float_writer: dict = {}
-    int_readers: dict = {}       # reg -> list of reader indices
-    float_readers: dict = {}
+    # Track last writer and readers for each register (unified 0–63)
+    last_writer: dict = {}   # reg -> last writer index
+    readers: dict = {}       # reg -> list of reader indices
 
     # Memory dependency tracking
     last_mem_op: int = -1        # index of last memory operation
@@ -67,53 +65,40 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
             # queries, add the direct edge.
 
         # --- Register RAW/WAW/WAR edges ---
-        for reg in insn.uses_int:
+        for reg in insn.uses_regs:
             # RAW: if there's a writer before us, we depend on it
-            if reg in last_int_writer:
-                add_edge(last_int_writer[reg], i)
+            if reg in last_writer:
+                add_edge(last_writer[reg], i)
             # Track us as a reader
-            int_readers.setdefault(reg, []).append(i)
+            readers.setdefault(reg, []).append(i)
 
-        for reg in insn.uses_float:
-            if reg in last_float_writer:
-                add_edge(last_float_writer[reg], i)
-            float_readers.setdefault(reg, []).append(i)
-
-        for reg in insn.defs_int:
+        for reg in insn.defs_regs:
             # WAR: all readers before us must complete before we write
-            for j in int_readers.get(reg, []):
+            for j in readers.get(reg, []):
                 add_edge(j, i)
             # WAW: last writer before us
-            if reg in last_int_writer:
-                add_edge(last_int_writer[reg], i)
-            last_int_writer[reg] = i
+            if reg in last_writer:
+                add_edge(last_writer[reg], i)
+            last_writer[reg] = i
             # Clear old readers for this reg (they all now precede us)
-            int_readers[reg] = []
-
-        for reg in insn.defs_float:
-            for j in float_readers.get(reg, []):
-                add_edge(j, i)
-            if reg in last_float_writer:
-                add_edge(last_float_writer[reg], i)
-            last_float_writer[reg] = i
-            float_readers[reg] = []
+            readers[reg] = []
 
         # --- ABI-implied register effects ---
         from isa.abi import call_liveness_effect
-        imp_use_i, imp_def_i, imp_use_f, imp_def_f, _, _, _ = call_liveness_effect(insn)
+        imp_use, imp_def, _, _ = call_liveness_effect(insn)
 
-        for reg in imp_use_i:
-            if reg in last_int_writer:
-                add_edge(last_int_writer[reg], i)
-            int_readers.setdefault(reg, []).append(i)
+        for reg in imp_use:
+            if reg in last_writer:
+                add_edge(last_writer[reg], i)
+            readers.setdefault(reg, []).append(i)
 
-        for reg in imp_def_i:
-            for j in int_readers.get(reg, []):
+        for reg in imp_def:
+            for j in readers.get(reg, []):
                 add_edge(j, i)
-            if reg in last_int_writer:
-                add_edge(last_int_writer[reg], i)
-            last_int_writer[reg] = i
-            int_readers[reg] = []
+            if reg in last_writer:
+                add_edge(last_writer[reg], i)
+            last_writer[reg] = i
+            readers[reg] = []
 
         # --- Memory ordering edges ---
         is_mem = insn.reads_memory or insn.writes_memory
@@ -141,7 +126,7 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
                             if not has_unknown:
                                 # Check base reg not written between them
                                 base_modified = any(
-                                    insn.rs1 in insns[k].defs_int
+                                    insn.rs1 in insns[k].defs_regs
                                     for k in range(prev_idx + 1, i)
                                 )
                                 if not base_modified:
@@ -178,7 +163,7 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
             if i + 1 < n:
                 next_insn = insns[i + 1]
                 if (next_insn.rs1 == insn.rd or next_insn.rs2 == insn.rd or
-                        insn.rd in next_insn.uses_int):
+                        insn.rd in next_insn.uses_regs):
                     add_edge(i, i + 1)
 
     return DepGraph(instructions=insns, edges=edges)

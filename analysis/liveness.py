@@ -5,6 +5,9 @@ Two-phase approach:
 1. Global pass: iterative backward dataflow over the CFG of a function.
 2. Local pass: backward propagation within each block, assigning
    live_in/live_out to every individual Instruction.
+
+A single frozenset[int] domain covers all registers (indices 0–31 integer,
+32–63 float); there is no separate float domain.
 """
 
 from __future__ import annotations
@@ -13,88 +16,61 @@ from collections import deque
 from typing import Optional
 
 from isa.abi import call_liveness_effect
-from isa.registers import CALLEE_SAVED, FCALLEE_SAVED
+from isa.registers import CALLEE_SAVED
 
 
 @dataclass
 class LivenessResult:
     """Result of global liveness pass over a set of blocks."""
-    live_in_int:    dict = field(default_factory=dict)   # label -> frozenset[int]
-    live_out_int:   dict = field(default_factory=dict)
-    live_in_float:  dict = field(default_factory=dict)
-    live_out_float: dict = field(default_factory=dict)
+    live_in:    dict = field(default_factory=dict)   # label -> frozenset[int]
+    live_out:   dict = field(default_factory=dict)
 
 
-def _block_use_def(block) -> tuple[frozenset, frozenset, frozenset, frozenset, bool, frozenset, frozenset]:
+def _block_use_def(block) -> tuple[frozenset, frozenset, bool, frozenset]:
     """Compute use[B], def[B] for a block.
 
     Returns:
-      use_int, def_int, use_float, def_float,
-      terminates, exit_seed_int, exit_seed_float
+      use, def, terminates, exit_seed
     """
-    use_int   = set()
-    def_int   = set()
-    use_float = set()
-    def_float = set()
+    use_set   = set()
+    def_set   = set()
     terminates = False
-    exit_seed_int   = frozenset()
-    exit_seed_float = frozenset()
+    exit_seed  = frozenset()
 
     for insn in block.instructions:
         # ABI effects first
-        (imp_use_i, imp_def_i,
-         imp_use_f, imp_def_f,
-         seed_i, seed_f,
-         term) = call_liveness_effect(insn)
+        imp_use, imp_def, seed, term = call_liveness_effect(insn)
 
         if term:
             terminates = True
-            exit_seed_int   = seed_i
-            exit_seed_float = seed_f
+            exit_seed  = seed
 
-        # For ABI-controlled instructions (call/ret/tail and their encoded forms),
-        # use ONLY the ABI implicit uses, not the raw register operands.
-        # This prevents ra (x1) from appearing as a live use of "ret".
-        is_abi = bool(imp_use_i or imp_use_f or imp_def_i or imp_def_f or
-                      seed_i or seed_f or term)
+        # For ABI-controlled instructions, use ONLY the ABI implicit uses,
+        # not the raw register operands.
+        is_abi = bool(imp_use or imp_def or seed or term)
 
         if not is_abi:
-            # Integer uses: instruction's explicit uses
-            for r in insn.uses_int:
-                if r not in def_int:
-                    use_int.add(r)
+            for r in insn.uses_regs:
+                if r not in def_set:
+                    use_set.add(r)
+
         # ABI implicit uses always added
-        for r in imp_use_i:
-            if r not in def_int:
-                use_int.add(r)
+        for r in imp_use:
+            if r not in def_set:
+                use_set.add(r)
 
-        # Integer defs
-        def_int.update(insn.defs_int)
-        def_int.update(imp_def_i)
+        # Defs
+        def_set.update(insn.defs_regs)
+        def_set.update(imp_def)
 
-        if not is_abi:
-            # Float uses
-            for r in insn.uses_float:
-                if r not in def_float:
-                    use_float.add(r)
-        for r in imp_use_f:
-            if r not in def_float:
-                use_float.add(r)
-
-        # Float defs
-        def_float.update(insn.defs_float)
-        def_float.update(imp_def_f)
-
-    return (frozenset(use_int), frozenset(def_int),
-            frozenset(use_float), frozenset(def_float),
-            terminates, exit_seed_int, exit_seed_float)
+    return (frozenset(use_set), frozenset(def_set), terminates, exit_seed)
 
 
 def compute_global_liveness(blocks: list) -> LivenessResult:
     """Standard iterative backward dataflow over a list of BasicBlocks.
 
     Blocks may belong to multiple functions; each function_entry block
-    gets ARG_REGS / FARG_REGS permanently unioned into its live_in.
+    gets CALLEE_SAVED permanently unioned into its live_in.
 
     The list of blocks is treated as a single analysis unit (function scope).
     Blocks are identified by their .label attribute.
@@ -104,10 +80,8 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
     # Initialize
     for bb in blocks:
         key = bb.label
-        result.live_in_int[key]    = frozenset()
-        result.live_out_int[key]   = frozenset()
-        result.live_in_float[key]  = frozenset()
-        result.live_out_float[key] = frozenset()
+        result.live_in[key]  = frozenset()
+        result.live_out[key] = frozenset()
 
     # Pre-compute use/def for each block
     use_def = {}
@@ -123,44 +97,27 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
         key = bb.label
         in_worklist[key] = False
 
-        (use_i, def_i, use_f, def_f,
-         terminates, exit_seed_i, exit_seed_f) = use_def[key]
+        use, defs, terminates, exit_seed = use_def[key]
 
         # --- Compute live_out ---
         if terminates:
-            # No successors contribute; live_out = exit_seed (applied every iteration)
-            new_out_i = exit_seed_i
-            new_out_f = exit_seed_f
+            new_out = exit_seed
         else:
-            new_out_i = exit_seed_i  # always union exit_seed (may be empty)
-            new_out_f = exit_seed_f
+            new_out = exit_seed  # may be empty for non-terminating blocks
             for succ in bb.successors:
-                new_out_i = new_out_i | result.live_in_int[succ.label]
-                new_out_f = new_out_f | result.live_in_float[succ.label]
+                new_out = new_out | result.live_in[succ.label]
 
         # --- Compute live_in ---
-        new_in_i = use_i | (new_out_i - def_i)
-        new_in_f = use_f | (new_out_f - def_f)
+        new_in = use | (new_out - defs)
 
-        # ENTRY_SEED: function-entry blocks with at least one instruction have
-        # CALLEE_SAVED registers considered live at entry (the caller placed values
-        # there; the function must preserve them). Applied without kill analysis
-        # (additive per-iteration term per plan §7).
-        # Empty blocks (no instructions) are excluded to avoid spurious liveness.
+        # ENTRY_SEED: function-entry blocks get CALLEE_SAVED permanently unioned in
         if bb.is_function_entry and bb.instructions:
-            new_in_i = new_in_i | CALLEE_SAVED
-            new_in_f = new_in_f | FCALLEE_SAVED
+            new_in = new_in | CALLEE_SAVED
 
         # Check for change
-        if (new_in_i  != result.live_in_int[key]  or
-            new_out_i != result.live_out_int[key]  or
-            new_in_f  != result.live_in_float[key] or
-            new_out_f != result.live_out_float[key]):
-
-            result.live_in_int[key]    = new_in_i
-            result.live_out_int[key]   = new_out_i
-            result.live_in_float[key]  = new_in_f
-            result.live_out_float[key] = new_out_f
+        if new_in != result.live_in[key] or new_out != result.live_out[key]:
+            result.live_in[key]  = new_in
+            result.live_out[key] = new_out
 
             # Re-add predecessors to worklist
             for pred in bb.predecessors:
@@ -180,38 +137,25 @@ def compute_local_liveness(block, global_result: LivenessResult) -> None:
     key = block.label
 
     # Seed from global live_out
-    live_i = global_result.live_out_int.get(key, frozenset())
-    live_f = global_result.live_out_float.get(key, frozenset())
+    live = global_result.live_out.get(key, frozenset())
 
     for insn in reversed(block.instructions):
         # ABI effects
-        (imp_use_i, imp_def_i,
-         imp_use_f, imp_def_f,
-         seed_i, seed_f,
-         term) = call_liveness_effect(insn)
+        imp_use, imp_def, seed, term = call_liveness_effect(insn)
 
         # Apply mid-block call seed: union current live with seed BEFORE setting live_out
-        # Per plan §7: "live_out for the call is unioned with its live_out_seed"
-        if seed_i or seed_f:
-            live_i = live_i | seed_i
-            live_f = live_f | seed_f
+        if seed:
+            live = live | seed
 
         # live_out of this instruction = current live set (after seed application)
-        insn.live_out  = frozenset(live_i)
-        insn.flive_out = frozenset(live_f)
+        insn.live_out = frozenset(live)
 
         # live_in = (live_out - defs) ∪ uses
-        # For ABI-controlled instructions, use only ABI implicit uses (not raw operands)
-        is_abi = bool(imp_use_i or imp_use_f or imp_def_i or imp_def_f or
-                      seed_i or seed_f or term)
+        is_abi = bool(imp_use or imp_def or seed or term)
         if is_abi:
-            raw_uses_i = frozenset()
-            raw_uses_f = frozenset()
+            raw_uses = frozenset()
         else:
-            raw_uses_i = insn.uses_int
-            raw_uses_f = insn.uses_float
-        live_i = (live_i - insn.defs_int - imp_def_i) | raw_uses_i | imp_use_i
-        live_f = (live_f - insn.defs_float - imp_def_f) | raw_uses_f | imp_use_f
+            raw_uses = insn.uses_regs
 
-        insn.live_in  = frozenset(live_i)
-        insn.flive_in = frozenset(live_f)
+        live = (live - insn.defs_regs - imp_def) | raw_uses | imp_use
+        insn.live_in = frozenset(live)
