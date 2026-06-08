@@ -138,14 +138,6 @@ the encoded register operands still constrain ordering.  The CFG gives this bloc
 no successors (register-computed target, treat as function exit), consistent with
 `terminates_function = True`.
 
-**Unclassified `jalr`.**  A `jalr` that writes a register other than `x0`, `ra`,
-or `t0` does not match any row above.  Such instructions are exotic in practice
-(no standard RISC-V ABI usage), but when they occur they are treated as no-ops
-from an ABI perspective: `call_liveness_effect()` returns all-empty sets and
-`terminates_function = False`.  The dep-graph edges from the encoded register
-operands still constrain ordering correctly for any downstream use of the link
-value.
-
 `t0` (x5) is treated as a link register alongside `ra` (x1) because the RISC-V
 psABI designates it as the alternate link register for linker call stubs.
 
@@ -207,6 +199,7 @@ All are derived from the stored fields; none are stored separately.
 | `is_branch` | conditional branch (two CFG successors) |
 | `is_jump` | unconditional jump (JAL, JALR — one or zero successors) |
 | `is_call` | mnemonic `"call"`, or JAL/JALR writing `ra` (x1) or `t0` (x5) — covers both the unexpanded `call` pseudo and the encoded form |
+| `is_tail` | mnemonic `"tail"` — the unexpanded tail-call pseudo; not expanded, not a jump or call in the encoded sense, but transfers control and must not be in A-slot |
 | `is_return` | `jalr x0, ra, 0` |
 | `is_csr` | accesses a CSR |
 | `is_fence` | FENCE / FENCE.I |
@@ -357,7 +350,7 @@ in `range(8, 16)`):
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
 | `c.sd rs2', imm(rs1')` | RV64: `sd rs2, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
 | `c.addi rd, nzimm` | `addi rd, rd, imm` — `rd == rs1`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
-| `c.addiw rd, imm` | RV64: `addiw rd, rd, imm` — `rd == rs1`, rd ≠ x0, imm ≠ 0, fits 6 signed bits |
+| `c.addiw rd, imm` | RV64: `addiw rd, rd, imm` — `rd == rs1`, rd ≠ x0, fits 6 signed bits (imm=0 encodes `sext.w`, which is valid) |
 | `c.li rd, imm` | `addi rd, x0, imm` — rd ≠ x0, fits 6 signed bits |
 | `c.addi16sp imm` | `addi x2, x2, imm` — `rd == rs1`, rd = x2, imm ≠ 0, fits 10 signed bits (16-byte aligned) |
 | `c.lui rd, nzimm` | `lui rd, nzimm` — rd ≠ x0, rd ≠ x2, nzimm ≠ 0, fits 6 signed bits (×4096) |
@@ -427,8 +420,9 @@ class BasicBlock:
 | `jalr` (not a call, rd = x0) | no successors — treated as tail call or indirect jump (see §2) |
 | `jalr` (not a call, rd ≠ x0) | no successors — register-computed target, unclassified; `terminates_function = True` in §2 |
 | `ret` / `jalr x0, ra, 0` | no successors |
-| `call` / `jal x1` | fall-through only (callee is opaque) |
+| `call` / any JAL or JALR writing ra (x1) or t0 (x5) | fall-through only (callee is opaque) |
 | `tail` | no successors — tail call terminates function |
+| `ecall` / `ebreak` | fall-through only (treated as a side-effecting call with no register ABI) |
 | Fall-through (non-terminator last instruction) | next block |
 
 ### Function grouping
@@ -499,13 +493,24 @@ applied at the block level — it is applied in the **local pass** when the
 backward propagation reaches the call instruction.  At that point `live_out` for
 the call is unioned with its `live_out_seed` before propagating further backward.
 
-**Function-entry seed.**  Blocks with `is_function_entry = True` have their
-`live_in` pre-loaded with `ARG_REGS ∪ FARG_REGS` (integer and float argument
-registers respectively), since the caller may have passed values in any of them.
-`is_function_entry` is set for blocks headed by `.globl`-declared labels.
-`.weak` symbols are also treated as function entries for this purpose, since
-weak aliases are commonly used as alternate entry points with the same calling
-convention.
+**Function-entry seed.**  Blocks with `is_function_entry = True` permanently
+union `ARG_REGS` (integer) and `FARG_REGS` (float) into their `live_in` on
+every dataflow iteration, since the caller may have passed values in any of
+them.  This is an additive term in the fixed-point equation, not a one-time
+pre-load:
+
+```
+live_in[B] = use[B]  ∪  (live_out[B] − def[B])  ∪  ENTRY_SEED[B]
+
+where ENTRY_SEED[B] = ARG_REGS ∪ FARG_REGS   if is_function_entry(B)
+                    = ∅                         otherwise
+```
+
+Pre-loading would be overwritten on convergence; the union must be re-applied
+each iteration so the seed is never lost.  `is_function_entry` is set for
+blocks headed by `.globl`-declared labels.  `.weak` symbols are also treated as
+function entries for this purpose, since weak aliases are commonly used as
+alternate entry points with the same calling convention.
 
 **`ret` seed conservatism.**  The `live_out_seed` for a return instruction is
 `CALLEE_SAVED ∪ FCALLEE_SAVED ∪ RET_REGS ∪ FRET_REGS`.  Including the full
@@ -541,9 +546,9 @@ for correctness.
   appears between them** (unknown instructions may have undeclared memory effects)
   — and non-overlapping byte ranges (same offset ± access width) have this edge
   dropped.
-- **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, `call`,
-  and `tail` instructions get ordering edges from all preceding instructions
-  in the block.  Unknown instructions (`is_unknown`) are **not** treated as
+- **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, CSR
+  instructions (`is_csr`), `call`, and `tail` instructions get ordering edges
+  from all preceding instructions in the block.  Unknown instructions (`is_unknown`) are **not** treated as
   full barriers; they receive conservative memory ordering edges against all
   adjacent memory operations (see below), but other non-memory instructions
   may still be reordered around them if the register-dependency edges permit.
@@ -621,6 +626,7 @@ A_SLOT_DISQUALIFIERS = [
     "is_jump",      # same applies to unconditional jumps and returns
     "is_return",
     "is_call",      # calls belong in B-slot only (see below)
+    "is_tail",      # tail-call pseudo transfers control; not a JAL/JALR so not caught by is_jump
 ]
 
 B_SLOT_DISQUALIFIERS = [
@@ -753,9 +759,14 @@ exact calls:
 for each (free, curr) pair tested during the pairing pass:
     reason = can_pair(free, curr)
     if reason is not None:
-        free.solo_reasons.add(reason)   # free failed as A-slot against curr
-        curr.solo_reasons.add(reason)   # curr failed as B-slot against free
+        free.solo_reasons.add(reason)   # always: free was rejected in this attempt
+        if reason not from A_SLOT_DISQUALIFIERS:
+            curr.solo_reasons.add(reason)  # only when the reason is not A-slot-specific
 ```
+
+A-slot disqualifier reasons (e.g. `"is_call"`, `"is_tail"`) describe a property
+of `free`, not of `curr`.  Adding them to `curr.solo_reasons` would falsely
+imply that `curr` was itself the problem.
 
 In `--fast` (forward-scan) mode each instruction is tested against at most one
 adjacent candidate.  In list-scheduling and BnB modes the ready queue may cause
@@ -904,7 +915,8 @@ Fields in the comment:
 - `{solo}` — unpaired with no rejection reason recorded.
 - `{solo: reason1, reason2}` — unpaired; the reasons are the deduplicated union
   of all `can_pair()` rejection strings collected for this instruction across
-  all adjacent candidates examined during the pairing pass.
+  all adjacent candidates examined during the pairing pass.  Reasons are sorted
+  lexicographically before rendering for deterministic output.
 
 With `--annotate-liveness`, the live-in set is also appended to the comment.
 
@@ -926,7 +938,8 @@ Options:
   --annotate-liveness      Include live-in register sets in comments
   -v, --verbose            Show all candidate pairs tested during scheduling,
                            not just the ones that appear in final output
-                           (default: only solo_reasons on unpaired instructions)
+                           (default: only solo_reasons on unpaired instructions);
+                           verbose output goes to stderr
 ```
 
 If both `--fast` and `--thorough` are given, `--thorough` takes precedence.
