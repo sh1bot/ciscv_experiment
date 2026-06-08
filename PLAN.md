@@ -118,6 +118,14 @@ are the fallback for assembler output that has already expanded pseudo-instructi
 tail-call use sets; it is listed explicitly in the call and indirect-jump rows
 where it would otherwise be absent.
 
+**Unclassified `jalr`.**  A `jalr` that writes a register other than `x0`, `ra`,
+or `t0` does not match any row above.  Such instructions are exotic in practice
+(no standard RISC-V ABI usage), but when they occur they are treated as no-ops
+from an ABI perspective: `call_liveness_effect()` returns all-empty sets and
+`terminates_function = False`.  The dep-graph edges from the encoded register
+operands still constrain ordering correctly for any downstream use of the link
+value.
+
 `t0` (x5) is treated as a link register alongside `ra` (x1) because the RISC-V
 psABI designates it as the alternate link register for linker call stubs.
 
@@ -466,6 +474,19 @@ come directly from the §2 table; there is no separate seed specification.
 **Function-entry seed.**  Blocks with `is_function_entry = True` have their
 `live_in` pre-loaded with `ARG_REGS ∪ FARG_REGS` (integer and float argument
 registers respectively), since the caller may have passed values in any of them.
+`is_function_entry` is set for blocks headed by `.globl`-declared labels.
+`.weak` symbols are also treated as function entries for this purpose, since
+weak aliases are commonly used as alternate entry points with the same calling
+convention.
+
+**`ret` seed conservatism.**  The `live_out_seed` for a return instruction is
+`CALLEE_SAVED ∪ FCALLEE_SAVED ∪ RET_REGS ∪ FRET_REGS`.  Including the full
+callee-saved sets is intentionally conservative: it ensures that any instruction
+that restores a callee-saved register (e.g. `lw s0, 0(sp)`) has a dep-graph edge
+to the `ret`, preventing reordering that would place the restore after the return.
+It does not prevent dead callee-saved registers from being scheduled freely
+earlier in the function — the scheduler does not eliminate dead writes, only
+orders instructions.
 
 ### Local pass
 
@@ -496,8 +517,14 @@ for correctness.
   and `tail` instructions get ordering edges from all preceding instructions
   in the block.  Unknown instructions (`is_unknown`) are **not** treated as
   full barriers; they receive conservative memory ordering edges against all
-  adjacent memory operations, but other non-memory instructions may still be
-  reordered around them if the register-dependency edges permit.
+  adjacent memory operations (see below), but other non-memory instructions
+  may still be reordered around them if the register-dependency edges permit.
+- **Unknown-instruction memory edges**: `build_dep_graph` checks `is_unknown`
+  directly — it does not rely on `reads_memory` or `writes_memory`, which are
+  only set for recognised load/store mnemonics.  When an unknown instruction
+  is present, a memory ordering edge is inserted between it and every
+  memory operation that precedes or follows it within the block, conservatively
+  treating it as both a load and a store.
 
 ```python
 @dataclass
@@ -574,6 +601,13 @@ B_SLOT_DISQUALIFIERS = [
 Calls are A-slot disqualified because placing a call in A-slot would transfer
 control before the B-slot instruction executes.  In B-slot a call executes after
 the A-slot instruction completes, which is the intended sequencing.
+
+**Branches and jumps in B-slot** are explicitly permitted by the packet format:
+the B-slot instruction executes after A-slot, so a branch or jump in B-slot
+redirects control after A has committed — which is correct.  This is why
+`is_branch`, `is_jump`, and `is_return` appear only in `A_SLOT_DISQUALIFIERS`
+and not in `B_SLOT_DISQUALIFIERS`.  Pairing an ALU instruction in A-slot with a
+branch in B-slot is a meaningful optimisation target.
 
 ### Rule evaluation contract
 
@@ -687,14 +721,25 @@ dependency graph that maximises the number of pairs under this exact model.
 
 ### Rejection reason collection
 
-After the reorder pass fixes the instruction order and liveness is recomputed,
-the annotator calls `can_pair()` on each adjacent pair `(insn[i], insn[i+1])` in
-the final ordered output and records the reason string.  The `solo_reasons` for
-each instruction is a **set of strings** so that multiple distinct rejection
-reasons from different adjacent candidates can be accumulated and deduplicated.
-The coverage of reasons naturally varies by scheduling mode (the forward-scan
-mode only ever sees one candidate per instruction; the reorder modes may surface
-more), and that is acceptable.
+After the reorder pass and liveness recomputation, the pairing pass runs the
+greedy-advance model and simultaneously populates `solo_reasons` on each
+unpaired instruction.  The accumulation loop is:
+
+```
+for each instruction insn emitted solo:
+    # examine all instructions that were considered as pairing candidates
+    for each candidate cand that was tested against insn:
+        reason = can_pair(insn, cand)   # insn as A-slot
+        if reason: insn.solo_reasons.add(reason)
+        reason = can_pair(cand, insn)   # insn as B-slot
+        if reason: insn.solo_reasons.add(reason)
+```
+
+In `--fast` (forward-scan) mode each instruction has at most one adjacent
+candidate, so `solo_reasons` holds at most one string.  In list-scheduling and
+BnB modes the ready queue may offer multiple candidates, and all tested
+rejections are accumulated.  Using a set deduplicates identical reasons from
+different candidates.
 
 ---
 
