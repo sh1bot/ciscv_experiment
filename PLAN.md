@@ -196,6 +196,8 @@ All are derived from the stored fields; none are stored separately.
 | `writes_rd` | `rd is not None` |
 | `writes_memory` | store instruction |
 | `reads_memory` | load instruction |
+| `access_width` | byte width of the memory access (1/2/4/8), or `None` for non-memory instructions — inferred from the mnemonic (lb/sb=1, lh/sh=2, lw/sw/flw/fsw=4, ld/sd/fld/fsd=8) |
+| `access_shift` | `int.bit_length(access_width) - 1` when `access_width` is not None, else `None` — the natural alignment shift; use as the `shift` argument to `imm_fits`/`uimm_fits` when checking whether an offset is naturally aligned |
 | `is_branch` | conditional branch (two CFG successors) |
 | `is_jump` | unconditional jump (JAL, JALR — one or zero successors) |
 | `is_call` | mnemonic `"call"`, or JAL/JALR writing `ra` (x1) or `t0` (x5) — covers both the unexpanded `call` pseudo and the encoded form |
@@ -227,9 +229,46 @@ from the `uses_int`/`defs_int` computed sets.
 Helper predicates (used internally by decoders and rules):
 
 ```python
-def imm_bits(self, n: int) -> bool:   # imm fits in a signed n-bit field
-def uimm_bits(self, n: int) -> bool:  # imm fits in an unsigned n-bit field
+def imm_bits(self, n: int) -> bool:
+    """True if self.imm fits in a signed n-bit two's-complement field."""
+
+def uimm_bits(self, n: int) -> bool:
+    """True if self.imm fits in an unsigned n-bit field (0 ≤ imm < 2**n)."""
+
+def imm_multiple(self, shift: int) -> bool:
+    """True if self.imm is a non-None multiple of (1 << shift).
+    Equivalent to (imm & ((1 << shift) - 1)) == 0.
+    shift=0 always returns True (every integer is a multiple of 1).
+    shift=1 → 2-byte aligned, shift=2 → 4-byte aligned, etc."""
+
+def imm_fits(self, n: int, shift: int = 0) -> bool:
+    """Combined signed-range + alignment check.
+    True iff imm_bits(n) and imm_multiple(shift).
+    Equivalent to: imm fits in a signed n-bit field whose low `shift`
+    bits are implicitly zero (the field encodes imm >> shift in n bits).
+    This is the standard RISC-V load/store offset encoding:
+      - lw/sw:  imm_fits(12, 0)  — full 12-bit signed, byte granular
+      - c.lw:   imm_fits(7, 2)   — 7-bit unsigned × 4 (use uimm_fits)
+    For unsigned variants use uimm_fits()."""
+
+def uimm_fits(self, n: int, shift: int = 0) -> bool:
+    """Combined unsigned-range + alignment check.
+    True iff uimm_bits(n) and imm_multiple(shift)."""
 ```
+
+The `shift` parameter reflects how memory instructions encode their offsets: a
+`lw` with a 4-byte-aligned offset can store `offset >> 2` in fewer bits (as in
+the C-extension encodings) while still representing a wider byte range.  Rules
+that test whether two adjacent loads/stores can share an encoding call
+`imm_fits` / `uimm_fits` with the appropriate `n` and `shift` for the target
+encoding.
+
+**Access width from opcode.**  Load and store mnemonics encode the access size
+in the opcode (`lb`/`sb` = 1, `lh`/`sh` = 2, `lw`/`sw` = 4, `ld`/`sd` = 8,
+etc.).  An `access_width` property returns this as an integer, or `None` for
+non-memory instructions.  Pairing rules that need the natural alignment shift
+use `int.bit_length(access_width) - 1` to derive `shift` (e.g. width 4 →
+shift 2).
 
 ---
 
