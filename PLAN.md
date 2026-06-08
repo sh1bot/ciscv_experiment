@@ -239,34 +239,44 @@ def imm_multiple(self, shift: int) -> bool:
     """True if self.imm is a non-None multiple of (1 << shift).
     Equivalent to (imm & ((1 << shift) - 1)) == 0.
     shift=0 always returns True (every integer is a multiple of 1).
-    shift=1 → 2-byte aligned, shift=2 → 4-byte aligned, etc."""
+    shift=1 → 2-byte aligned, shift=2 → 4-byte aligned, etc.
+    Note: zero is always a multiple of any power of 2."""
 
-def imm_fits(self, n: int, shift: int = 0) -> bool:
-    """Combined signed-range + alignment check.
-    True iff imm_bits(n) and imm_multiple(shift).
+def imm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
+    """Combined signed-range + alignment + optional nonzero check.
+    True iff imm_bits(n) and imm_multiple(shift) and (imm != 0 if nonzero).
     Equivalent to: imm fits in a signed n-bit field whose low `shift`
     bits are implicitly zero (the field encodes imm >> shift in n bits).
-    This is the standard RISC-V load/store offset encoding:
-      - lw/sw:  imm_fits(12, 0)  — full 12-bit signed, byte granular
-      - c.lw:   imm_fits(7, 2)   — 7-bit unsigned × 4 (use uimm_fits)
-    For unsigned variants use uimm_fits().
+    nonzero=True is needed for encodings that reserve the all-zero
+    immediate for a different meaning (e.g. c.addi nzimm, c.lui nzimm).
     Examples:
-      lw/sw:  imm_fits(12, 0)   — 12-bit signed, byte-granular
-      c.lwsp: uimm_fits(8, 2)   — 8-bit unsigned offset, 4-byte aligned"""
+      lw/sw:       imm_fits(12)         — 12-bit signed, zero allowed
+      c.addi:      imm_fits(6, nonzero=True)  — 6-bit signed, nzimm
+      c.lui:       imm_fits(6, nonzero=True)  — 6-bit signed ×4096, nzimm
+    For unsigned variants use uimm_fits()."""
 
-def uimm_fits(self, n: int, shift: int = 0) -> bool:
-    """Combined unsigned-range + alignment check.
-    True iff uimm_bits(n) and imm_multiple(shift).
+def uimm_fits(self, n: int, shift: int = 0, nonzero: bool = False) -> bool:
+    """Combined unsigned-range + alignment + optional nonzero check.
+    True iff uimm_bits(n) and imm_multiple(shift) and (imm != 0 if nonzero).
+    nonzero=True is needed for encodings that disallow a zero immediate
+    (e.g. c.addi4spn nzuimm, c.slli/c.srli/c.srai nzuimm shamt).
     Examples:
-      c.lw:   uimm_fits(7, 2)   — 7-bit unsigned offset, 4-byte aligned
-      c.ld:   uimm_fits(8, 3)   — 8-bit unsigned offset, 8-byte aligned"""
+      c.lw/c.sw:   uimm_fits(7, 2)              — 7-bit, 4-aligned, zero ok
+      c.addi4spn:  uimm_fits(10, 2, nonzero=True) — 10-bit, 4-aligned, nzuimm
+      c.slli shamt: uimm_fits(6, nonzero=True)   — 6-bit, nonzero shamt"""
 ```
+
+The `nonzero` parameter reflects the RISC-V C-extension convention of reserving
+the all-zero immediate encoding for a different instruction or as an illegal
+encoding (`nzimm` / `nzuimm` in the spec).  Zero immediates are valid for most
+load/store offsets but invalid for shift amounts and some arithmetic encodings.
 
 The `shift` parameter reflects how memory instructions encode their offsets: a
 `c.lw` with a 4-byte-aligned offset stores `offset >> 2` in 5 bits (the
 C-extension field), reaching a 7-bit unsigned byte range.  Rules that test
 whether two adjacent loads/stores can share an encoding call `imm_fits` /
-`uimm_fits` with the appropriate `n` and `shift` for the target encoding.
+`uimm_fits` with the appropriate `n`, `shift`, and `nonzero` for the target
+encoding.
 
 **Access width from opcode.**  Load and store mnemonics encode the access size
 in the opcode (`lb`/`sb` = 1, `lh`/`sh` = 2, `lw`/`sw` = 4, `ld`/`sd` = 8,
@@ -402,7 +412,7 @@ in `range(8, 16)`):
 
 | RVC encoding | Condition on the base instruction |
 |---|---|
-| `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, `4 ≤ imm ≤ 1020`, multiple of 4 (imm must be strictly positive; negative or zero values are not encodable) |
+| `c.addi4spn rd', nzuimm` | `addi rd, x2, nzuimm` — rd' in 8–15, `uimm_fits(10, 2, nonzero=True)` (encodes bits [9:2] of a 10-bit unsigned offset; zero is reserved) |
 | `c.lw rd', imm(rs1')` | `lw rd, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.sw rs2', imm(rs1')` | `sw rs2, imm(rs1)` — both in 8–15, uimm fits 7 bits (4-byte aligned) |
 | `c.ld rd', imm(rs1')` | RV64: `ld rd, imm(rs1)` — both in 8–15, uimm fits 8 bits (8-byte aligned) |
