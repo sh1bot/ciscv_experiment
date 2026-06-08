@@ -10,6 +10,16 @@ instructions sharing a single 32-bit word.  All instruction boundaries remain
 project; they are deliberately isolated so that iterating on them requires only
 local edits to one file.
 
+**Execution model.**  Within a packet, the A-slot instruction executes first and
+completes before the B-slot instruction begins.  B may freely read registers
+written by A; A is unaffected by anything B does.  This is sequential execution
+in hardware — the only difference from two consecutive unpaired instructions is
+code density.  Consequently, register data-dependencies within a pair are not a
+pairing constraint; they are already enforced by the dependency graph which
+places B after A in the instruction ordering.  Pairing rules express only
+*hardware structural constraints* — what instruction-type combinations the packet
+format can physically encode — not register compatibility.
+
 RVC eligibility is computed and annotated independently.  It has no effect on
 pairing decisions — it is informational only.
 
@@ -538,7 +548,9 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
 ```
 
 The list scheduler and BnB both operate on a `DepGraph` and only emit orderings
-that are topological sorts of it.
+that are topological sorts of it.  Because pairs execute sequentially (A then B),
+all intra-pair data dependencies are automatically satisfied by the ordering;
+the dep-graph does not need to be consulted again by pairing rules.
 
 ---
 
@@ -628,15 +640,14 @@ rejected slips through.
 
 As a worked example, consider pairing two instructions where both have the form
 `{add, sub, and, or, xor} rsd, rs2` — i.e. both are two-register ALU ops where
-the destination is also a source (no immediate, no load/store).  This is the
-simplest non-trivial rule: it expresses that two independent accumulator-style
-operations can share a packet.
+the destination is also a source (no immediate, no load/store).
 
-The `is_rsd` property is True when `rd` also appears as `rs1` or `rs2`.  The
-mnemonic filter is expressed via a prerequisite property `is_rsd_alu_pair_eligible`
-(or inline in the check lambda).  The only correctness constraint is that neither
-instruction writes a register the other reads or writes (RAW/WAW) — which is
-expressed by the check function:
+Because packets execute sequentially, register data-dependencies between A and B
+are not a pairing constraint — they are already handled by the dep-graph.  The
+only question a pairing rule needs to answer is whether the hardware can encode
+and execute this instruction-type combination in a packet.  For this rule the
+check is purely a mnemonic filter: both instructions must be from the supported
+set.  No register conflict checks are needed or appropriate.
 
 ```python
 PairingRule(
@@ -645,14 +656,9 @@ PairingRule(
     b_prerequisites=["is_rsd"],
     check=lambda a, b: (
         None
-        if (a.mnemonic in {"add","sub","and","or","xor",
-                           "addw","subw"}
-            and b.mnemonic in {"add","sub","and","or","xor",
-                               "addw","subw"}
-            and not (a.defs_int & b.uses_int)   # no RAW a→b
-            and not (b.defs_int & a.uses_int)   # no WAR b→a
-            and not (a.defs_int & b.defs_int))  # no WAW
-        else "rsd-alu-pair: register conflict or mnemonic mismatch"
+        if (a.mnemonic in {"add","sub","and","or","xor","addw","subw"}
+            and b.mnemonic in {"add","sub","and","or","xor","addw","subw"})
+        else "rsd-alu-pair: mnemonic not in supported set"
     ),
 )
 ```
