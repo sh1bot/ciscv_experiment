@@ -1,12 +1,13 @@
 """
-Tests for analysis/pairing.py — pairing rules and can_pair().
+Tests for scheduler/pairing.py — pairing rules and can_pair().
+
+Only rsd-alu-pair exists. All other combinations should be rejected.
 """
 
 import pytest
 from isa.instruction import Instruction
 from scheduler.pairing import (
     can_pair, greedy_pair, RULES,
-    A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS,
 )
 
 
@@ -20,6 +21,11 @@ def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=Non
 
 def make_add(rd, rs1, rs2):
     return make_insn("add", rd=rd, rs1=rs1, rs2=rs2)
+
+
+def make_add_rsd(rd, rs2):
+    """make_add with rd==rs1 so is_rsd==True."""
+    return make_insn("add", rd=rd, rs1=rd, rs2=rs2)
 
 
 def make_addi(rd, rs1, imm):
@@ -51,127 +57,91 @@ def make_tail():
 
 
 # ---------------------------------------------------------------------------
-# A-slot disqualifiers
+# rsd-alu-pair: the one defined rule
 # ---------------------------------------------------------------------------
 
-class TestASlotDisqualifiers:
-
-    def test_branch_not_in_a_slot(self):
-        """A branch in A-slot should be disqualified."""
-        beq = make_beq(10, 11)
-        add = make_add(12, 13, 14)
-        reason = can_pair(beq, add)
-        assert reason is not None
-        assert "A-slot disqualified: is_branch" in reason
-
-    def test_ret_not_in_a_slot(self):
-        """ret in A-slot should be disqualified."""
-        ret = make_ret()
-        add = make_add(10, 11, 12)
-        reason = can_pair(ret, add)
-        assert reason is not None
-        assert "A-slot disqualified" in reason
-
-    def test_call_not_in_a_slot(self):
-        """call in A-slot should be disqualified."""
-        call = make_call()
-        add = make_add(10, 11, 12)
-        reason = can_pair(call, add)
-        assert reason is not None
-        assert "A-slot disqualified: is_call" in reason
-
-    def test_tail_not_in_a_slot(self):
-        """tail pseudo in A-slot should be disqualified."""
-        tail = make_tail()
-        add = make_add(10, 11, 12)
-        reason = can_pair(tail, add)
-        assert reason is not None
-        assert "A-slot disqualified: is_tail" in reason
-
-    def test_jal_rd_ra_not_in_a_slot(self):
-        """jal ra (call) in A-slot should be disqualified."""
-        jal_call = make_insn("jal", rd=1, branch_target="foo")
-        add = make_add(10, 11, 12)
-        reason = can_pair(jal_call, add)
-        assert reason is not None
-        assert "A-slot disqualified" in reason
-
-    def test_branch_in_b_slot_ok(self):
-        """A branch in B-slot is explicitly allowed (executes after A)."""
-        add = make_add(10, 11, 12)
-        beq = make_beq(10, 11)
-        reason = can_pair(add, beq)
-        # Branch in B-slot should NOT be disqualified
-        assert reason is None or "B-slot disqualified" not in reason
-
-
-# ---------------------------------------------------------------------------
-# Basic pairing acceptance
-# ---------------------------------------------------------------------------
-
-class TestCanPairBasic:
+class TestRsdAluPair:
 
     def test_two_rsd_alu_ops_pair(self):
-        """Two RSD ALU ops should pair."""
-        a = make_insn("add", rd=10, rs1=10, rs2=11)  # is_rsd=True
-        b = make_insn("sub", rd=12, rs1=12, rs2=13)  # is_rsd=True
+        """Two rsd-form ALU ops with supported mnemonics should pair."""
+        a = make_insn("add", rd=10, rs1=10, rs2=11)   # is_rsd: rd==rs1
+        b = make_insn("sub", rd=12, rs1=12, rs2=13)   # is_rsd: rd==rs1
         assert can_pair(a, b) is None
 
-    def test_alu_alu_pair(self):
-        """Two plain ALU instructions should pair."""
-        a = make_add(10, 11, 12)
+    def test_all_supported_mnemonics_pair(self):
+        """Every mnemonic in the supported set can appear in either slot."""
+        supported = ["add", "sub", "and", "or", "xor", "addw", "subw"]
+        for m in supported:
+            a = make_insn(m, rd=10, rs1=10, rs2=11)
+            b = make_insn(m, rd=12, rs1=12, rs2=13)
+            assert can_pair(a, b) is None, f"{m}+{m} should pair"
+
+    def test_non_rsd_form_does_not_pair(self):
+        """add with rd != rs1 and rd != rs2 is not rsd-form, should not pair."""
+        a = make_add(10, 11, 12)   # rd=10, rs1=11, rs2=12 — is_rsd=False
         b = make_add(13, 14, 15)
+        assert can_pair(a, b) is not None
+
+    def test_unsupported_mnemonic_does_not_pair(self):
+        """addi is not in the rsd-alu supported set — even rsd-form should not pair."""
+        a = make_insn("addi", rd=10, rs1=10, imm=1)   # is_rsd: rd==rs1
+        b = make_insn("addi", rd=12, rs1=12, imm=2)
+        assert can_pair(a, b) is not None
+
+    def test_pair_returns_none_for_valid(self):
+        """can_pair returns None (not empty string) for a valid pair."""
+        a = make_insn("add", rd=10, rs1=10, rs2=11)
+        b = make_insn("add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
-    def test_alu_branch_pair(self):
-        """ALU + branch should pair."""
-        a = make_add(10, 11, 12)
-        b = make_beq(10, 11)
-        assert can_pair(a, b) is None
+    def test_pair_returns_string_for_invalid(self):
+        """can_pair returns a non-empty string for an invalid pair."""
+        a = make_add(10, 11, 12)   # not rsd-form
+        b = make_add(13, 14, 15)
+        result = can_pair(a, b)
+        assert isinstance(result, str) and len(result) > 0
 
-    def test_alu_load_pair(self):
-        """ALU + load should pair."""
-        a = make_add(10, 11, 12)
-        b = make_lw(13, 14)
-        assert can_pair(a, b) is None
 
-    def test_load_alu_pair(self):
-        """Load + ALU should pair."""
-        a = make_lw(10, 11)
-        b = make_add(12, 13, 14)
-        assert can_pair(a, b) is None
+# ---------------------------------------------------------------------------
+# Combinations that should not pair (no applicable rule)
+# ---------------------------------------------------------------------------
 
-    def test_alu_store_pair(self):
-        """ALU + store should pair."""
-        a = make_add(10, 11, 12)
-        b = make_sw(rs1=2, rs2=10)
-        assert can_pair(a, b) is None
+class TestNoApplicableRule:
 
-    def test_store_alu_pair(self):
-        """Store + ALU should pair."""
-        a = make_sw(rs1=2, rs2=10)
-        b = make_add(12, 13, 14)
-        assert can_pair(a, b) is None
+    def test_load_alu_does_not_pair(self):
+        lw = make_lw(10, 11)
+        add = make_add(12, 13, 14)
+        assert can_pair(lw, add) is not None
 
-    def test_ret_not_pairable_in_a_slot(self):
-        """ret cannot be in A-slot."""
+    def test_alu_store_does_not_pair(self):
+        add = make_add(10, 11, 12)
+        sw = make_sw(rs1=2, rs2=10)
+        assert can_pair(add, sw) is not None
+
+    def test_alu_branch_does_not_pair(self):
+        add = make_add(10, 11, 12)
+        beq = make_beq(10, 11)
+        assert can_pair(add, beq) is not None
+
+    def test_branch_alu_does_not_pair(self):
+        beq = make_beq(10, 11)
+        add = make_add(12, 13, 14)
+        assert can_pair(beq, add) is not None
+
+    def test_ret_alu_does_not_pair(self):
         ret = make_ret()
         add = make_add(10, 11, 12)
         assert can_pair(ret, add) is not None
 
-    def test_pair_returns_none_for_valid(self):
-        """can_pair returns None (not empty string) for a valid pair."""
-        a = make_add(10, 11, 12)
-        b = make_add(13, 14, 15)
-        result = can_pair(a, b)
-        assert result is None
+    def test_call_alu_does_not_pair(self):
+        call = make_call()
+        add = make_add(10, 11, 12)
+        assert can_pair(call, add) is not None
 
-    def test_pair_returns_string_for_invalid(self):
-        """can_pair returns a non-empty string for an invalid pair."""
-        branch = make_beq(10, 11)
-        add = make_add(12, 13, 14)
-        result = can_pair(branch, add)
-        assert isinstance(result, str) and len(result) > 0
+    def test_tail_alu_does_not_pair(self):
+        tail = make_tail()
+        add = make_add(10, 11, 12)
+        assert can_pair(tail, add) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -180,40 +150,28 @@ class TestCanPairBasic:
 
 class TestSoloReasons:
 
-    def test_a_slot_reason_goes_to_free_only(self):
-        """A-slot disqualifier reason should go to free.solo_reasons, not curr."""
-        branch = make_beq(10, 11)
-        add = make_add(12, 13, 14)
-        # Simulate greedy pass
-        branch.solo_reasons = set()
-        add.solo_reasons = set()
-
-        packets = greedy_pair([branch, add])
-        # branch is A-slot disqualified; reason should be in branch.solo_reasons
-        assert any("A-slot" in r for r in branch.solo_reasons)
-        # Not in add.solo_reasons
-        assert not any("A-slot" in r for r in add.solo_reasons)
-
     def test_rule_rejection_goes_to_both(self):
         """Rule-check rejection reasons should go to both instructions."""
-        # Two branches — first is A-slot disqualified (so never reaches rule check)
-        # Instead, test with atomic (has_side_effects) pair
         from scheduler.pairing import _record_solo_reasons
-        a = make_add(10, 11, 12)
-        b = make_add(13, 14, 15)
+        a = make_insn("add", rd=10, rs1=10, rs2=11)
+        b = make_insn("add", rd=12, rs1=12, rs2=13)
         a.solo_reasons = set()
         b.solo_reasons = set()
-        # Force a rejection scenario: make a fence-like (side effects)
-        a2 = make_insn("fence")
-        b2 = make_add(10, 11, 12)
-        a2.solo_reasons = set()
-        b2.solo_reasons = set()
-        # fence has side effects, so alu-alu-pair would reject
-        # but A-slot disqualifier check happens first...
-        # Let's just test _record_solo_reasons directly
         _record_solo_reasons(a, b, "some-rule: some reason")
         assert "some-rule: some reason" in a.solo_reasons
         assert "some-rule: some reason" in b.solo_reasons
+
+    def test_greedy_records_solo_reason_on_non_pairable(self):
+        """After greedy rejects a pair, both instructions have solo_reasons."""
+        a = make_add(10, 11, 12)   # not rsd-form, can't pair
+        b = make_add(13, 14, 15)
+        a.solo_reasons = set()
+        b.solo_reasons = set()
+        packets = greedy_pair([a, b])
+        # Both should be solo and have reasons
+        assert all(p[0] == 'solo' for p in packets)
+        assert len(a.solo_reasons) > 0
+        assert len(b.solo_reasons) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -223,46 +181,46 @@ class TestSoloReasons:
 class TestGreedyPairing:
 
     def test_simple_pair(self):
-        """Two ALU instructions should be paired."""
-        a = make_add(10, 11, 12)
-        b = make_add(13, 14, 15)
+        """Two rsd-form ALU instructions should be paired."""
+        a = make_add_rsd(10, 11)
+        b = make_add_rsd(12, 13)
         packets = greedy_pair([a, b])
         assert len(packets) == 1
         assert packets[0][0] == 'pair'
 
     def test_three_instructions_one_pair_one_solo(self):
         """Three instructions: first two pair, third is solo."""
-        a = make_add(10, 11, 12)
-        b = make_add(13, 14, 15)
-        ret = make_ret()
-        packets = greedy_pair([a, b, ret])
+        a = make_add_rsd(10, 11)
+        b = make_add_rsd(12, 13)
+        c = make_add_rsd(14, 15)
+        packets = greedy_pair([a, b, c])
         assert len(packets) == 2
         assert packets[0][0] == 'pair'
         assert packets[1][0] == 'solo'
-        assert packets[1][1] is ret
+        assert packets[1][1] is c
 
-    def test_branch_solo(self):
-        """Branch that can't pair stays solo."""
-        beq = make_beq(10, 11)
-        packets = greedy_pair([beq])
-        assert packets[0][0] == 'solo'
-
-    def test_free_candidate_advances(self):
-        """After a pair, the next free candidate advances."""
+    def test_non_pairable_stays_solo(self):
+        """Non-rsd-form adds stay solo."""
         a = make_add(10, 11, 12)
         b = make_add(13, 14, 15)
-        c = make_add(16, 17, 18)
-        d = make_add(19, 20, 21)
+        packets = greedy_pair([a, b])
+        assert all(p[0] == 'solo' for p in packets)
+
+    def test_free_candidate_advances(self):
+        """After a pair, the next free candidate advances correctly."""
+        a = make_add_rsd(10, 11)
+        b = make_add_rsd(12, 13)
+        c = make_add_rsd(14, 15)
+        d = make_add_rsd(16, 17)
         packets = greedy_pair([a, b, c, d])
-        # Should be two pairs
         assert len(packets) == 2
         assert all(p[0] == 'pair' for p in packets)
 
     def test_solo_flush_at_end(self):
         """If last instruction has no partner, it's emitted as solo."""
-        a = make_add(10, 11, 12)
-        b = make_add(13, 14, 15)
-        c = make_add(16, 17, 18)
+        a = make_add_rsd(10, 11)
+        b = make_add_rsd(12, 13)
+        c = make_add_rsd(14, 15)
         packets = greedy_pair([a, b, c])
         assert len(packets) == 2
         assert packets[0][0] == 'pair'

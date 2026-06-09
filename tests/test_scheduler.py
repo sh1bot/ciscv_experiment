@@ -23,6 +23,11 @@ def make_add(rd, rs1, rs2):
     return make_insn("add", rd=rd, rs1=rs1, rs2=rs2)
 
 
+def make_add_rsd(rd, rs2):
+    """add with rd==rs1 so is_rsd==True (matches rsd-alu-pair rule)."""
+    return make_insn("add", rd=rd, rs1=rd, rs2=rs2)
+
+
 def make_addi(rd, rs1, imm):
     return make_insn("addi", rd=rd, rs1=rs1, imm=imm)
 
@@ -94,12 +99,12 @@ class TestListMode:
         assert result.index(insn0) < result.index(insn1)
 
     def test_list_mode_maximises_pairs(self):
-        """LIST mode should pair independent instructions together."""
-        # Four independent instructions: should produce 2 pairs
-        a = make_add(10, 11, 12)
-        b = make_add(13, 14, 15)
-        c = make_add(16, 17, 18)
-        d = make_add(19, 20, 21)
+        """LIST mode should pair independent rsd-form instructions together."""
+        # Four independent rsd-form instructions: should produce 2 pairs
+        a = make_add_rsd(10, 11)
+        b = make_add_rsd(12, 13)
+        c = make_add_rsd(14, 15)
+        d = make_add_rsd(16, 17)
         block = make_block([a, b, c, d])
         graph = build_dep_graph(block)
         result = schedule(block, graph, ScheduleMode.LIST)
@@ -178,8 +183,8 @@ class TestBNBMode:
 
     def test_bnb_small_block_optimal(self):
         """For a small independent block, BNB should achieve maximum pairing."""
-        # 4 fully independent instructions → max 2 pairs
-        insns = [make_add(i, i+1, i+2) for i in range(0, 12, 3)]
+        # 4 fully independent rsd-form instructions → max 2 pairs
+        insns = [make_add_rsd(i*2, i*2+1) for i in range(4)]
         block = make_block(insns)
         graph = build_dep_graph(block)
         result = schedule(block, graph, ScheduleMode.BNB)
