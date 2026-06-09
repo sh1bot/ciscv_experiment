@@ -61,7 +61,7 @@ _CSR_MNEMONICS = {
     "rdcycleh", "rdtimeh", "rdinstreth",
 }
 
-_KNOWN_MNEMONICS_WARNED: set = set()
+_UNKNOWN_WARNED: set = set()  # mnemonics already warned about
 
 
 def _parse_reg(tok: str) -> Optional[int]:
@@ -99,6 +99,37 @@ def _parse_mem_operand(tok: str) -> tuple[Optional[int], Optional[int]]:
     return None, None
 
 
+def _generic_decode(insn: 'Instruction', ops: list) -> None:
+    """Positional operand decode: try each token as register, mem operand, or
+    immediate and assign to rd/rs1/rs2/rs3/imm in order.  Used for all
+    instructions that follow the standard positional pattern."""
+    slot = 0  # next register slot: 0=rd, 1=rs1, 2=rs2, 3=rs3
+    for op in ops:
+        r = REG_ALIASES.get(op.lower())
+        if r is not None:
+            if slot == 0:
+                if r != 0:
+                    insn.rd = r
+            elif slot == 1:
+                insn.rs1 = r
+            elif slot == 2:
+                insn.rs2 = r
+            elif slot == 3:
+                insn.rs3 = r
+            slot += 1
+            continue
+        off, r = _parse_mem_operand(op)
+        if r is not None:
+            insn.imm = off
+            insn.rs1 = r
+            insn._has_mem_operand = True
+            slot = 2  # next reg after a mem operand goes to rs2
+            continue
+        imm = _parse_imm(op)
+        if imm is not None and insn.imm is None:
+            insn.imm = imm
+
+
 def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional[str]) -> Instruction:
     """Decode a RISC-V instruction from mnemonic and operand tokens."""
     insn = Instruction(
@@ -111,6 +142,7 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
     m = mnemonic.lower()
     ops = [o.strip().rstrip(",") for o in operands]
 
+    known = True
     try:
         # --- Pseudo-instructions: expand to canonical forms ---
         if m == "nop":
@@ -119,10 +151,10 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
             return insn
 
         if m == "mv" and len(ops) >= 2:
-            insn.mnemonic = "add"
+            insn.mnemonic = "addi"
             insn.rd  = REG_ALIASES.get(ops[0].lower())
             insn.rs1 = REG_ALIASES.get(ops[1].lower())
-            insn.rs2 = 0  # x0
+            insn.imm = 0
             return insn
 
         if m == "li" and len(ops) >= 2:
@@ -263,67 +295,11 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                 insn.rs1 = rs1
             return insn
 
-        # --- R-type (3-register) ---
-        _R_TYPE = {
-            "add", "sub", "and", "or", "xor", "sll", "srl", "sra",
-            "slt", "sltu", "addw", "subw", "sllw", "srlw", "sraw",
-            "mul", "mulh", "mulhu", "mulhsu", "div", "divu", "rem", "remu",
-            "mulw", "divw", "divuw", "remw", "remuw",
-            "min", "minu", "max", "maxu",
-            "sh1add", "sh2add", "sh3add",
-            "andn", "orn", "xnor", "clmul", "clmulh", "clmulr",
-        }
-        if m in _R_TYPE and len(ops) >= 3:
-            insn.rd  = REG_ALIASES.get(ops[0].lower())
-            insn.rs1 = REG_ALIASES.get(ops[1].lower())
-            insn.rs2 = REG_ALIASES.get(ops[2].lower())
-            return insn
-
-        # --- I-type (rd, rs1, imm) ---
-        _I_TYPE = {
-            "addi", "andi", "ori", "xori", "slti", "sltiu",
-            "slli", "srli", "srai",
-            "addiw", "slliw", "srliw", "sraiw",
-        }
-        if m in _I_TYPE and len(ops) >= 3:
-            insn.rd  = REG_ALIASES.get(ops[0].lower())
-            insn.rs1 = REG_ALIASES.get(ops[1].lower())
-            insn.imm = _parse_imm(ops[2])
-            return insn
-
-        # --- U-type (rd, imm) ---
-        if m in ("lui", "auipc") and len(ops) >= 2:
-            insn.rd  = REG_ALIASES.get(ops[0].lower())
-            insn.imm = _parse_imm(ops[1])
-            return insn
-
-        # --- CSR instructions ---
-        if m in _CSR_MNEMONICS:
-            if len(ops) >= 2:
-                insn.rd = REG_ALIASES.get(ops[0].lower())
-            return insn
-
-        # --- Float instructions ---
-        if m.startswith("f") or m in ("fcvt.w.s", "fcvt.wu.s", "fcvt.l.s", "fcvt.lu.s",
-                                       "fcvt.w.d", "fcvt.wu.d", "fcvt.l.d", "fcvt.lu.d",
-                                       "fclass.s", "fclass.d",
-                                       "fmv.x.w", "fmv.x.d", "fle.s", "flt.s", "feq.s",
-                                       "fle.d", "flt.d", "feq.d"):
-            if len(ops) >= 1:
-                insn.rd = _parse_reg(ops[0])
-                if len(ops) >= 2:
-                    insn.rs1 = _parse_reg(ops[1])
-                if len(ops) >= 3:
-                    insn.rs2 = _parse_reg(ops[2])
-                if len(ops) >= 4:
-                    insn.rs3 = _parse_reg(ops[3])
-            return insn
-
         # --- Fence ---
         if m in ("fence", "fence.i", "ecall", "ebreak"):
             return insn
 
-        # --- Atomic ---
+        # --- Atomic (non-standard operand order: rd, rs2, rs1) ---
         if m.startswith("lr.") or m.startswith("sc.") or m.startswith("amo"):
             if len(ops) >= 3:
                 insn.rd  = REG_ALIASES.get(ops[0].lower())
@@ -334,31 +310,25 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                 insn.rs1 = REG_ALIASES.get(ops[1].lower())
             return insn
 
-    except Exception:
-        pass
+        # --- CSR: only rd is meaningful for scheduling ---
+        if m in _CSR_MNEMONICS:
+            if len(ops) >= 1:
+                insn.rd = REG_ALIASES.get(ops[0].lower())
+            return insn
 
-    # --- Best-effort for unknown instructions ---
-    if m not in _KNOWN_MNEMONICS_WARNED:
-        _KNOWN_MNEMONICS_WARNED.add(m)
-        print(f"warning: unknown mnemonic '{m}'", file=sys.stderr)
-    insn.is_unknown = True
-    reg_ops = []
-    for op in ops:
-        r = REG_ALIASES.get(op.lower())
-        if r is None:
-            off, r = _parse_mem_operand(op)
-            if r is not None:
-                insn._has_mem_operand = True
-        if r is not None:
-            reg_ops.append(r)
-    if reg_ops:
-        if reg_ops[0] != 0:
-            insn.rd = reg_ops[0]
-        sources = [r for r in reg_ops[1:] if r != 0]
-        if sources:
-            insn.rs1 = sources[0]
-        if len(sources) > 1:
-            insn.rs2 = sources[1]
+    except Exception:
+        known = False
+
+    # --- Generic positional decode ---
+    # Mnemonics not handled by any explicit case above are decoded generically.
+    # If `known` was never set True inside the try block, the mnemonic is
+    # unrecognised and gets a one-time warning and is_unknown=True.
+    if not known:
+        if m not in _UNKNOWN_WARNED:
+            _UNKNOWN_WARNED.add(m)
+            print(f"warning: unknown mnemonic '{m}'", file=sys.stderr)
+        insn.is_unknown = True
+    _generic_decode(insn, ops)
     return insn
 
 
