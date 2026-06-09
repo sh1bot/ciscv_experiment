@@ -82,6 +82,18 @@ class TestRsdAluPair:
         b = make_add(13, 14, 15)
         assert can_pair(a, b) is not None
 
+    def test_commutative_rd_eq_rs2_pairs(self):
+        """add with rd==rs2 (not rs1) is valid because add is commutative."""
+        a = make_insn("add", rd=11, rs1=10, rs2=11)   # rd==rs2, commutative
+        b = make_insn("add", rd=12, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_non_commutative_rd_eq_rs2_does_not_pair(self):
+        """sub with rd==rs2 (not rs1) must not pair — operands can't be swapped."""
+        a = make_insn("sub", rd=11, rs1=10, rs2=11)   # rd==rs2, non-commutative
+        b = make_insn("sub", rd=12, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
     def test_unsupported_mnemonic_does_not_pair(self):
         """addi is not in the rsd-alu supported set — even rsd-form should not pair."""
         a = make_insn("addi", rd=10, rs1=10, imm=1)   # is_rsd: rd==rs1

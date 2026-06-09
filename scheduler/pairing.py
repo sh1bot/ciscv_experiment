@@ -40,11 +40,18 @@ class PairingRule:
 # ---------------------------------------------------------------------------
 
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """Both instructions are two-register ALU ops with dest=src1."""
+    """Both instructions are two-register ALU ops with dest=src1.
+
+    rd==rs2 (instead of rd==rs1) is only valid for commutative operations,
+    where the operands can be swapped in the encoding.
+    """
     supported = {"add", "sub", "and", "or", "xor", "addw", "subw"}
-    if a.mnemonic in supported and b.mnemonic in supported:
-        return None
-    return f"rsd-alu-pair: mnemonic not in supported set ({a.mnemonic}, {b.mnemonic})"
+    for slot, insn in (("A", a), ("B", b)):
+        if insn.mnemonic not in supported:
+            return f"rsd-alu-pair: {slot}-slot mnemonic not in supported set ({insn.mnemonic})"
+        if insn.rd != insn.rs1 and not insn.is_commutative:
+            return f"rsd-alu-pair: {slot}-slot rd==rs2 but {insn.mnemonic} is not commutative"
+    return None
 
 
 RULES: list[PairingRule] = [
