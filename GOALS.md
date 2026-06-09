@@ -180,11 +180,9 @@ The prescan identifies barriers from:
 The following design decisions have not yet been resolved.  They are noted here
 so that they are not silently assumed.
 
-**ABI target**: the tool assumes the standard RISC-V psABI, including `t0` (x5)
-as an alternate link register used by linker call stubs.  If the target uses a
-non-standard calling convention (firmware, custom RTOS, etc.) the ABI tables in
-`isa/abi.py` and `isa/registers.py` would need to be updated.  It is not yet
-decided whether supporting multiple ABI profiles is a goal.
+**ABI target**: the tool targets the standard RISC-V psABI, including `t0` (x5)
+as an alternate link register used by linker call stubs.  Supporting
+non-standard calling conventions is not a current goal.
 
 **Memory ordering conservatism**: the default memory model is conservative —
 every load/store pair is ordered unless `--same-base-reorder` is passed.
