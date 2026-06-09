@@ -61,11 +61,13 @@ rv_scheduler/
 
 ## 1. `isa/registers.py`
 
-Map every ABI name and `x`/`f` numeric alias to a canonical integer index.
+Map every ABI name and `x`/`f`/`v` numeric alias to a canonical integer index.
 Integer registers occupy indices 0–31 (`x0`–`x31`); float registers occupy
-indices 32–63 (`f0`–`f31`, equivalently `ft0`/`fs0`/`fa0` etc.).  A single flat
-namespace avoids maintaining parallel integer and float domains throughout the
-rest of the tool.
+indices 32–63 (`f0`–`f31`, equivalently `ft0`/`fs0`/`fa0` etc.); vector
+registers occupy indices 64–95 (`v0`–`v31`).  A single flat namespace avoids
+maintaining parallel register-file domains throughout the rest of the tool.
+Vector registers are recognised so that the heuristic unknown-instruction
+decoder can correctly skip them when extracting scalar dependencies.
 
 ```python
 REG_ALIASES: dict[str, int]
@@ -73,6 +75,9 @@ REG_ALIASES: dict[str, int]
 #          "x0"–"x31"  -> 0–31
 # Float:   "ft0"–"ft11","fs0"–"fs11","fa0"–"fa7",
 #          "f0"–"f31"  -> 32–63
+# Vector:  "v0"–"v31"  -> 64–95
+
+VECTOR_REG_BASE = 64  # first vector register index
 
 CALLER_SAVED: frozenset[int]  # ra, t0–t6, a0–a7, ft0–ft11, fa0–fa7
 CALLEE_SAVED: frozenset[int]  # sp, s0–s11, fs0–fs11
@@ -80,8 +85,9 @@ ARG_REGS:     frozenset[int]  # a0–a7, fa0–fa7
 RET_REGS:     frozenset[int]  # a0, a1, fa0, fa1
 ```
 
-Provide a helper `reg_name(index) -> str` returning the canonical ABI name
-(`"a0"` for 10, `"fa0"` for 42, etc.).
+Provide helpers `reg_name(index) -> str` returning the canonical ABI name
+(`"a0"` for 10, `"fa0"` for 42, `"v8"` for 72, etc.) and
+`is_vector_reg(index) -> bool` returning True for indices ≥ 64.
 
 ---
 
@@ -190,8 +196,9 @@ All are derived from the stored fields; none are stored separately.
 | `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul` and their `*w` variants |
 | `reads_rd` | instruction reads `rd` before writing it — **not** AMO instructions; AMOs write `rd` with the old memory value but do not read `rd` |
 | `writes_rd` | `rd is not None` |
-| `writes_memory` | store instruction |
-| `reads_memory` | load instruction |
+| `writes_memory` | store instruction (mnemonic-based) |
+| `reads_memory` | load instruction (mnemonic-based) |
+| `has_mem_operand` | `reads_memory or writes_memory or _has_mem_operand` — True for any instruction that accesses memory, including unknown instructions whose operands contain a `(base-reg)` form.  Calls and other side-effecting instructions that implicitly touch memory are **not** included here; they are handled as full dep-graph barriers via `has_side_effects`. |
 | `reads_stack` | load instruction whose base register is `sp` (x2) |
 | `writes_stack` | store instruction whose base register is `sp` (x2) |
 | `access_width` | byte width of the memory access (1/2/4/8), or `None` for non-memory instructions — inferred from the mnemonic (lb/sb=1, lh/sh=2, lw/sw/flw/fsw=4, ld/sd/fld/fsd=8) |
@@ -205,22 +212,24 @@ All are derived from the stored fields; none are stored separately.
 | `is_fence` | FENCE / FENCE.I |
 | `is_atomic` | A-extension instruction |
 | `has_side_effects` | `is_call or is_return or writes_memory or is_csr or is_fence or is_atomic` |
-| `uses_regs` | `frozenset` of registers read by this instruction (indices 0–63), **excluding x0** |
-| `defs_regs` | `frozenset` of registers written by this instruction (indices 0–63), **excluding x0** |
+| `uses_regs` | `frozenset` of registers read by this instruction (any index), **excluding x0** |
+| `defs_regs` | `frozenset` of registers written by this instruction (any index), **excluding x0** |
 | `rvc_eligible` | see §5 |
 | `rs1_in_rvc_range` | `rs1 is not None and rs1 in range(8, 16)` |
 | `rs2_in_rvc_range` | `rs2 is not None and rs2 in range(8, 16)` |
 | `rd_in_rvc_range` | `rd is not None and rd in range(8, 16)` |
 
-**x0 is excluded from `uses_regs` and `defs_regs`** — writes to x0 are no-ops and
-reads of x0 always produce zero, so x0 participates in no data dependencies and
-must not appear in liveness sets (otherwise it would be "live" everywhere and
-pollute every live_in/live_out set in the file).  However, the raw decoded fields
-`rd`, `rs1`, `rs2` *may* still hold index 0 when the instruction architecturally
-references x0 (e.g. `jalr x0, ra, 0` has `rd = 0`, `jalr x1, x0, target` has
-`rs1 = 0`).  These raw fields are needed for instruction classification (e.g.
-`is_return` checks `rd == 0`) and RVC eligibility checks; they are just excluded
-from the `uses_regs`/`defs_regs` computed sets.
+**x0 is the only register excluded from `uses_regs` and `defs_regs`** — writes
+to x0 are no-ops and reads always produce zero, so it participates in no data
+dependencies and must not appear in liveness sets.  The raw fields `rd`, `rs1`,
+`rs2` may still hold index 0 for classification purposes (e.g. `is_return`
+checks `rd == 0`); it is simply not emitted into the computed sets.
+
+Vector register indices (64–95) flow through `uses_regs`/`defs_regs` and
+liveness sets without special treatment.  They sit alongside scalar indices in
+the same frozensets and cost nothing — no scheduling or pairing decision
+consults them, and no calling-convention set includes them, so their presence
+is inert.
 
 Helper predicates (used internally by decoders and rules):
 
