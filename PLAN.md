@@ -193,7 +193,7 @@ All are derived from the stored fields; none are stored separately.
 | Property | Definition |
 |---|---|
 | `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand.  Note: RVC CA-format eligibility checks (c.sub, c.xor, c.or, c.and, c.subw, c.addw, c.srli, c.srai, c.andi) require specifically `rd == rs1`; the `rv_c.py` checks test `rd == rs1` directly rather than relying on the broader `is_rsd`. |
-| `is_commutative` | mnemonic is one of `add`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd`, `fmul` and their `*w` variants |
+| `is_commutative` | mnemonic is one of `add`, `addw`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd.s`, `fadd.d`, `fmul.s`, `fmul.d` |
 | `reads_rd` | instruction reads `rd` before writing it — **not** AMO instructions; AMOs write `rd` with the old memory value but do not read `rd` |
 | `writes_rd` | `rd is not None` |
 | `writes_memory` | store instruction (mnemonic-based) |
@@ -361,27 +361,34 @@ def match(mnemonic: str) -> type[Instruction] | None
 If no module matches, an `UnknownInstruction` subclass is returned (not raised)
 using best-effort decoding (see below) — unrecognised mnemonics are never fatal.
 
+### Common positional decoding
+
+Both known and unknown instructions share a common positional decoding path
+(`_generic_decode`): operands are scanned left-to-right; register-name tokens
+are assigned to `rd`, `rs1`, `rs2`, `rs3` in order; a `offset(base)` token sets
+`imm` and `rs1` and marks `_has_mem_operand = True`; a bare integer sets `imm`.
+Instructions whose operands deviate from the default positional pattern (stores,
+branches, atomics, pseudo-instructions) have explicit special-case handling
+before the common path.
+
 ### Best-effort decoding of unknown instructions
 
-When no decoder matches a mnemonic, the instruction is decoded as follows:
+When no decoder matches a mnemonic, the instruction falls through to the common
+positional decoding path.  Additionally:
 
-- Scan the operand list left-to-right, parsing each token as a register name if
-  possible and ignoring any token that is not a valid register name.
-- `defs_regs` = the first register-like operand, if any, **excluding x0**.
-- `uses_regs` = all remaining register-like operands, **excluding x0**.
 - `is_unknown = True` — the annotator will emit a `[?]` marker on output.
-- The instruction is **not** treated as a barrier in the dependency graph.
-  It participates via its inferred `defs_regs` / `uses_regs` (RAW/WAR/WAW edges
-  only) and may be reordered if those edges permit.  Side-effect and memory
-  behaviour is unknown, so the instruction is treated as both reading and
-  writing memory (conservative memory ordering edge against all adjacent
-  memory operations), but it does not anchor all other instructions to it the
-  way a true barrier (AMO, fence, fence.i, ecall, ebreak, call, tail) does.
-- A `[?]` annotation appears in the output for every unknown instruction.
 - A warning is emitted on stderr: `warning: unknown mnemonic '<mnemonic>'`
-  on the first occurrence of each unknown mnemonic.  If the inferred register
-  effects are wrong, the instruction should be added to the known-instruction
-  tables.
+  on the first occurrence of each unknown mnemonic.
+
+`is_unknown` is set **only** for mnemonics not found in the known-instruction
+tables.  Instructions that are recognised but decoded via the common positional
+path (e.g. most arithmetic instructions) are **not** marked `is_unknown`.
+
+The instruction is **not** treated as a barrier in the dependency graph.
+Memory ordering for unknown instructions follows the same rule as known
+instructions: a memory ordering edge is added only if `has_mem_operand` is True
+(i.e. a `offset(base)` operand was detected).  Unknown instructions with no
+detectable memory operand may be freely reordered around other memory operations.
 
 ### Pseudo-instruction handling
 
@@ -676,26 +683,27 @@ for correctness.
 - **Memory ordering**: by default, each memory operation has a dependency edge
   from the previous memory operation in program order (conservative).  With
   `--same-base-reorder`, two mem-ops with the same base register — provided that
-  register is not written between them **and no unknown instruction (`is_unknown`)
-  appears between them** (unknown instructions may have undeclared memory effects)
-  — and non-overlapping byte ranges have this edge dropped.  Non-overlap is
-  tested as disjoint half-open intervals: `[off_a, off_a+width_a)` and
-  `[off_b, off_b+width_b)` are disjoint iff `off_a+width_a ≤ off_b` or
+  register is not written between them and no unknown instruction (`is_unknown`)
+  appears between them — and non-overlapping byte ranges have this edge dropped.
+  Non-overlap is tested as disjoint half-open intervals: `[off_a, off_a+width_a)`
+  and `[off_b, off_b+width_b)` are disjoint iff `off_a+width_a ≤ off_b` or
   `off_b+width_b ≤ off_a`.  Access width is inferred from the mnemonic (lb/sb=1,
   lh/sh=2, lw/sw/flw/fsw=4, ld/sd/fld/fsd=8; default 4 for unrecognised).
+  **An instruction participates in memory ordering only if `has_mem_operand` is
+  True** — i.e. it is a recognised load/store, or it has an `offset(base)`
+  operand syntax detected during decoding.  Unknown instructions with no
+  detectable memory operand are transparent to memory ordering and may be
+  freely reordered around loads and stores.
+- **ABI-implied register effects**: `call_liveness_effect()` is also consulted
+  per instruction in `build_dep_graph`.  Its `implicit_uses` and `implicit_defs`
+  (caller-saved clobbers at call sites) generate additional RAW/WAR/WAW edges,
+  ensuring that e.g. a value held in a caller-saved register has a dep-graph edge
+  to any subsequent call that clobbers it.
 - **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, CSR
   instructions (`is_csr`), `call`, and `tail` instructions get ordering edges
-  from all preceding instructions in the block.  Unknown instructions (`is_unknown`) are **not** treated as
-  full barriers; they receive conservative memory ordering edges against all
-  adjacent memory operations (see below), but other non-memory instructions
-  may still be reordered around them if the register-dependency edges permit.
-- **Unknown-instruction memory edges**: `build_dep_graph` checks `is_unknown`
-  directly — it does not rely on `reads_memory` or `writes_memory`, which are
-  only set for recognised load/store mnemonics.  When an unknown instruction
-  is present, a memory ordering edge is inserted between it and **every**
-  memory operation that precedes or follows it within the block, conservatively
-  treating it as both a load and a store.  "Adjacent" is not the right word —
-  it is all preceding and all following memory ops, not just the nearest one.
+  from all preceding instructions in the block.  Unknown instructions are **not**
+  treated as full barriers; they participate only via their inferred register
+  dependencies and any detected memory operand.
 
 ```python
 @dataclass
@@ -879,7 +887,7 @@ def can_pair(a: Instruction, b: Instruction) -> str | None:
         result = rule.check(a, b)
         if result is None:
             return None          # encoding accepts — the pair is valid
-        reasons.append(f"{rule.name}: {result}")
+        reasons.append(result)  # check() already includes rule name as prefix
     # No encoding could represent this pair.
     if reasons:
         return "; ".join(reasons)
@@ -1005,10 +1013,18 @@ maximises pair count under the greedy-advance model.  Used to establish an upper
 bound on what any reordering strategy can achieve with the current rule set.
 
 ```python
-WINDOW_SIZE   = 16      # blocks longer than this are split into independent windows
+WINDOW_SIZE   = 16      # blocks longer than this are split into windows
 NODE_BUDGET   = 50_000  # total search nodes before giving up
 STAGNATION    = 5_000   # nodes without improvement before giving up
 ```
+
+Blocks longer than `WINDOW_SIZE` are split into consecutive fixed-size windows,
+each scheduled independently.  Cross-window dependency edges (edges from an
+instruction in window N pointing to one in window N+1) are **not** added to the
+window's sub-graph because they are trivially satisfied: window N is fully emitted
+before window N+1 begins, so any instruction in window N always precedes any
+instruction in window N+1 in the output regardless of intra-window reordering.
+Only intra-window edges are needed in the sub-graph.
 
 **Upper bound:**
 ```python
