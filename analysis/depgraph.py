@@ -101,7 +101,7 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
             readers[reg] = []
 
         # --- Memory ordering edges ---
-        is_mem = insn.reads_memory or insn.writes_memory or insn.has_mem_operand
+        is_mem = insn.has_mem_operand
 
         if is_mem:
             if last_mem_op >= 0:

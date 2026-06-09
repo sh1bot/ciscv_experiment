@@ -348,7 +348,7 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
         if r is None:
             off, r = _parse_mem_operand(op)
             if r is not None:
-                insn.has_mem_operand = True
+                insn._has_mem_operand = True
         if r is not None:
             reg_ops.append(r)
     if reg_ops:

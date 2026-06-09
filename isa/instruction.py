@@ -25,7 +25,7 @@ class Instruction:
     imm:  Optional[int] = None
     branch_target: Optional[str] = None
     is_unknown:    bool = False
-    has_mem_operand: bool = False  # unknown insn with a (base-reg) operand
+    _has_mem_operand: bool = False  # set by parser for unknown insns with (base-reg) operand
 
     # Populated by liveness pass (indices 0–63):
     live_in:   frozenset = field(default_factory=frozenset)
@@ -133,6 +133,12 @@ class Instruction:
             "flw", "fld",
             "c.lw", "c.ld", "c.lwsp", "c.ldsp",
         }
+
+    @property
+    def has_mem_operand(self) -> bool:
+        """True if this instruction accesses memory — known loads/stores, or
+        unknown instructions where the parser detected a (base-reg) operand."""
+        return self.reads_memory or self.writes_memory or self._has_mem_operand
 
     @property
     def reads_stack(self) -> bool:
