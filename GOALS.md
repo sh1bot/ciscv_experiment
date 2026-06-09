@@ -6,6 +6,35 @@ represent a change in what the tool is for, not just how it works.
 
 ---
 
+## 0. Primary goal: a workbench for exploring pairing rules
+
+The primary purpose of this tool is to provide a fast feedback loop for
+iterating on instruction pairing rules against real-world code.
+
+The encoding space for a custom 32-bit packet format has many degrees of
+freedom: which opcode combinations are legal, which operand forms are required,
+whether sequential execution within a packet is exploited, and so on.  The
+right set of rules is not obvious from first principles — it depends on what
+patterns actually appear in the output of real compilers on real codebases.
+
+This tool lets a rule author:
+
+1. Express a candidate pairing rule as a small, self-contained function.
+2. Run it against a large real-world binary (e.g. a game engine) to measure
+   the pairing rate it achieves.
+3. Read the annotated output to understand *why* instructions went solo —
+   specifically which constraints were the binding ones — and use that to
+   refine the rule or propose a new one.
+4. Compare pairing rates across rule sets to evaluate tradeoffs between
+   encoding complexity and compression gain.
+
+The annotation format is therefore not just cosmetic output — it is the primary
+instrument by which rule authors diagnose and improve pairing coverage.  Solo
+reasons, RVC eligibility on missed instructions, and packet numbering all serve
+this feedback purpose.
+
+---
+
 ## 1. Output: annotated assembly
 
 The tool reads RISC-V assembly and emits annotated assembly.  The annotations
