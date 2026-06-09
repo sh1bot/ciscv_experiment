@@ -194,7 +194,7 @@ All are derived from the stored fields; none are stored separately.
 
 | Property | Definition |
 |---|---|
-| `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand.  Note: RVC CA-format eligibility checks (c.sub, c.xor, c.or, c.and, c.subw, c.addw, c.srli, c.srai, c.andi) require specifically `rd == rs1`; the `rv_c.py` checks test `rd == rs1` directly rather than relying on the broader `is_rsd`. |
+| `is_rsd` | `rd is not None and (rd == rs1 or rd == rs2)` — True when the destination register also appears as a source operand.  Note: RVC CA-format eligibility checks (c.sub, c.xor, c.or, c.and, c.subw, c.addw, c.srli, c.srai, c.andi) require specifically `rd == rs1`; the `rv_c.py` checks test `rd == rs1` directly rather than relying on the broader `is_rsd`.  Pairing rules that require rsd-form must additionally verify that `rd == rs2`-only cases (where `rd != rs1`) are commutative operations — non-commutative ops with `rd == rs2` cannot be re-encoded as `rd == rs1` by swapping operands. |
 | `is_commutative` | mnemonic is one of `add`, `addw`, `mul`, `mulh`, `mulhu`, `mulhsu`, `and`, `or`, `xor`, `min`, `minu`, `max`, `maxu`, `fadd.s`, `fadd.d`, `fmul.s`, `fmul.d` |
 | `reads_rd` | instruction reads `rd` before writing it — **not** AMO instructions; AMOs write `rd` with the old memory value but do not read `rd` |
 | `writes_rd` | `rd is not None` |
@@ -851,21 +851,28 @@ Because packets execute sequentially, register data-dependencies between A and B
 are not a pairing constraint — they are already handled by the dep-graph.  The
 only question a pairing rule needs to answer is whether the hardware can encode
 and execute this instruction-type combination in a packet.  For this rule the
-check is purely a mnemonic filter: both instructions must be from the supported
-set.  No register conflict checks are needed or appropriate.
+check is a mnemonic filter combined with a commutativity check: both instructions
+must be from the supported set, and any instruction where `rd == rs2` (not `rs1`)
+must be commutative — otherwise the operands cannot be swapped in the encoding to
+produce the required `rd == rs1` form.
 
 ```python
+SUPPORTED = {"add", "sub", "and", "or", "xor", "addw", "subw"}
+
 PairingRule(
     name="rsd-alu-pair",
     a_prerequisites=["is_rsd"],
     b_prerequisites=["is_rsd"],
-    check=lambda a, b: (
-        None
-        if (a.mnemonic in {"add","sub","and","or","xor","addw","subw"}
-            and b.mnemonic in {"add","sub","and","or","xor","addw","subw"})
-        else "rsd-alu-pair: mnemonic not in supported set"
-    ),
+    check=_rsd_alu_pair,   # see scheduler/pairing.py
 )
+
+def _rsd_alu_pair(a, b):
+    for slot, insn in (("A", a), ("B", b)):
+        if insn.mnemonic not in SUPPORTED:
+            return f"rsd-alu-pair: {slot}-slot mnemonic not in supported set"
+        if insn.rd != insn.rs1 and not insn.is_commutative:
+            return f"rsd-alu-pair: {slot}-slot rd==rs2 but {insn.mnemonic} is not commutative"
+    return None
 ```
 
 Note that this rule is intentionally narrow.  Widening it (e.g. allowing one
