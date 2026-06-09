@@ -238,12 +238,13 @@ def link_blocks(*blocks):
         blocks[i + 1].predecessors.append(blocks[i])
 
 
-# Convenience accessors for the unified LivenessResult
-def live_in(result, label):
-    return result.live_in[label]
+# Convenience accessors for the unified LivenessResult.
+# Accepts a BasicBlock object and uses id(bb) as the key.
+def live_in(result, bb):
+    return result.live_in[id(bb)]
 
-def live_out(result, label):
-    return result.live_out[label]
+def live_out(result, bb):
+    return result.live_out[id(bb)]
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +259,7 @@ class TestGlobalPassSingleBlock:
         ret = make_ret()
         bb = single_block_cfg([ret])
         result = compute_global_liveness([bb])
-        assert live_out(result, bb.label) == RET_REGS | CALLEE_SAVED
+        assert live_out(result, bb) == RET_REGS | CALLEE_SAVED
 
     def test_single_add_live_through(self):
         """  add a0, a1, a2
@@ -270,8 +271,8 @@ class TestGlobalPassSingleBlock:
         ret  = make_ret()
         bb   = single_block_cfg([add, ret])
         result = compute_global_liveness([bb])
-        assert 11 in live_in(result, bb.label)
-        assert 12 in live_in(result, bb.label)
+        assert 11 in live_in(result, bb)
+        assert 12 in live_in(result, bb)
 
     def test_def_kills_upstream_use(self):
         """  addi a2, a2, 1   ; redefines a2 (also reads it)
@@ -284,7 +285,7 @@ class TestGlobalPassSingleBlock:
         ret   = make_ret()
         bb    = single_block_cfg([insn1, insn2, ret])
         result = compute_global_liveness([bb])
-        assert 12 in live_in(result, bb.label)
+        assert 12 in live_in(result, bb)
 
     def test_pure_def_kills_before_block_entry(self):
         """  addi a2, a3, 0   ; a2 = a3; a2 is newly defined
@@ -298,8 +299,8 @@ class TestGlobalPassSingleBlock:
         ret   = make_ret()
         bb    = single_block_cfg([insn1, insn2, ret])
         result = compute_global_liveness([bb])
-        assert 12 not in live_in(result, bb.label)
-        assert 13 in live_in(result, bb.label)
+        assert 12 not in live_in(result, bb)
+        assert 13 in live_in(result, bb)
 
     def test_dead_def_not_live(self):
         """  addi t0, t0, 1   ; t0 written but never read after
@@ -311,14 +312,14 @@ class TestGlobalPassSingleBlock:
         bb   = single_block_cfg([insn, ret])
         result = compute_global_liveness([bb])
         assert 5 not in (RET_REGS | CALLEE_SAVED)
-        assert 5 not in live_out(result, bb.label)
+        assert 5 not in live_out(result, bb)
 
     def test_sp_callee_saved_live_at_ret(self):
         """sp (x2) is CALLEE_SAVED — it must appear in live_out for a ret block."""
         ret = make_ret()
         bb  = single_block_cfg([ret])
         result = compute_global_liveness([bb])
-        assert 2 in live_out(result, bb.label)
+        assert 2 in live_out(result, bb)
 
     def test_zero_register_never_live(self):
         """x0 is hardwired zero; it should never appear in any live set."""
@@ -326,8 +327,8 @@ class TestGlobalPassSingleBlock:
         ret = make_ret()
         bb  = single_block_cfg([add, ret])
         result = compute_global_liveness([bb])
-        assert 0 not in live_in(result, bb.label)
-        assert 0 not in live_out(result, bb.label)
+        assert 0 not in live_in(result, bb)
+        assert 0 not in live_out(result, bb)
 
     def test_x0_source_operand_not_live(self):
         """addi a0, x0, 5 — x0 as source should not make x0 live."""
@@ -335,7 +336,7 @@ class TestGlobalPassSingleBlock:
         ret  = make_ret()
         bb   = single_block_cfg([insn, ret])
         result = compute_global_liveness([bb])
-        assert 0 not in live_in(result, bb.label)
+        assert 0 not in live_in(result, bb)
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +350,7 @@ class TestABISeedTerminals:
         ret = make_ret()
         bb  = single_block_cfg([ret])
         result = compute_global_liveness([bb])
-        assert live_out(result, bb.label) == RET_REGS | CALLEE_SAVED
+        assert live_out(result, bb) == RET_REGS | CALLEE_SAVED
 
     def test_ret_seed_float(self):
         """ret → live_out includes float RET_REGS (fa0, fa1 at indices 42, 43)."""
@@ -357,21 +358,21 @@ class TestABISeedTerminals:
         bb  = single_block_cfg([ret])
         result = compute_global_liveness([bb])
         for r in _FLOAT_RET_REGS:
-            assert r in live_out(result, bb.label)
+            assert r in live_out(result, bb)
 
     def test_tail_pseudo_seed_int(self):
         """tail pseudo → live_out seed includes a0–a7."""
         tail = make_tail_pseudo()
         bb   = single_block_cfg([tail])
         result = compute_global_liveness([bb])
-        assert _INT_ARG_REGS.issubset(live_out(result, bb.label))
+        assert _INT_ARG_REGS.issubset(live_out(result, bb))
 
     def test_tail_pseudo_seed_float(self):
         """tail pseudo → live_out seed includes fa0–fa7 (indices 42–49)."""
         tail = make_tail_pseudo()
         bb   = single_block_cfg([tail])
         result = compute_global_liveness([bb])
-        assert _FLOAT_ARG_REGS.issubset(live_out(result, bb.label))
+        assert _FLOAT_ARG_REGS.issubset(live_out(result, bb))
 
     def test_call_pseudo_seed_int(self):
         """call pseudo → live_out seed = RET_REGS ∪ CALLEE_SAVED."""
@@ -379,7 +380,7 @@ class TestABISeedTerminals:
         ret  = make_ret()
         bb   = single_block_cfg([call, ret])
         result = compute_global_liveness([bb])
-        assert (RET_REGS | CALLEE_SAVED).issubset(live_out(result, bb.label))
+        assert (RET_REGS | CALLEE_SAVED).issubset(live_out(result, bb))
 
     def test_call_pseudo_seed_float(self):
         """call pseudo → live_out includes float CALLEE_SAVED (fs0–fs11)."""
@@ -387,7 +388,7 @@ class TestABISeedTerminals:
         ret  = make_ret()
         bb   = single_block_cfg([call, ret])
         result = compute_global_liveness([bb])
-        assert _FLOAT_CALLEE_SAVED.issubset(live_out(result, bb.label))
+        assert _FLOAT_CALLEE_SAVED.issubset(live_out(result, bb))
 
     def test_jalr_t0_is_call(self):
         """jalr t0, rs1 — rd=t0(x5) counts as call-with-return."""
@@ -395,14 +396,14 @@ class TestABISeedTerminals:
         ret  = make_ret()
         bb   = single_block_cfg([call, ret])
         result = compute_global_liveness([bb])
-        assert _INT_CALLEE_SAVED.issubset(live_out(result, bb.label))
+        assert _INT_CALLEE_SAVED.issubset(live_out(result, bb))
 
     def test_tail_call_jalr_seed(self):
         """jalr x0, t1 (rs1=t1≠ra) — tail call → live_out seed includes a0–a7."""
         tail = make_tail_call(rs1=6)
         bb   = single_block_cfg([tail])
         result = compute_global_liveness([bb])
-        assert _INT_ARG_REGS.issubset(live_out(result, bb.label))
+        assert _INT_ARG_REGS.issubset(live_out(result, bb))
 
     def test_jal_ra_is_call_seed(self):
         """jal ra, target — call; live_out seed = RET_REGS ∪ CALLEE_SAVED."""
@@ -410,8 +411,8 @@ class TestABISeedTerminals:
         ret  = make_ret()
         bb   = single_block_cfg([call, ret])
         result = compute_global_liveness([bb])
-        assert (RET_REGS | CALLEE_SAVED).issubset(live_out(result, bb.label))
-        assert _FLOAT_CALLEE_SAVED.issubset(live_out(result, bb.label))
+        assert (RET_REGS | CALLEE_SAVED).issubset(live_out(result, bb))
+        assert _FLOAT_CALLEE_SAVED.issubset(live_out(result, bb))
 
     def test_plain_jal_x0_not_a_call(self):
         """jal x0, target — NOT a call; no ABI seed injection."""
@@ -424,7 +425,7 @@ class TestABISeedTerminals:
         # Only RET_REGS | CALLEE_SAVED from ret should be in live_out of 'before'
         caller_only = CALLER_SAVED - CALLEE_SAVED - RET_REGS
         for r in caller_only:
-            assert r not in live_out(result, bb.label), (
+            assert r not in live_out(result, bb), (
                 f"reg {r} should not be live after plain jal x0")
 
 
@@ -443,12 +444,12 @@ class TestGlobalPassMultiBlock:
 
         result = compute_global_liveness([block_a, block_b])
 
-        assert live_out(result, "a") == live_in(result, "b")
-        assert live_out(result, "a") == RET_REGS | CALLEE_SAVED
+        assert live_out(result, block_a) == live_in(result, block_b)
+        assert live_out(result, block_a) == RET_REGS | CALLEE_SAVED
 
-        assert 11 in live_in(result, "a")
-        assert 12 in live_in(result, "a")
-        assert 10 not in live_in(result, "a")
+        assert 11 in live_in(result, block_a)
+        assert 12 in live_in(result, block_a)
+        assert 10 not in live_in(result, block_a)
 
     def test_join_point_live_union(self):
         insn_c0 = make_add(rd=10, rs1=11, rs2=12)
@@ -467,12 +468,12 @@ class TestGlobalPassMultiBlock:
 
         result = compute_global_liveness([block_a, block_b, block_c])
 
-        assert 11 in live_in(result, "c")
-        assert 12 in live_in(result, "c")
-        assert 13 in live_in(result, "a")
-        assert 14 in live_in(result, "b")
-        assert 13 not in live_in(result, "b")
-        assert 14 not in live_in(result, "a")
+        assert 11 in live_in(result, block_c)
+        assert 12 in live_in(result, block_c)
+        assert 13 in live_in(result, block_a)
+        assert 14 in live_in(result, block_b)
+        assert 13 not in live_in(result, block_b)
+        assert 14 not in live_in(result, block_a)
 
     def test_back_edge_loop(self):
         beq    = make_beq(rs1=10, rs2=0, target="exit")
@@ -490,8 +491,8 @@ class TestGlobalPassMultiBlock:
 
         result = compute_global_liveness([header, body, exit_b])
 
-        assert 10 in live_in(result, "header")
-        assert 10 in live_in(result, "body")
+        assert 10 in live_in(result, header)
+        assert 10 in live_in(result, body)
 
     def test_conditional_branch_live_union(self):
         beq     = make_beq(rs1=10, rs2=11, target="tgt")
@@ -511,7 +512,7 @@ class TestGlobalPassMultiBlock:
 
         result = compute_global_liveness([block_br, block_ft, block_tgt])
 
-        li_br = live_in(result, "br")
+        li_br = live_in(result, block_br)
         for r in (10, 11, 13, 14, 15, 16):
             assert r in li_br, f"x{r} should be live at conditional branch block"
 
@@ -524,7 +525,7 @@ class TestGlobalPassMultiBlock:
 
         result = compute_global_liveness([bb, phantom])
 
-        lo = live_out(result, "tail_block")
+        lo = live_out(result, bb)
         assert _INT_ARG_REGS.issubset(lo)
         if 3 not in ARG_REGS:
             assert 3 not in lo
@@ -544,7 +545,7 @@ class TestABIInjection:
         bb    = single_block_cfg([insn0, call, add, ret], label="b")
         result = compute_global_liveness([bb])
         for r in _INT_CALLEE_SAVED:
-            assert r in live_in(result, bb.label) or r in live_out(result, bb.label), (
+            assert r in live_in(result, bb) or r in live_out(result, bb), (
                 f"callee-saved x{r} should survive across call")
 
     def test_call_implicit_uses_arg_regs(self):
@@ -556,7 +557,7 @@ class TestABIInjection:
         result  = compute_global_liveness([bb])
         for r in _INT_ARG_REGS:
             if r not in (10, 11):
-                assert r in live_in(result, bb.label), (
+                assert r in live_in(result, bb), (
                     f"a{r-10} should be live_in (implicit call use, not redefined)")
 
     def test_call_does_not_kill_callee_saved(self):
@@ -566,14 +567,14 @@ class TestABIInjection:
         ret    = make_ret()
         bb     = single_block_cfg([set_s0, call, use_s0, ret])
         result = compute_global_liveness([bb])
-        assert 8 in live_in(result, bb.label)
+        assert 8 in live_in(result, bb)
 
     def test_return_implicit_uses_ret_regs(self):
         add = make_add(rd=10, rs1=11, rs2=12)
         ret = make_ret()
         bb  = single_block_cfg([add, ret])
         result = compute_global_liveness([bb])
-        assert 10 in live_out(result, bb.label) or 10 in live_in(result, bb.label)
+        assert 10 in live_out(result, bb) or 10 in live_in(result, bb)
 
     def test_float_callee_saved_survives_call(self):
         """fs0 (float index 40) must be live across a call (CALLEE_SAVED)."""
@@ -584,7 +585,7 @@ class TestABIInjection:
         bb    = single_block_cfg([call, fadd, ret])
         result = compute_global_liveness([bb])
         # fs0 (float index 40) should be live into the block
-        assert FS0 in live_in(result, bb.label)
+        assert FS0 in live_in(result, bb)
 
 
 # ---------------------------------------------------------------------------
@@ -739,8 +740,8 @@ class TestFloatLiveness:
         ret  = make_ret()
         bb   = single_block_cfg([fadd, ret])
         result = compute_global_liveness([bb])
-        assert FA1 in live_in(result, bb.label)
-        assert FA2 in live_in(result, bb.label)
+        assert FA1 in live_in(result, bb)
+        assert FA2 in live_in(result, bb)
 
     def test_float_def_kills(self):
         """Two fadd.s instructions both writing fa0; first def is killed."""
@@ -749,7 +750,7 @@ class TestFloatLiveness:
         ret   = make_ret()
         bb    = single_block_cfg([fadd1, fadd2, ret])
         result = compute_global_liveness([bb])
-        assert FA0 not in live_in(result, bb.label)
+        assert FA0 not in live_in(result, bb)
 
     def test_int_and_float_same_numeric_index_independent(self):
         """a0 (int=10) and fa0 (float=42) are different registers in unified namespace.
@@ -761,11 +762,11 @@ class TestFloatLiveness:
         bb   = single_block_cfg([iadd, fadd, ret])
         result = compute_global_liveness([bb])
         # Integer a1=11, a2=12
-        assert 11 in live_in(result, bb.label)
-        assert 12 in live_in(result, bb.label)
+        assert 11 in live_in(result, bb)
+        assert 12 in live_in(result, bb)
         # Float fa1=43, fa2=44
-        assert FA1 in live_in(result, bb.label)
-        assert FA2 in live_in(result, bb.label)
+        assert FA1 in live_in(result, bb)
+        assert FA2 in live_in(result, bb)
 
     def test_float_ret_regs_in_ret_seed(self):
         """ret seed includes fa0 (42) and fa1 (43) — float RET_REGS."""
@@ -773,7 +774,7 @@ class TestFloatLiveness:
         bb  = single_block_cfg([ret])
         result = compute_global_liveness([bb])
         for r in _FLOAT_RET_REGS:
-            assert r in live_out(result, bb.label)
+            assert r in live_out(result, bb)
 
     def test_float_caller_saved_killed_by_call(self):
         """ft0 (float index 32) is CALLER_SAVED; must not be live after call."""
@@ -810,8 +811,8 @@ class TestEdgeCases:
         """A block with zero instructions."""
         bb = single_block_cfg([], label="empty")
         result = compute_global_liveness([bb])
-        assert live_in(result, "empty") == frozenset()
-        assert live_out(result, "empty") == frozenset()
+        assert live_in(result, bb) == frozenset()
+        assert live_out(result, bb) == frozenset()
 
     def test_store_does_not_define_rd(self):
         """sw has no rd; it must not add anything to def[B]."""
@@ -819,8 +820,8 @@ class TestEdgeCases:
         ret = make_ret()
         bb  = single_block_cfg([sw, ret])
         result = compute_global_liveness([bb])
-        assert 2 in live_in(result, bb.label)
-        assert 10 in live_in(result, bb.label)
+        assert 2 in live_in(result, bb)
+        assert 10 in live_in(result, bb)
 
     def test_unknown_instruction_conservative_register_handling(self):
         """Unknown instruction: first register-like operand is def, rest are uses."""
@@ -831,9 +832,9 @@ class TestEdgeCases:
         ret = make_ret()
         bb  = single_block_cfg([unk, ret])
         result = compute_global_liveness([bb])
-        assert 11 in live_in(result, bb.label)
-        assert 12 in live_in(result, bb.label)
-        assert 10 not in live_in(result, bb.label)
+        assert 11 in live_in(result, bb)
+        assert 12 in live_in(result, bb)
+        assert 10 not in live_in(result, bb)
 
     def test_worklist_converges(self):
         """A loop with a back-edge must converge to a fixed point."""
@@ -864,8 +865,8 @@ class TestEdgeCases:
 
         result = compute_global_liveness([fn1, fn2])
 
-        assert 15 not in live_in(result, "fn1")
-        assert 15 in live_in(result, "fn2")
+        assert 15 not in live_in(result, fn1)
+        assert 15 in live_in(result, fn2)
 
     def test_indirect_jump_no_successors_for_liveness(self):
         """jalr x0, rs1 — computed goto; terminates_function=True."""
@@ -877,7 +878,7 @@ class TestEdgeCases:
 
         result = compute_global_liveness([bb, phantom])
         if 3 not in ARG_REGS:
-            assert 3 not in live_out(result, "indirect")
+            assert 3 not in live_out(result, bb)
 
     def test_liveness_result_is_frozensets(self):
         """live_in / live_out stored on Instruction objects must be frozenset."""
@@ -892,13 +893,13 @@ class TestEdgeCases:
 
     def test_liveness_result_interface(self):
         """compute_global_liveness must return an object with live_in and live_out
-        keyed by block label (str)."""
+        keyed by id(bb) (object identity)."""
         ret = make_ret()
         bb  = single_block_cfg([ret], label="entry")
         result = compute_global_liveness([bb])
         assert hasattr(result, "live_in")
         assert hasattr(result, "live_out")
-        assert "entry" in result.live_in
+        assert id(bb) in result.live_in
 
 
 # ---------------------------------------------------------------------------

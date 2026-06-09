@@ -34,7 +34,7 @@ rv_scheduler/
 │   ├── registers.py          # register indices, ABI names, calling-convention sets
 │   ├── abi.py                # call_liveness_effect() — ABI-implied use/def sets
 │   ├── instruction.py        # Instruction base class + all computed properties
-│   └── decode/
+│   └── decode/               # planned modular decoders (see §4 note)
 │       ├── __init__.py       # public parse_line() factory
 │       ├── rv_i.py           # RV32I / RV64I
 │       ├── rv_m.py           # M extension
@@ -46,15 +46,17 @@ rv_scheduler/
 │       ├── rv_v.py           # V extension
 │       └── rv_zicsr.py       # Zicsr
 ├── analysis/
+│   ├── parser.py             # actual implementation: two-pass parsing + decode (see §4)
 │   ├── cfg.py                # basic-block + function identification, CFG edges
 │   ├── depgraph.py           # per-block RAW/WAR/WAW dependency graph
-│   └── liveness.py           # iterative liveness dataflow, per-instruction sets
+│   ├── liveness.py           # iterative liveness dataflow, per-instruction sets
+│   └── annotator.py          # formats annotated assembly output
 ├── scheduler/
 │   ├── pairing.py            # can_pair(a, b) -> None | reason_str; greedy pass
-│   ├── rules.py              # PairingRule dataclass + all concrete rules
+│   ├── rules.py              # PairingRule dataclass + all concrete rules (planned)
 │   └── reorder.py            # list scheduling (default) + BnB (--thorough)
 └── output/
-    └── annotator.py          # formats annotated assembly output
+    └── annotator.py          # planned output formatter (currently in analysis/annotator.py)
 ```
 
 ---
@@ -315,6 +317,14 @@ use `access_width.bit_length() - 1` to derive `shift` (e.g. width 4 →
 
 ## 4. `isa/decode/` — Decoders
 
+> **Implementation note:** The modular `isa/decode/` structure described in this
+> section reflects the target design.  The current implementation consolidates
+> two-pass parsing and instruction decode into a single file, `analysis/parser.py`,
+> rather than the per-extension module layout shown above.  All behaviours
+> described in this section (two-pass label classification, best-effort decode,
+> pseudo-instruction handling, etc.) are implemented there.  The `isa/decode/`
+> directory does not yet exist; `analysis/parser.py` is the authoritative source.
+
 ### Two-pass parsing
 
 The parser makes two passes over the source file before decoding any
@@ -509,12 +519,15 @@ They are not included in `rvc_eligible` computation.
 ```python
 @dataclass
 class BasicBlock:
+    label:              str | None     # primary label (used as dict key in older passes; None for unlabelled blocks)
     labels:             list[str]      # all labels at this address (may be empty or multiple)
     instructions:       list[Instruction]
     successors:         list[BasicBlock]
     predecessors:       list[BasicBlock]
     is_function_entry:  bool           # True when preceded by a .globl or .weak directive
 ```
+
+> **Implementation note:** The current code retains both `label` (a single primary label, historically used as a dict key in the liveness pass) and `labels` (the full list of all labels at the same address).  The liveness pass now keys by `id(bb)` (object identity) rather than `bb.label`, so `labels` can safely contain multiple entries and `label` is no longer load-bearing for analysis.  Both fields are kept for compatibility with tests and tools that reference `bb.label` directly.
 
 ### CFG edges
 
