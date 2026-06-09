@@ -115,3 +115,80 @@ These ABI assumptions are the basis on which liveness analysis produces
 live-in and live-out sets for each block, which in turn determine which
 inter-block register dependencies must be honoured even though the instructions
 on the other side of the boundary are not visible to the scheduler.
+
+---
+
+## 3. Scope of reordering
+
+The scheduler reorders instructions within a basic block.  It does not attempt
+to move instructions across block boundaries or hoist/sink them across branches.
+The rationale is that the tool processes compiler output: a compiler already made
+those larger-scope decisions, and second-guessing them risks correctness problems
+(hoisting across a branch requires knowing the branch condition is always taken,
+etc.) for marginal gain.  The tool's job is to pack what the compiler gave it
+as efficiently as possible, not to re-optimise the compiler's code structure.
+
+---
+
+## 4. Unknown instructions
+
+An instruction is *unknown* when its mnemonic is not in the recognised opcode
+table.  This most commonly means a custom extension, a newer standard extension
+not yet in the decoder, or a vendor-specific intrinsic.
+
+**Pairing**: unknown instructions are disqualified from both packet slots (§1).
+The rationale is that their operands, side effects, and structural constraints
+are all unverified.
+
+**Dependency analysis**: the tool applies best-effort positional decoding to
+unknown instructions — register-name tokens are assigned to `rd`/`rs1`/`rs2`
+in order, and `offset(base)` syntax is recognised as a memory operand.  This
+is likely to be correct for instructions that follow established RISC-V
+operand conventions, since most custom extensions do.  The consequence of
+a wrong decode is a missing dependency edge, which could produce an
+incorrectly reordered output.
+
+**Policy**: when an unknown instruction appears in real input, the correct
+response is to add it to the decoder, not to rely on the heuristic.  The
+heuristic is an interim measure that makes the tool useful on unfamiliar input
+while the gap is being investigated, not a permanent substitute for correct
+decoding.  Unknown instructions are annotated with `[?]` in the output to make
+them visible.
+
+---
+
+## 5. Labels as block boundaries
+
+A label is treated as a basic-block boundary (barrier) if it could be the
+target of a control-flow transfer from somewhere not immediately preceding it.
+The prescan identifies barriers from:
+
+- Branch and jump targets appearing directly in instruction operands.
+- `.globl` and `.weak` directives (the label may be called from outside the
+  translation unit).
+- Data directives that reference a label *without arithmetic* — e.g.
+  `.word .Lfoo` makes `.Lfoo` a barrier because something may branch to it
+  via a computed address loaded from the table.  However, `.word .Lfoo - .Lbar`
+  or `.word .Lfoo + 4` contains arithmetic and is a PCREL or offset expression;
+  the label is not the target of a branch, only a value used in a calculation,
+  so it is **not** treated as a barrier.
+
+---
+
+## 6. Open questions
+
+The following design decisions have not yet been resolved.  They are noted here
+so that they are not silently assumed.
+
+**ABI target**: the tool assumes the standard RISC-V psABI, including `t0` (x5)
+as an alternate link register used by linker call stubs.  If the target uses a
+non-standard calling convention (firmware, custom RTOS, etc.) the ABI tables in
+`isa/abi.py` and `isa/registers.py` would need to be updated.  It is not yet
+decided whether supporting multiple ABI profiles is a goal.
+
+**Memory ordering conservatism**: the default memory model is conservative —
+every load/store pair is ordered unless `--same-base-reorder` is passed.  For
+the primary goal of measuring pairing rates, this default may systematically
+suppress pairing opportunities in memory-heavy code.  It is not yet decided
+whether the measured pairing rates should reflect "safe by default" or "best
+achievable with explicit relaxation".
