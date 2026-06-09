@@ -20,8 +20,10 @@ Every instruction is emitted in one of two forms:
 
 - **Solo** — a single instruction that could not be paired.  A solo instruction
   carries annotations recording:
-  - Whether it is eligible for **RVC** (compressed 16-bit) encoding, if that
-    applies.
+  - Whether it is eligible for **RVC** (compressed 16-bit) encoding.  This is
+    only noted on solo instructions — a paired instruction that is RVC-eligible
+    carries no such annotation, because the pairing opportunity was taken and
+    the RVC eligibility is moot.
   - Whether it is an **unknown instruction** — one whose opcode is not
     recognised, which means its register reads, writes, and side effects cannot
     be determined.  Unknown instructions are treated conservatively.
