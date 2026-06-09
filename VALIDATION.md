@@ -55,25 +55,45 @@ underspecified to the point where two reasonable implementations could differ.
   is now self-contradictory.
 
 
-## Technique 3 — Five-subagent structured audit
+## Technique 3 — Six targeted approaches (gap-finding menu)
 
-*(Details to be recovered from session transcript at
-`/root/.claude/projects/-home-user-ai-rv32-scheduler/2a627adc-34c7-5a78-9309-5802550b4dc0.jsonl`.
-The broad shape was five agents each with a distinct angle of attack, run in
-parallel, with findings synthesised afterward.  Possible decomposition — to be
-confirmed against the transcript:)*
+These six approaches find different classes of problems and can be run
+independently or combined.  Estimated yield is noted for each.
 
-1. **Plan-to-code coverage**: does every normative claim in the plan have a
-   corresponding implementation?
-2. **Code-to-plan coverage**: does every non-trivial code behaviour appear
-   somewhere in the plan?
-3. **Interface contracts**: do the public APIs (function signatures, return
-   types, data-class fields) match what the plan specifies?
-4. **Test coverage**: do the tests exercise the behaviours the plan calls out
-   as important?
-5. **Invariant audit**: does the code uphold the invariants the plan states
-   (e.g. liveness dict keying, packet sequential semantics, function-boundary
-   isolation)?
+1. **Write unit tests first** *(medium yield)*
+   Draft the test file for one module without looking at the plan, then compare
+   what the tests assume against what the plan specifies.  Edge cases that tests
+   naturally reach — what happens at a call inside a loop? what is the seed for
+   a block with no successors? — surface gaps the plan glosses over.
+
+2. **Trace a concrete example end-to-end** *(medium yield)*
+   Pick 10–15 lines of real RISC-V assembly — something with a branch, a call,
+   a load/store pair, and one unknown mnemonic — and manually walk through every
+   phase the plan describes: two-pass label scan, block boundaries, CFG edges,
+   liveness dataflow, dep-graph edges, list scheduling decisions, greedy-advance
+   pairing, annotation output.  Any step where you cannot produce a definite
+   answer from the plan text alone is a gap.
+
+3. **Ask a model to implement one module from the plan alone** *(highest yield)*
+   Give the model only the relevant plan section(s) and ask it to write the
+   code.  The questions it asks, the assumptions it makes, and the corners it
+   has to invent are all plan deficiencies.  This forces every ambiguity to
+   resolve: the model either makes a reasonable guess (revealing the plan left
+   room for it) or asks a clarifying question (revealing a genuine gap).
+
+4. **Adversarial edge-case prompting** *(high yield)*
+   Ask a model to generate assembly snippets specifically designed to stress
+   each design decision: a label that is both a branch target and `.globl`, a
+   commutative instruction where `rd == rs1 == rs2`, a block that ends with an
+   unknown instruction, a tail call in a loop, a block with only one
+   instruction.  Then trace each through the plan.
+
+5. **Cross-check spec-derived tables against primary sources** *(targeted yield)*
+   Any table or enumeration in the plan that was written from training data
+   rather than a primary source is suspect: the RVC encoding table in §5, ABI
+   register conventions, calling-convention saved/clobbered sets.  Fetch the
+   actual RISC-V specs and diff them against the plan tables to catch wrong
+   bit-widths, alignment constraints, or register-range boundaries.
 
 ---
 
