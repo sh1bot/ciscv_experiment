@@ -6,8 +6,8 @@ import pytest
 from isa.instruction import Instruction
 from analysis.cfg import BasicBlock
 from analysis.depgraph import build_dep_graph
-from analysis.scheduler import schedule, ScheduleMode
-from analysis.pairing import greedy_pair
+from scheduler.reorder import schedule, ScheduleMode
+from scheduler.pairing import greedy_pair
 from analysis.liveness import compute_global_liveness, compute_local_liveness
 
 

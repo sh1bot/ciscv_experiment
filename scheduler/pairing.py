@@ -1,5 +1,5 @@
 """
-analysis/pairing.py — Pairing rules and can_pair() function.
+scheduler/pairing.py — Pairing rules and can_pair() function.
 
 The pairing model is encoding-based allowlist: a pair (a, b) is valid iff at
 least one PairingRule accepts it. can_pair() returns None on success or a

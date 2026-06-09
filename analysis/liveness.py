@@ -68,28 +68,28 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
     gets CALLEE_SAVED permanently unioned into its live_in.
 
     The list of blocks is treated as a single analysis unit (function scope).
-    Blocks are identified by their .label attribute.
+    Blocks are identified by id(bb) (object identity).
     """
     result = LivenessResult()
 
     # Initialize
     for bb in blocks:
-        key = bb.label
+        key = id(bb)
         result.live_in[key]  = frozenset()
         result.live_out[key] = frozenset()
 
     # Pre-compute use/def for each block
     use_def = {}
     for bb in blocks:
-        use_def[bb.label] = _block_use_def(bb)
+        use_def[id(bb)] = _block_use_def(bb)
 
     # Worklist — iterate until stable
     worklist = deque(blocks)
-    in_worklist = {bb.label: True for bb in blocks}
+    in_worklist = {id(bb): True for bb in blocks}
 
     while worklist:
         bb = worklist.popleft()
-        key = bb.label
+        key = id(bb)
         in_worklist[key] = False
 
         use, defs, terminates, exit_seed = use_def[key]
@@ -100,8 +100,8 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
         else:
             new_out = exit_seed  # may be empty for non-terminating blocks
             for succ in bb.successors:
-                if succ.label in result.live_in:
-                    new_out = new_out | result.live_in[succ.label]
+                if id(succ) in result.live_in:
+                    new_out = new_out | result.live_in[id(succ)]
 
         # --- Compute live_in ---
         new_in = use | (new_out - defs)
@@ -117,9 +117,9 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
 
             # Re-add predecessors to worklist (only those in this function)
             for pred in bb.predecessors:
-                if pred.label in use_def and not in_worklist.get(pred.label, False):
+                if id(pred) in use_def and not in_worklist.get(id(pred), False):
                     worklist.append(pred)
-                    in_worklist[pred.label] = True
+                    in_worklist[id(pred)] = True
 
     return result
 
@@ -130,7 +130,7 @@ def compute_local_liveness(block, global_result: LivenessResult) -> None:
     Uses the block's global live_out as the initial seed.
     Mid-block call seeds are applied at call instructions.
     """
-    key = block.label
+    key = id(block)
 
     # Seed from global live_out
     live = global_result.live_out.get(key, frozenset())

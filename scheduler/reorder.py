@@ -1,5 +1,5 @@
 """
-analysis/scheduler.py — Instruction reordering for maximum pairing.
+scheduler/reorder.py — Instruction reordering for maximum pairing.
 
 Three modes:
   FORWARD — source order, no reordering
@@ -14,7 +14,7 @@ from typing import Optional
 from analysis.cfg import BasicBlock
 from analysis.depgraph import DepGraph, build_dep_graph
 from analysis.liveness import compute_local_liveness, LivenessResult
-from analysis.pairing import can_pair, greedy_pair
+from scheduler.pairing import can_pair, greedy_pair
 from isa.instruction import Instruction
 
 
@@ -314,8 +314,7 @@ def _bnb_schedule(insns: list, graph: DepGraph) -> list:
                     if 0 <= local_j < len(window):
                         window_edges[i].add(local_j)
 
-        from analysis.cfg import BasicBlock as BB
-        dummy_block = BB(label=None, instructions=window)
+        dummy_block = None  # unused placeholder (window scheduled directly)
         sub_graph = DepGraph(instructions=window, edges=window_edges)
         result.extend(_bnb_single_window(window, sub_graph))
 

@@ -12,8 +12,8 @@ import sys
 from analysis.parser import parse_file
 from analysis.liveness import compute_global_liveness, compute_local_liveness
 from analysis.depgraph import build_dep_graph
-from analysis.scheduler import schedule, ScheduleMode
-from analysis.pairing import greedy_pair
+from scheduler.reorder import schedule, ScheduleMode
+from scheduler.pairing import greedy_pair
 from analysis.annotator import annotate_output
 
 

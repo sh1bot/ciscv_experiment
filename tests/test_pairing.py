@@ -4,7 +4,7 @@ Tests for analysis/pairing.py — pairing rules and can_pair().
 
 import pytest
 from isa.instruction import Instruction
-from analysis.pairing import (
+from scheduler.pairing import (
     can_pair, greedy_pair, RULES,
     A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS,
 )
@@ -198,7 +198,7 @@ class TestSoloReasons:
         """Rule-check rejection reasons should go to both instructions."""
         # Two branches — first is A-slot disqualified (so never reaches rule check)
         # Instead, test with atomic (has_side_effects) pair
-        from analysis.pairing import _record_solo_reasons
+        from scheduler.pairing import _record_solo_reasons
         a = make_add(10, 11, 12)
         b = make_add(13, 14, 15)
         a.solo_reasons = set()
