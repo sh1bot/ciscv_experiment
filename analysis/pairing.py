@@ -25,14 +25,14 @@ from isa.instruction import Instruction
 class PairingRule:
     name: str
 
+    # check(a, b) -> None means encoding accepts; str -> encoding rejects (reason).
+    check: Callable
+
     # Properties that must be True on a for the rule to be applicable.
     a_prerequisites: list = field(default_factory=list)
 
     # Properties that must be True on b for the rule to be applicable.
     b_prerequisites: list = field(default_factory=list)
-
-    # check(a, b) -> None means encoding accepts; str -> encoding rejects (reason).
-    check: Callable = None
 
 
 # ---------------------------------------------------------------------------

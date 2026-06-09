@@ -396,6 +396,10 @@ detectable memory operand may be freely reordered around other memory operations
 similar single-instruction pseudo-instructions are expanded to their canonical
 equivalents during parsing.  All downstream code sees only real instructions.
 
+Branch condition pseudo-instructions (`beqz`, `bnez`, `bltz`, `bgez`, `blez`,
+`bgtz`) are **not** expanded — they are retained with their original mnemonic.
+`is_branch` and the CFG-edge builder recognise them directly.
+
 `ret`, `call`, and `tail` are **not** expanded — they are retained as single
 instructions with their original mnemonic.  Their ABI effects (argument registers
 used, caller-saved registers clobbered) are handled by `call_liveness_effect()`
@@ -730,17 +734,19 @@ the dep-graph does not need to be consulted again by pairing rules.
 class PairingRule:
     name: str
 
+    # Returns None  -> this encoding accepts the pair (success).
+    # Returns str   -> this encoding cannot represent the pair; the string
+    #                  is the reason.  Other encodings (rules) may still accept.
+    # The reason string should be prefixed with the rule name, e.g.
+    # "rsd-alu-pair: mnemonic not in supported set".
+    check: Callable[[Instruction, Instruction], str | None]
+
     # Properties that must be True on the A-slot instruction (first of pair).
     # If any fails, this rule is skipped (not applicable — does not reject).
     a_prerequisites: list[str] = field(default_factory=list)
 
     # Properties that must be True on the B-slot instruction (second of pair).
     b_prerequisites: list[str] = field(default_factory=list)
-
-    # Returns None  -> this encoding accepts the pair (success).
-    # Returns str   -> this encoding cannot represent the pair; the string
-    #                  is the reason.  Other encodings (rules) may still accept.
-    check: Callable[[Instruction, Instruction], str | None]
 ```
 
 ### Slot asymmetry
