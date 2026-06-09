@@ -16,7 +16,7 @@ from collections import deque
 from typing import Optional
 
 from isa.abi import call_liveness_effect
-from isa.registers import CALLEE_SAVED
+from isa.registers import ARG_REGS
 
 
 @dataclass
@@ -45,16 +45,11 @@ def _block_use_def(block) -> tuple[frozenset, frozenset, bool, frozenset]:
             terminates = True
             exit_seed  = seed
 
-        # For ABI-controlled instructions, use ONLY the ABI implicit uses,
-        # not the raw register operands.
-        is_abi = bool(imp_use or imp_def or seed or term)
+        for r in insn.uses_regs:
+            if r not in def_set:
+                use_set.add(r)
 
-        if not is_abi:
-            for r in insn.uses_regs:
-                if r not in def_set:
-                    use_set.add(r)
-
-        # ABI implicit uses always added
+        # ABI implicit uses (e.g. caller-saved regs at calls)
         for r in imp_use:
             if r not in def_set:
                 use_set.add(r)
@@ -111,9 +106,9 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
         # --- Compute live_in ---
         new_in = use | (new_out - defs)
 
-        # ENTRY_SEED: function-entry blocks get CALLEE_SAVED permanently unioned in
+        # ENTRY_SEED: function-entry blocks assume argument registers are live-in
         if bb.is_function_entry and bb.instructions:
-            new_in = new_in | CALLEE_SAVED
+            new_in = new_in | ARG_REGS
 
         # Check for change
         if new_in != result.live_in[key] or new_out != result.live_out[key]:
@@ -151,12 +146,5 @@ def compute_local_liveness(block, global_result: LivenessResult) -> None:
         # live_out of this instruction = current live set (after seed application)
         insn.live_out = frozenset(live)
 
-        # live_in = (live_out - defs) ∪ uses
-        is_abi = bool(imp_use or imp_def or seed or term)
-        if is_abi:
-            raw_uses = frozenset()
-        else:
-            raw_uses = insn.uses_regs
-
-        live = (live - insn.defs_regs - imp_def) | raw_uses | imp_use
+        live = (live - insn.defs_regs - imp_def) | insn.uses_regs | imp_use
         insn.live_in = frozenset(live)

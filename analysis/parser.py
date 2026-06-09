@@ -627,8 +627,8 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             pass  # no successors
 
         elif last.mnemonic in ("ecall", "ebreak"):
-            # Fall-through
-            if next_bb and next_bb not in bb.successors:
+            # Fall-through, but don't cross function boundaries
+            if next_bb and not next_bb.is_function_entry and next_bb not in bb.successors:
                 bb.successors.append(next_bb)
                 next_bb.predecessors.append(bb)
 

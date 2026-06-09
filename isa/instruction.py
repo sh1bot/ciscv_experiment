@@ -175,9 +175,8 @@ class Instruction:
     def is_commutative(self) -> bool:
         return self.mnemonic in {
             "add", "addw", "mul", "mulh", "mulhu", "mulhsu",
-            "and", "andw", "or", "orw", "xor", "xorw",
+            "and", "or", "xor",
             "min", "minu", "max", "maxu",
-            "fadd", "faddw", "fmul", "fmulw",
             "fadd.s", "fadd.d", "fmul.s", "fmul.d",
         }
 

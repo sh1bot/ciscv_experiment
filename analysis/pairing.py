@@ -203,7 +203,7 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
         result = rule.check(a, b)
         if result is None:
             return None   # encoding accepts — pair is valid
-        reasons.append(f"{rule.name}: {result}")
+        reasons.append(result)
 
     if reasons:
         return "; ".join(reasons)
