@@ -101,14 +101,9 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
             readers[reg] = []
 
         # --- Memory ordering edges ---
-        is_mem = insn.reads_memory or insn.writes_memory
+        is_mem = insn.reads_memory or insn.writes_memory or insn.has_mem_operand
 
-        if insn.is_unknown:
-            # Unknown instructions conservatively ordered against all memory ops
-            for j, _, _, _ in mem_ops:
-                add_edge(j, i)
-                # Also: future memory ops will depend on unknown (added below)
-        elif is_mem:
+        if is_mem:
             if last_mem_op >= 0:
                 if same_base_reorder:
                     # Check if we can prove independence with the preceding mem op
@@ -143,17 +138,8 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
                     add_edge(last_mem_op, i)
 
         # Update memory op tracking
-        if is_mem or insn.is_unknown:
-            if is_mem:
-                mem_ops.append((i, insn.rs1, insn.imm, insn.access_width))
-            if is_mem:
-                last_mem_op = i
-
-        # For unknown instructions, also ensure future memory ops depend on us
-        if insn.is_unknown:
-            # We record the unknown instruction as a "memory op" for future tracking
-            # Future memory ops will see this in mem_ops and add edge from it
-            mem_ops.append((i, None, None, None))
+        if is_mem:
+            mem_ops.append((i, insn.rs1, insn.imm, insn.access_width))
             last_mem_op = i
 
         # --- auipc + next-insn dependency (§11 PCREL heuristic) ---

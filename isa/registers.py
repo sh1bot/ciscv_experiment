@@ -1,7 +1,10 @@
 """
 isa/registers.py — Register indices, ABI names, and calling-convention sets.
 
-Flat namespace: integer registers 0–31, float registers 32–63.
+Flat namespace: integer registers 0–31, float registers 32–63,
+vector registers 64–95.  Vector registers are recognised so the
+heuristic unknown-instruction decoder can skip them when extracting
+scalar register dependencies.
 """
 
 # Single flat register namespace
@@ -34,6 +37,10 @@ for _i in range(32):
 # Add f0–f31 aliases (offset by 32)
 for _i in range(32):
     REG_ALIASES[f"f{_i}"] = _i + 32
+# Add v0–v31 aliases (offset by 64) — vector register file
+VECTOR_REG_BASE = 64
+for _i in range(32):
+    REG_ALIASES[f"v{_i}"] = _i + VECTOR_REG_BASE
 
 # Calling-convention register sets (unified int+float)
 # Integer caller-saved: ra, t0–t6, a0–a7
@@ -85,7 +92,13 @@ _FLOAT_REG_NAMES = [
 
 
 def reg_name(index: int) -> str:
-    """Return the canonical ABI name for a register index (0–63)."""
+    """Return the canonical ABI name for a register index (0–95)."""
     if index < 32:
         return _INT_REG_NAMES[index]
-    return _FLOAT_REG_NAMES[index - 32]
+    if index < 64:
+        return _FLOAT_REG_NAMES[index - 32]
+    return f"v{index - 64}"
+
+
+def is_vector_reg(index: int) -> bool:
+    return index >= VECTOR_REG_BASE

@@ -346,15 +346,18 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
     for op in ops:
         r = REG_ALIASES.get(op.lower())
         if r is None:
-            # Try parsing mem operand
-            _, r = _parse_mem_operand(op)
+            off, r = _parse_mem_operand(op)
+            if r is not None:
+                insn.has_mem_operand = True
         if r is not None:
             reg_ops.append(r)
-    if reg_ops:
-        first = reg_ops[0]
+    # Assign scalar register operands only (skip vector regs 64+)
+    scalar_ops = [r for r in reg_ops if r < 64]
+    if scalar_ops:
+        first = scalar_ops[0]
         if first != 0:
             insn.rd = first
-        remaining = [r for r in reg_ops[1:] if r != 0]
+        remaining = [r for r in scalar_ops[1:] if r != 0]
         if remaining:
             insn.rs1 = remaining[0]
         if len(remaining) > 1:

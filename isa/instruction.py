@@ -25,6 +25,7 @@ class Instruction:
     imm:  Optional[int] = None
     branch_target: Optional[str] = None
     is_unknown:    bool = False
+    has_mem_operand: bool = False  # unknown insn with a (base-reg) operand
 
     # Populated by liveness pass (indices 0–63):
     live_in:   frozenset = field(default_factory=frozenset)
@@ -34,20 +35,21 @@ class Instruction:
     solo_reasons: set = field(default_factory=set)
 
     # -----------------------------------------------------------------------
-    # Register use/def sets (excluding x0, indices 0–63)
+    # Register use/def sets (scalar only: indices 0–63, excluding x0)
+    # Vector registers (64–95) are excluded — they are not scalar dependencies.
     # -----------------------------------------------------------------------
 
     @property
     def uses_regs(self) -> frozenset:
         regs = set()
         for r in (self.rs1, self.rs2, self.rs3):
-            if r is not None and r != 0:
+            if r is not None and r != 0 and r < 64:
                 regs.add(r)
         return frozenset(regs)
 
     @property
     def defs_regs(self) -> frozenset:
-        if self.rd is not None and self.rd != 0:
+        if self.rd is not None and self.rd != 0 and self.rd < 64:
             return frozenset({self.rd})
         return frozenset()
 
