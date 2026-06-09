@@ -288,19 +288,20 @@ class TestGlobalPassSingleBlock:
         assert 12 in live_in(result, bb)
 
     def test_pure_def_kills_before_block_entry(self):
-        """  addi a2, a3, 0   ; a2 = a3; a2 is newly defined
-             add  a0, a1, a2
+        """  addi t3, t4, 0   ; t3 = t4 (t3 newly defined, not arg reg)
+             add  t5, t3, t3
              ret
-        a2 is NOT live at block entry.
-        a3 IS live at block entry.
+        t3(28) is NOT live at block entry (defined before first use).
+        t4(29) IS live at block entry (read before any def).
+        Uses t3/t4/t5 (28/29/30) — none in ARG_REGS so ENTRY_SEED doesn't mask.
         """
-        insn1 = make_addi(rd=12, rs1=13, imm=0)
-        insn2 = make_add(rd=10, rs1=11, rs2=12)
+        insn1 = make_addi(rd=28, rs1=29, imm=0)   # t3 = t4
+        insn2 = make_add(rd=30, rs1=28, rs2=28)   # t5 = t3 + t3
         ret   = make_ret()
         bb    = single_block_cfg([insn1, insn2, ret])
         result = compute_global_liveness([bb])
-        assert 12 not in live_in(result, bb)
-        assert 13 in live_in(result, bb)
+        assert 28 not in live_in(result, bb)
+        assert 29 in live_in(result, bb)
 
     def test_dead_def_not_live(self):
         """  addi t0, t0, 1   ; t0 written but never read after
@@ -415,15 +416,17 @@ class TestABISeedTerminals:
         assert _FLOAT_CALLEE_SAVED.issubset(live_out(result, bb))
 
     def test_plain_jal_x0_not_a_call(self):
-        """jal x0, target — NOT a call; no ABI seed injection."""
+        """jal x0, target — NOT a call; no ABI seed injection.
+        succ is not a function entry so no ARG_REGS seed floods live_out(bb)."""
         jmp = make_jal_jump(target="loop")
-        succ = single_block_cfg([make_ret()], label="loop")
+        succ = single_block_cfg([make_ret()], label="loop", is_function_entry=False)
         bb   = single_block_cfg([jmp], label="before")
         bb.successors = [succ]
         succ.predecessors = [bb]
         result = compute_global_liveness([bb, succ])
-        # Only RET_REGS | CALLEE_SAVED from ret should be in live_out of 'before'
-        caller_only = CALLER_SAVED - CALLEE_SAVED - RET_REGS
+        # RET_REGS | CALLEE_SAVED | {ra} from ret should propagate to live_out of bb.
+        # ra(1) is live because ret reads it (rs1=ra). Exclude it from the check.
+        caller_only = CALLER_SAVED - CALLEE_SAVED - RET_REGS - {1}   # 1=ra
         for r in caller_only:
             assert r not in live_out(result, bb), (
                 f"reg {r} should not be live after plain jal x0")
@@ -436,31 +439,37 @@ class TestABISeedTerminals:
 class TestGlobalPassMultiBlock:
 
     def test_two_block_live_through(self):
-        add = make_add(rd=10, rs1=11, rs2=12)
+        # Use non-arg, non-callee-saved regs so ENTRY_SEED doesn't interfere.
+        # t3(28)=rs1, t4(29)=rs2, t5(30)=rd — none in ARG_REGS or CALLEE_SAVED.
+        add = make_add(rd=30, rs1=28, rs2=29)
         ret = make_ret()
-        block_a = single_block_cfg([add], label="a")
-        block_b = single_block_cfg([ret], label="b")
+        block_a = single_block_cfg([add], label="a", is_function_entry=False)
+        block_b = single_block_cfg([ret], label="b", is_function_entry=False)
         link_blocks(block_a, block_b)
 
         result = compute_global_liveness([block_a, block_b])
 
         assert live_out(result, block_a) == live_in(result, block_b)
-        assert live_out(result, block_a) == RET_REGS | CALLEE_SAVED
+        # ret reads ra(1) explicitly, so ra is live into block_b (and out of block_a)
+        assert live_out(result, block_a) == RET_REGS | CALLEE_SAVED | {1}
 
-        assert 11 in live_in(result, block_a)
-        assert 12 in live_in(result, block_a)
-        assert 10 not in live_in(result, block_a)
+        assert 28 in live_in(result, block_a)
+        assert 29 in live_in(result, block_a)
+        assert 30 not in live_in(result, block_a)
 
     def test_join_point_live_union(self):
-        insn_c0 = make_add(rd=10, rs1=11, rs2=12)
+        # Use caller-saved-only regs (t0/t1/t3/t4/t5/t6 = 5/6/28/29/30/31)
+        # which are NOT in ARG_REGS or CALLEE_SAVED, so neither ENTRY_SEED
+        # nor the ret seed causes them to appear everywhere.
+        insn_c0 = make_add(rd=5, rs1=6, rs2=7)    # t0 = t1 + t2  (read t1, t2)
         ret_c   = make_ret()
-        block_c = single_block_cfg([insn_c0, ret_c], label="c")
+        block_c = single_block_cfg([insn_c0, ret_c], label="c", is_function_entry=False)
 
-        insn_a  = make_add(rd=12, rs1=13, rs2=0)
-        block_a = single_block_cfg([insn_a], label="a")
+        insn_a  = make_add(rd=6, rs1=28, rs2=0)   # t1 = t3  (read t3 from a)
+        block_a = single_block_cfg([insn_a], label="a", is_function_entry=False)
 
-        insn_b  = make_add(rd=12, rs1=14, rs2=0)
-        block_b = single_block_cfg([insn_b], label="b")
+        insn_b  = make_add(rd=6, rs1=29, rs2=0)   # t1 = t4  (read t4 from b)
+        block_b = single_block_cfg([insn_b], label="b", is_function_entry=False)
 
         block_a.successors = [block_c]
         block_b.successors = [block_c]
@@ -468,12 +477,12 @@ class TestGlobalPassMultiBlock:
 
         result = compute_global_liveness([block_a, block_b, block_c])
 
-        assert 11 in live_in(result, block_c)
-        assert 12 in live_in(result, block_c)
-        assert 13 in live_in(result, block_a)
-        assert 14 in live_in(result, block_b)
-        assert 13 not in live_in(result, block_b)
-        assert 14 not in live_in(result, block_a)
+        assert 6 in live_in(result, block_c)    # t1 read in c
+        assert 7 in live_in(result, block_c)    # t2 read in c
+        assert 28 in live_in(result, block_a)   # t3 read only in a
+        assert 29 in live_in(result, block_b)   # t4 read only in b
+        assert 28 not in live_in(result, block_b)
+        assert 29 not in live_in(result, block_a)
 
     def test_back_edge_loop(self):
         beq    = make_beq(rs1=10, rs2=0, target="exit")
@@ -561,11 +570,12 @@ class TestABIInjection:
                     f"a{r-10} should be live_in (implicit call use, not redefined)")
 
     def test_call_does_not_kill_callee_saved(self):
-        set_s0 = make_addi(rd=8, rs1=0, imm=99)
+        # s0(8) is read after the call but not defined before it —
+        # it must therefore be live into the block (not killed by the call).
         call   = make_call_pseudo()
-        use_s0 = make_add(rd=10, rs1=8, rs2=0)
+        use_s0 = make_add(rd=28, rs1=8, rs2=0)   # t3 = s0 (non-arg dest)
         ret    = make_ret()
-        bb     = single_block_cfg([set_s0, call, use_s0, ret])
+        bb     = single_block_cfg([call, use_s0, ret])
         result = compute_global_liveness([bb])
         assert 8 in live_in(result, bb)
 
@@ -744,13 +754,15 @@ class TestFloatLiveness:
         assert FA2 in live_in(result, bb)
 
     def test_float_def_kills(self):
-        """Two fadd.s instructions both writing fa0; first def is killed."""
-        fadd1 = make_fadd(rd=FA0, rs1=FA1, rs2=FA2)
-        fadd2 = make_fadd(rd=FA0, rs1=FA3, rs2=FA4)
+        """Two fadd.s both writing fs2(50); first def is killed.
+        Uses fs2/fs3/fs4 (50/51/52) — none in ARG_REGS so ENTRY_SEED won't mask."""
+        FS2, FS3, FS4 = 50, 51, 52
+        fadd1 = make_fadd(rd=FS2, rs1=FS3, rs2=FS4)
+        fadd2 = make_fadd(rd=FS2, rs1=FS3, rs2=FS4)
         ret   = make_ret()
         bb    = single_block_cfg([fadd1, fadd2, ret])
         result = compute_global_liveness([bb])
-        assert FA0 not in live_in(result, bb)
+        assert FS2 not in live_in(result, bb)
 
     def test_int_and_float_same_numeric_index_independent(self):
         """a0 (int=10) and fa0 (float=42) are different registers in unified namespace.
@@ -824,17 +836,18 @@ class TestEdgeCases:
         assert 10 in live_in(result, bb)
 
     def test_unknown_instruction_conservative_register_handling(self):
-        """Unknown instruction: first register-like operand is def, rest are uses."""
+        """Unknown instruction: first register-like operand is def, rest are uses.
+        Uses t3/t4/t5 (28/29/30) — none in ARG_REGS so ENTRY_SEED doesn't mask."""
         unk = Instruction(
-            mnemonic="bogus", operands=["a0", "a1", "a2"], raw="bogus a0, a1, a2",
-            rd=10, rs1=11, rs2=12, is_unknown=True,
+            mnemonic="bogus", operands=["t3", "t4", "t5"], raw="bogus t3, t4, t5",
+            rd=28, rs1=29, rs2=30, is_unknown=True,
         )
         ret = make_ret()
         bb  = single_block_cfg([unk, ret])
         result = compute_global_liveness([bb])
-        assert 11 in live_in(result, bb)
-        assert 12 in live_in(result, bb)
-        assert 10 not in live_in(result, bb)
+        assert 29 in live_in(result, bb)
+        assert 30 in live_in(result, bb)
+        assert 28 not in live_in(result, bb)
 
     def test_worklist_converges(self):
         """A loop with a back-edge must converge to a fixed point."""
@@ -855,18 +868,21 @@ class TestEdgeCases:
         assert result is not None
 
     def test_multiple_functions_independent(self):
-        """Two independent functions must not cross-contaminate liveness."""
+        """Two independent functions must not cross-contaminate liveness.
+        Uses t3(28) — caller-saved only, not in ARG_REGS or CALLEE_SAVED,
+        so fn1's ret seed and ENTRY_SEED won't inject it; only fn2's use
+        makes it live there."""
         ret1 = make_ret()
         fn1  = single_block_cfg([ret1], label="fn1", is_function_entry=True)
 
-        insn = make_addi(rd=10, rs1=15, imm=0)
+        insn = make_addi(rd=29, rs1=28, imm=0)   # t4 = t3 (t3=28, caller-saved only)
         ret2 = make_ret()
         fn2  = single_block_cfg([insn, ret2], label="fn2", is_function_entry=True)
 
         result = compute_global_liveness([fn1, fn2])
 
-        assert 15 not in live_in(result, fn1)
-        assert 15 in live_in(result, fn2)
+        assert 28 not in live_in(result, fn1)
+        assert 28 in live_in(result, fn2)
 
     def test_indirect_jump_no_successors_for_liveness(self):
         """jalr x0, rs1 — computed goto; terminates_function=True."""
