@@ -118,6 +118,41 @@ class TestRsdAluPair:
 # Combinations that should not pair (no applicable rule)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Slot disqualifiers
+# ---------------------------------------------------------------------------
+
+class TestSlotDisqualifiers:
+
+    def test_unknown_in_a_slot_disqualified(self):
+        """An unknown instruction in A-slot must not pair."""
+        unk = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
+        unk.is_unknown = True
+        add = make_add_rsd(13, 14)
+        reason = can_pair(unk, add)
+        assert reason is not None
+        assert "A-slot disqualified: is_unknown" in reason
+
+    def test_unknown_in_b_slot_disqualified(self):
+        """An unknown instruction in B-slot must not pair."""
+        add = make_add_rsd(10, 11)
+        unk = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
+        unk.is_unknown = True
+        reason = can_pair(add, unk)
+        assert reason is not None
+        assert "B-slot disqualified: is_unknown" in reason
+
+    def test_two_unknown_disqualified(self):
+        """Two unknown instructions must not pair (A-slot check fires first)."""
+        unk1 = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
+        unk1.is_unknown = True
+        unk2 = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
+        unk2.is_unknown = True
+        reason = can_pair(unk1, unk2)
+        assert reason is not None
+        assert "A-slot disqualified: is_unknown" in reason
+
+
 class TestNoApplicableRule:
 
     def test_load_alu_does_not_pair(self):

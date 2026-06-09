@@ -70,6 +70,10 @@ RULES: list[PairingRule] = [
 
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Return None if a and b may share a 32-bit packet, or a reason string if not."""
+    if a.is_unknown:
+        return "A-slot disqualified: is_unknown"
+    if b.is_unknown:
+        return "B-slot disqualified: is_unknown"
     reasons: list = []
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):

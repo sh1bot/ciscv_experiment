@@ -30,6 +30,10 @@ Every instruction is emitted in one of two forms:
     met.  This is diagnostic information; it lets the user understand what
     changes to the source would enable pairing.
 
+An unknown instruction is a **slot disqualifier**: it may not appear in either
+the A-slot or the B-slot of a packet.  Because its side effects are unknown it
+cannot safely be paired with anything.
+
 Pairing rules are encoding-based and structural.  A rule accepts a pair solely
 on the basis of opcode and operand form — not on the basis of whether the
 instructions are data-independent.  Data dependencies are handled separately

@@ -891,17 +891,23 @@ pairing policy.
 
 ### `can_pair()`
 
+Slot disqualifiers are checked first, before any rule is consulted.  An
+instruction that fails a slot disqualifier cannot appear in that slot regardless
+of what rules exist.  Current disqualifiers:
+
+| Slot | Property | Rationale |
+|---|---|---|
+| A or B | `is_unknown` | Side effects are unknown; cannot safely pair with anything. |
+
 ```python
 def can_pair(a: Instruction, b: Instruction) -> str | None:
     """Return None if a and b may share a 32-bit packet,
     or a short reason string if not."""
     # Per-slot disqualifiers: fast-out without examining the other instruction.
-    for prop in A_SLOT_DISQUALIFIERS:
-        if getattr(a, prop):
-            return f"A-slot disqualified: {prop}"
-    for prop in B_SLOT_DISQUALIFIERS:
-        if getattr(b, prop):
-            return f"B-slot disqualified: {prop}"
+    if a.is_unknown:
+        return "A-slot disqualified: is_unknown"
+    if b.is_unknown:
+        return "B-slot disqualified: is_unknown"
 
     reasons: list[str] = []
     for rule in RULES:
