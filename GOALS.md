@@ -58,8 +58,13 @@ Every instruction is emitted in one of two forms:
     be determined.  Unknown instructions are treated conservatively.
   - The **reasons it was not paired**: for each pairing rule that was
     considered and rejected, a short explanation of which constraint was not
-    met.  This is diagnostic information; it lets the user understand what
-    changes to the source would enable pairing.
+    met.  The purpose of these annotations is to inform the design of new
+    rules or modifications to existing rules that would capture the
+    instruction.  They also help identify instructions that are simply not
+    capturable within a given encoding budget — for example, an instruction
+    with a large immediate that cannot be represented in the compressed field
+    width the rule allows.  Knowing that an instruction is structurally
+    uncapturable is as useful as knowing that a rule tweak would capture it.
 
 An unknown instruction is a **slot disqualifier**: it may not appear in either
 the A-slot or the B-slot of a packet.  Because its side effects are unknown it
