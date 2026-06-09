@@ -35,23 +35,21 @@ class Instruction:
     solo_reasons: set = field(default_factory=set)
 
     # -----------------------------------------------------------------------
-    # Register use/def sets — integer and float registers only (indices 1–63).
-    # x0 (index 0) is excluded: writes are no-ops, reads always produce zero.
-    # Vector registers (indices 64+) are excluded: they have their own register
-    # file and are not tracked by scalar liveness or the scalar dep graph.
+    # Register use/def sets — all register files, excluding only x0 (index 0).
+    # x0 is excluded because writes are no-ops and reads always produce zero.
     # -----------------------------------------------------------------------
 
     @property
     def uses_regs(self) -> frozenset:
         regs = set()
         for r in (self.rs1, self.rs2, self.rs3):
-            if r is not None and 0 < r < 64:
+            if r is not None and r != 0:
                 regs.add(r)
         return frozenset(regs)
 
     @property
     def defs_regs(self) -> frozenset:
-        if self.rd is not None and 0 < self.rd < 64:
+        if self.rd is not None and self.rd != 0:
             return frozenset({self.rd})
         return frozenset()
 
