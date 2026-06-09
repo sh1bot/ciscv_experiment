@@ -343,7 +343,6 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
         print(f"warning: unknown mnemonic '{m}'", file=sys.stderr)
     insn.is_unknown = True
     reg_ops = []
-    first_slot_is_vector = False
     for op in ops:
         r = REG_ALIASES.get(op.lower())
         if r is None:
@@ -351,20 +350,11 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
             if r is not None:
                 insn.has_mem_operand = True
         if r is not None:
-            if not reg_ops and r >= 64:
-                first_slot_is_vector = True
             reg_ops.append(r)
-    # If slot 0 held a vector register, all scalar operands are sources.
-    # Otherwise the first scalar is the destination.
-    scalar_ops = [r for r in reg_ops if r < 64]
-    if scalar_ops:
-        if first_slot_is_vector:
-            sources = [r for r in scalar_ops if r != 0]
-        else:
-            first = scalar_ops[0]
-            if first != 0:
-                insn.rd = first
-            sources = [r for r in scalar_ops[1:] if r != 0]
+    if reg_ops:
+        if reg_ops[0] != 0:
+            insn.rd = reg_ops[0]
+        sources = [r for r in reg_ops[1:] if r != 0]
         if sources:
             insn.rs1 = sources[0]
         if len(sources) > 1:
