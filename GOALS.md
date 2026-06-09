@@ -187,8 +187,7 @@ non-standard calling convention (firmware, custom RTOS, etc.) the ABI tables in
 decided whether supporting multiple ABI profiles is a goal.
 
 **Memory ordering conservatism**: the default memory model is conservative —
-every load/store pair is ordered unless `--same-base-reorder` is passed.  For
-the primary goal of measuring pairing rates, this default may systematically
-suppress pairing opportunities in memory-heavy code.  It is not yet decided
-whether the measured pairing rates should reflect "safe by default" or "best
-achievable with explicit relaxation".
+every load/store pair is ordered unless `--same-base-reorder` is passed.
+Pairing rate measurements use this conservative baseline.  The
+`--same-base-reorder` flag exists for experimentation but the conservative
+default is the reference point.
