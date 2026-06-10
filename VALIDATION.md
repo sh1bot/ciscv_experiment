@@ -97,6 +97,50 @@ independently or combined.  Estimated yield is noted for each.
 
 ---
 
+
+## Technique 4 — Three-document cross-check (GOALS × PLAN × code)
+
+When all three artefacts exist, run four agents in parallel, each with a
+different blind spot.  The goal is to catch discrepancies that only appear when
+comparing two of the three, and to ensure that each layer is internally
+consistent with the other two.
+
+**Agent layout:**
+
+| Agent | Reads | Blind to | Finds |
+|-------|-------|----------|-------|
+| A | GOALS + PLAN + code | nothing | all three-way discrepancies |
+| B | PLAN + code | GOALS | plan/code gaps regardless of intent |
+| C | GOALS + code | PLAN | goal/code gaps; implementation decisions with no goal backing |
+| D | GOALS + PLAN | code | plan/goals inconsistency; decisions in PLAN not justified by any goal |
+
+**Prompt sketch for each agent:**
+
+> You are auditing a software project.  You have access to [FILES].
+> Read every file in full.  Report every discrepancy you find as a numbered
+> item: state which document/section each side of the discrepancy comes from,
+> what each says, and why they conflict.  Do not suggest fixes — only report
+> findings.  Do not read any files other than those listed.
+
+**Triage categories after collating all four agents:**
+
+- *Code bug* — PLAN or GOALS says X, code does Y, code should change.
+- *Plan drift* — code is right (deliberate design), plan is stale — update PLAN.
+- *GOALS gap* — design decision present in PLAN with no corresponding goal —
+  either add the goal or question the decision.
+- *Acknowledged* — already noted in PLAN as a known limitation or future work.
+
+**Notes:**
+- Findings confirmed by two or more agents are higher confidence.
+- Agent D (blind to code) finds goal/plan inconsistencies regardless of whether
+  the code is correct — useful for catching spec gaps before implementing.
+- Agent C (blind to PLAN) is most likely to surface new implicit design
+  decisions baked into the code that were never written down anywhere.
+- Collect all findings before acting; some apparent bugs are intentional
+  simplifications that just weren't documented.
+
+---
+
 ## General notes on running agent reviews
 
 - **Triage before acting.**  Collect all findings first, then classify each as
