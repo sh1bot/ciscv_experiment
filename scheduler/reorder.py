@@ -13,7 +13,7 @@ from typing import Optional
 
 from analysis.cfg import BasicBlock
 from analysis.depgraph import DepGraph, build_dep_graph
-from analysis.liveness import compute_local_liveness, LivenessResult
+from analysis.liveness import compute_local_liveness
 from scheduler.pairing import can_pair, greedy_pair
 from isa.instruction import Instruction
 
@@ -29,8 +29,7 @@ NODE_BUDGET  = 50_000
 STAGNATION   = 5_000
 
 
-def schedule(block: BasicBlock, graph: Optional[DepGraph], mode: ScheduleMode,
-             global_liveness: Optional[LivenessResult] = None) -> list:
+def schedule(block: BasicBlock, graph: Optional[DepGraph], mode: ScheduleMode) -> list:
     """Return a topological sort of graph that maximises pair count.
 
     graph may be None in FORWARD mode.

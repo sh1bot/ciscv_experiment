@@ -77,7 +77,7 @@ def main():
                 graph = build_dep_graph(block, same_base_reorder=args.same_base_reorder)
 
             # Schedule
-            ordered = schedule(block, graph, mode, global_result)
+            ordered = schedule(block, graph, mode)
 
             # Recompute local liveness on new ordering
             if mode != ScheduleMode.FORWARD:
