@@ -52,8 +52,8 @@ rv_scheduler/
 │   ├── liveness.py           # iterative liveness dataflow, per-instruction sets
 │   └── annotator.py          # formats annotated assembly output
 ├── scheduler/
-│   ├── pairing.py            # can_pair(a, b) -> None | reason_str; greedy pass
-│   ├── rules.py              # PairingRule dataclass + all concrete rules (planned)
+│   ├── pairing.py            # can_pair(); greedy_pair(); stamp_slot_eligibility()
+│   ├── rules.py              # PairingRule dataclass; RULES; A/B_SLOT_DISQUALIFIERS
 │   └── reorder.py            # list scheduling (default) + BnB (--thorough)
 └── output/
     └── annotator.py          # planned output formatter (currently in analysis/annotator.py)
@@ -772,7 +772,7 @@ make this a first-class design consideration rather than an afterthought.
 
 Some instructions are ineligible for a given slot regardless of what the other
 instruction is.  These are expressed as two configurable lists of instruction
-property names in `pairing.py`:
+property names in `rules.py`:
 
 ```python
 A_SLOT_DISQUALIFIERS: list[str]  # if any is True on a, a cannot be A-slot
@@ -877,7 +877,7 @@ PairingRule(
     name="rsd-alu-pair",
     a_prerequisites=["is_rsd"],
     b_prerequisites=["is_rsd"],
-    check=_rsd_alu_pair,   # see scheduler/pairing.py
+    check=_rsd_alu_pair,   # see scheduler/rules.py
 )
 
 def _rsd_alu_pair(a, b):

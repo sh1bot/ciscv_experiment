@@ -1,5 +1,5 @@
 """
-scheduler/pairing.py — Pairing rules and can_pair() function.
+scheduler/pairing.py — Pairing mechanism: can_pair(), greedy_pair(), stamp_slot_eligibility().
 
 The pairing model is encoding-based allowlist: a pair (a, b) is valid iff at
 least one PairingRule accepts it. can_pair() returns None on success or a
@@ -8,68 +8,18 @@ reason string if all applicable rules reject.
 Within a packet, a executes first (A-slot) and b executes second (B-slot).
 Pairing rules express only hardware structural constraints — not register
 data-dependency constraints (those are handled by the dependency graph).
+
+Policy (rules, disqualifier lists) lives in scheduler/rules.py.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 
 from isa.instruction import Instruction
+from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS
 
-
-# ---------------------------------------------------------------------------
-# PairingRule dataclass
-# ---------------------------------------------------------------------------
-
-@dataclass
-class PairingRule:
-    name: str
-
-    # check(a, b) -> None means encoding accepts; str -> encoding rejects (reason).
-    check: Callable
-
-    # Properties that must be True on a for the rule to be applicable.
-    a_prerequisites: list = field(default_factory=list)
-
-    # Properties that must be True on b for the rule to be applicable.
-    b_prerequisites: list = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Pairing rules
-# ---------------------------------------------------------------------------
-
-def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """Both instructions are two-register ALU ops with dest=src1.
-
-    rd==rs2 (instead of rd==rs1) is only valid for commutative operations,
-    where the operands can be swapped in the encoding.
-    """
-    supported = {"add", "sub", "and", "or", "xor", "addw", "subw"}
-    for slot, insn in (("A", a), ("B", b)):
-        if insn.mnemonic not in supported:
-            return f"rsd-alu-pair: {slot}-slot mnemonic not in supported set ({insn.mnemonic})"
-        if insn.rd != insn.rs1 and not insn.is_commutative:
-            return f"rsd-alu-pair: {slot}-slot rd==rs2 but {insn.mnemonic} is not commutative"
-    return None
-
-
-RULES: list[PairingRule] = [
-    PairingRule(
-        name="rsd-alu-pair",
-        a_prerequisites=["is_rsd"],
-        b_prerequisites=["is_rsd"],
-        check=_rsd_alu_pair,
-    ),
-]
-
-A_SLOT_DISQUALIFIERS: list[str] = [
-    "is_unknown",
-]
-
-B_SLOT_DISQUALIFIERS: list[str] = [
-    "is_unknown",
-]
+# Re-export PairingRule so callers that imported it from here still work.
+from scheduler.rules import PairingRule  # noqa: F401
 
 
 def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
@@ -84,10 +34,6 @@ def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
         insn.a_slot_ok = not any(getattr(insn, p) for p in A_SLOT_DISQUALIFIERS)
         insn.b_slot_ok = not any(getattr(insn, p) for p in B_SLOT_DISQUALIFIERS)
 
-
-# ---------------------------------------------------------------------------
-# can_pair()
-# ---------------------------------------------------------------------------
 
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Return None if a and b may share a 32-bit packet, or a reason string if not."""
@@ -105,7 +51,6 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
-        # Rule is applicable — check it
         result = rule.check(a, b)
         if result is None:
             return None   # encoding accepts — pair is valid
@@ -115,10 +60,6 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
         return "; ".join(reasons)
     return "no applicable encoding"
 
-
-# ---------------------------------------------------------------------------
-# Greedy-advance pairing pass
-# ---------------------------------------------------------------------------
 
 def greedy_pair(instructions: list[Instruction]) -> list:
     """Apply the greedy-advance pairing model to an ordered instruction list.
@@ -136,7 +77,6 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                 result.append(('pair', free, curr))
                 free = None
             else:
-                # Record rejection reasons per solo_reasons policy
                 _record_solo_reasons(free, curr, reason)
                 result.append(('solo', free))
                 free = curr
