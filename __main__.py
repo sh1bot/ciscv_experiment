@@ -13,7 +13,7 @@ from analysis.parser import parse_file
 from analysis.liveness import compute_global_liveness, compute_local_liveness
 from analysis.depgraph import build_dep_graph
 from scheduler.reorder import schedule, ScheduleMode
-from scheduler.pairing import greedy_pair
+from scheduler.pairing import greedy_pair, stamp_slot_eligibility
 from analysis.annotator import annotate_output
 
 
@@ -50,6 +50,11 @@ def main():
 
     # Parse
     blocks, functions = parse_file(source)
+
+    # Stamp slot eligibility once per instruction (intrinsic properties only)
+    for fn in functions:
+        for block in fn.blocks:
+            stamp_slot_eligibility(block.instructions)
 
     # Process each function independently
     all_packets = []

@@ -7,16 +7,18 @@ Only rsd-alu-pair exists. All other combinations should be rejected.
 import pytest
 from isa.instruction import Instruction
 from scheduler.pairing import (
-    can_pair, greedy_pair, RULES,
+    can_pair, greedy_pair, stamp_slot_eligibility, RULES,
 )
 
 
 def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=None):
-    return Instruction(
+    insn = Instruction(
         mnemonic=mnemonic, operands=[], raw=mnemonic,
         rd=rd, rs1=rs1, rs2=rs2, imm=imm,
         branch_target=branch_target,
     )
+    stamp_slot_eligibility([insn])
+    return insn
 
 
 def make_add(rd, rs1, rs2):
@@ -128,6 +130,7 @@ class TestSlotDisqualifiers:
         """An unknown instruction in A-slot must not pair."""
         unk = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
         unk.is_unknown = True
+        stamp_slot_eligibility([unk])
         add = make_add_rsd(13, 14)
         reason = can_pair(unk, add)
         assert reason is not None
@@ -138,6 +141,7 @@ class TestSlotDisqualifiers:
         add = make_add_rsd(10, 11)
         unk = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
         unk.is_unknown = True
+        stamp_slot_eligibility([unk])
         reason = can_pair(add, unk)
         assert reason is not None
         assert "B-slot disqualified: is_unknown" in reason
@@ -148,6 +152,7 @@ class TestSlotDisqualifiers:
         unk1.is_unknown = True
         unk2 = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
         unk2.is_unknown = True
+        stamp_slot_eligibility([unk1, unk2])
         reason = can_pair(unk1, unk2)
         assert reason is not None
         assert "A-slot disqualified: is_unknown" in reason

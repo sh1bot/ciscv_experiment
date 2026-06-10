@@ -72,18 +72,33 @@ B_SLOT_DISQUALIFIERS: list[str] = [
 ]
 
 
+def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
+    """Precompute a_slot_ok / b_slot_ok on each instruction.
+
+    Disqualifiers are intrinsic to the instruction — they depend only on the
+    instruction's own properties, never on its neighbours or position.  This
+    pass runs once after parsing so that scheduling and pairing code can read
+    the flags cheaply without re-evaluating the disqualifier lists.
+    """
+    for insn in instructions:
+        insn.a_slot_ok = not any(getattr(insn, p) for p in A_SLOT_DISQUALIFIERS)
+        insn.b_slot_ok = not any(getattr(insn, p) for p in B_SLOT_DISQUALIFIERS)
+
+
 # ---------------------------------------------------------------------------
 # can_pair()
 # ---------------------------------------------------------------------------
 
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Return None if a and b may share a 32-bit packet, or a reason string if not."""
-    for prop in A_SLOT_DISQUALIFIERS:
-        if getattr(a, prop):
-            return f"A-slot disqualified: {prop}"
-    for prop in B_SLOT_DISQUALIFIERS:
-        if getattr(b, prop):
-            return f"B-slot disqualified: {prop}"
+    if not a.a_slot_ok:
+        for prop in A_SLOT_DISQUALIFIERS:
+            if getattr(a, prop):
+                return f"A-slot disqualified: {prop}"
+    if not b.b_slot_ok:
+        for prop in B_SLOT_DISQUALIFIERS:
+            if getattr(b, prop):
+                return f"B-slot disqualified: {prop}"
     reasons: list = []
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):

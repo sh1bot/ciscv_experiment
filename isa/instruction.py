@@ -31,6 +31,10 @@ class Instruction:
     live_in:   frozenset = field(default_factory=frozenset)
     live_out:  frozenset = field(default_factory=frozenset)
 
+    # Populated by slot-eligibility pass (see scheduler/pairing.py):
+    a_slot_ok: bool = True
+    b_slot_ok: bool = True
+
     # Populated by pairing pass:
     solo_reasons: set = field(default_factory=set)
 

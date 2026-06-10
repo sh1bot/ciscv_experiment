@@ -772,14 +772,28 @@ make this a first-class design consideration rather than an afterthought.
 
 Some instructions are ineligible for a given slot regardless of what the other
 instruction is.  These are expressed as two configurable lists of instruction
-property names in `rules.py`:
+property names in `pairing.py`:
 
 ```python
 A_SLOT_DISQUALIFIERS: list[str]  # if any is True on a, a cannot be A-slot
 B_SLOT_DISQUALIFIERS: list[str]  # if any is True on b, b cannot be B-slot
 ```
 
-`can_pair()` checks these lists first, before evaluating any `PairingRule`.  If
+Because disqualifiers depend only on the instruction's own intrinsic properties
+— never on neighbours or position — they can be evaluated once, immediately
+after parsing, and stamped onto each instruction as two boolean flags:
+
+```python
+insn.a_slot_ok  # False if any A_SLOT_DISQUALIFIER property is True
+insn.b_slot_ok  # False if any B_SLOT_DISQUALIFIER property is True
+```
+
+The `stamp_slot_eligibility(instructions)` function in `pairing.py` performs
+this pass.  It must be called once per block after parsing, before scheduling
+or pairing.  Scheduling rules and `can_pair()` read the pre-computed flags
+directly rather than re-evaluating the disqualifier lists on every call.
+
+`can_pair()` checks these flags first, before evaluating any `PairingRule`.  If
 `a` is disqualified, the function returns immediately without examining `b` at
 all — there is no point searching for a B-slot partner when the A-slot candidate
 is already known to be ineligible.
@@ -903,11 +917,15 @@ of what rules exist.  Current disqualifiers:
 def can_pair(a: Instruction, b: Instruction) -> str | None:
     """Return None if a and b may share a 32-bit packet,
     or a short reason string if not."""
-    # Per-slot disqualifiers: fast-out without examining the other instruction.
-    if a.is_unknown:
-        return "A-slot disqualified: is_unknown"
-    if b.is_unknown:
-        return "B-slot disqualified: is_unknown"
+    # Per-slot disqualifiers: fast-out using pre-computed flags.
+    if not a.a_slot_ok:
+        for prop in A_SLOT_DISQUALIFIERS:
+            if getattr(a, prop):
+                return f"A-slot disqualified: {prop}"
+    if not b.b_slot_ok:
+        for prop in B_SLOT_DISQUALIFIERS:
+            if getattr(b, prop):
+                return f"B-slot disqualified: {prop}"
 
     reasons: list[str] = []
     for rule in RULES:
