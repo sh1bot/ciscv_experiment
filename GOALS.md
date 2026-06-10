@@ -178,19 +178,15 @@ The prescan identifies barriers from:
   the label is not the target of a branch, only a value used in a calculation,
   so it is **not** treated as a barrier.
 
----
+### ABI
 
-## 6. Open questions
+The tool targets the standard RISC-V psABI, including `t0` (x5) as an
+alternate link register used by linker call stubs.  Supporting non-standard
+calling conventions is not a current goal.
 
-The following design decisions have not yet been resolved.  They are noted here
-so that they are not silently assumed.
+### Memory ordering
 
-**ABI target**: the tool targets the standard RISC-V psABI, including `t0` (x5)
-as an alternate link register used by linker call stubs.  Supporting
-non-standard calling conventions is not a current goal.
-
-**Memory ordering conservatism**: the default memory model is conservative —
-every load/store pair is ordered unless `--same-base-reorder` is passed.
-Pairing rate measurements use this conservative baseline.  The
-`--same-base-reorder` flag exists for experimentation but the conservative
-default is the reference point.
+The default memory model is conservative — every load/store pair is ordered
+unless `--same-base-reorder` is passed.  Pairing rate measurements use this
+conservative baseline.  The `--same-base-reorder` flag exists for
+experimentation but the conservative default is the reference point.
