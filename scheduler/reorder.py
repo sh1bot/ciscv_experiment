@@ -133,11 +133,25 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
         ready.sort(key=key)
         return ready.pop(0)
 
-    def _pick_best_partner_for(free_insn: Instruction) -> Optional[int]:
-        """From ready, pick best partner for free_insn (A=free, B=partner).
-        Prefer the one with fewest alternative pairing options, then longest crit path.
-        """
+    def _pick_tier1_partner(free_insn: Instruction) -> Optional[int]:
+        """Pick best B-slot partner for free_insn (free=A, partner=B)."""
         pairable = [i for i in ready if can_pair(free_insn, insns[i]) is None]
+        if not pairable:
+            return None
+        ready_list = _ready_insns()
+        def key(i):
+            return (_count_pairings_in_ready(insns[i], ready_list), -crit[i])
+        return min(pairable, key=key)
+
+    def _pick_tier2_partner(free_insn: Instruction, free_idx: int) -> Optional[int]:
+        """Pick best A-slot partner for free_insn (partner=A, free=B).
+
+        Requires no dep-graph edge from free to cand — placing cand before
+        free must not violate the topological ordering.
+        """
+        pairable = [i for i in ready
+                    if can_pair(insns[i], free_insn) is None
+                    and i not in graph.edges[free_idx]]
         if not pairable:
             return None
         ready_list = _ready_insns()
@@ -150,31 +164,42 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
         if in_degree[i] == 0:
             ready.append(i)
 
+    free_idx: Optional[int] = None
+
     while ready or free is not None:
         if not ready:
             # No more ready instructions — flush free as solo
             result.append(free)
             free = None
+            free_idx = None
             continue
 
         if free is not None:
-            partner_idx = _pick_best_partner_for(free)
+            partner_idx = _pick_tier1_partner(free)
             if partner_idx is not None:
-                # Pair free with partner
+                # Tier-1: free=A, partner=B
                 ready.remove(partner_idx)
                 result.append(free)
                 result.append(_emit_idx(partner_idx))
                 free = None
+                free_idx = None
             else:
-                # No pairable partner — emit free as solo, pick next
-                result.append(free)
-                free = None
-                idx = _pick_best_from_ready()
-                free = _emit_idx(idx)
+                partner_idx = _pick_tier2_partner(free, free_idx)
+                if partner_idx is not None:
+                    # Tier-2: partner=A, free=B
+                    ready.remove(partner_idx)
+                    result.append(_emit_idx(partner_idx))
+                    result.append(free)
+                    free = None
+                    free_idx = None
+                else:
+                    # No partner — emit free solo, hold next as free
+                    result.append(free)
+                    free_idx = _pick_best_from_ready()
+                    free = _emit_idx(free_idx)
         else:
-            # No free slot — pick next instruction
-            idx = _pick_best_from_ready()
-            free = _emit_idx(idx)
+            free_idx = _pick_best_from_ready()
+            free = _emit_idx(free_idx)
 
     return result
 
@@ -228,7 +253,8 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
         return [i for i in range(n) if i not in emitted_set and
                 all(p in emitted_set for p in preds[i])]
 
-    def search(emitted: frozenset, order: list, pairs: int, free_insn: Optional[Instruction]):
+    def search(emitted: frozenset, order: list, pairs: int,
+               free_insn: Optional[Instruction], free_idx: Optional[int]):
         nonlocal best_count, best_order
         nodes_explored[0] += 1
         nodes_since_improvement[0] += 1
@@ -239,7 +265,6 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
 
         remaining = n - len(order)
         if remaining == 0:
-            # Complete ordering
             count = _pair_count(order)
             if count > best_count:
                 best_count = count
@@ -256,12 +281,12 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
         if not ready:
             return
 
-        # Order candidates: tier1 (pairs with free as B), tier2 (pairs with free as A), tier3 (rest)
+        # Order candidates: tier1 (free=A, cand=B), tier2 (cand=A, free=B), tier3 (rest)
         if free_insn is not None:
             tier1 = [i for i in ready if can_pair(free_insn, insns[i]) is None]
-            tier2 = [i for i in ready if i not in tier1 and
-                     can_pair(insns[i], free_insn) is None and
-                     i not in emitted]
+            tier2 = [i for i in ready if i not in tier1
+                     and can_pair(insns[i], free_insn) is None
+                     and i not in graph.edges[free_idx]]
             tier3 = [i for i in ready if i not in tier1 and i not in tier2]
             candidates = tier1 + tier2 + tier3
         else:
@@ -276,17 +301,22 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
             new_emitted = emitted | {idx}
             new_order = order + [insn]
 
-            # Determine new pair count and new free
-            if free_insn is not None and can_pair(free_insn, insn) is None:
+            if free_insn is not None and (
+                can_pair(free_insn, insn) is None          # tier-1: free=A, insn=B
+                or (can_pair(insn, free_insn) is None      # tier-2: insn=A, free=B
+                    and idx not in graph.edges[free_idx])
+            ):
                 new_pairs = pairs + 1
                 new_free = None
+                new_free_idx = None
             else:
                 new_pairs = pairs
                 new_free = insn
+                new_free_idx = idx
 
-            search(new_emitted, new_order, new_pairs, new_free)
+            search(new_emitted, new_order, new_pairs, new_free, new_free_idx)
 
-    search(frozenset(), [], 0, None)
+    search(frozenset(), [], 0, None, None)
     return best_order
 
 
