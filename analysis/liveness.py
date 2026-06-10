@@ -16,7 +16,7 @@ from collections import deque
 from typing import Optional
 
 from isa.abi import call_liveness_effect
-from isa.registers import ARG_REGS
+from isa.registers import ARG_REGS, CALLEE_SAVED
 
 
 @dataclass
@@ -64,8 +64,9 @@ def _block_use_def(block) -> tuple[frozenset, frozenset, bool, frozenset]:
 def compute_global_liveness(blocks: list) -> LivenessResult:
     """Standard iterative backward dataflow over a list of BasicBlocks.
 
-    Blocks may belong to multiple functions; each function_entry block
-    gets CALLEE_SAVED permanently unioned into its live_in.
+    Each function_entry block gets ARG_REGS | CALLEE_SAVED permanently
+    unioned into its live_in: arguments carry caller values, and
+    callee-saved registers hold caller state that must be preserved.
 
     The list of blocks is treated as a single analysis unit (function scope).
     Blocks are identified by id(bb) (object identity).
@@ -106,9 +107,10 @@ def compute_global_liveness(blocks: list) -> LivenessResult:
         # --- Compute live_in ---
         new_in = use | (new_out - defs)
 
-        # ENTRY_SEED: function-entry blocks assume argument registers are live-in
+        # ENTRY_SEED: at function entry, argument registers carry caller values
+        # and callee-saved registers hold caller state that must be preserved.
         if bb.is_function_entry and bb.instructions:
-            new_in = new_in | ARG_REGS
+            new_in = new_in | ARG_REGS | CALLEE_SAVED
 
         # Check for change
         if new_in != result.live_in[key] or new_out != result.live_out[key]:

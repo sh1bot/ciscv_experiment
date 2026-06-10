@@ -754,15 +754,16 @@ class TestFloatLiveness:
         assert FA2 in live_in(result, bb)
 
     def test_float_def_kills(self):
-        """Two fadd.s both writing fs2(50); first def is killed.
-        Uses fs2/fs3/fs4 (50/51/52) — none in ARG_REGS so ENTRY_SEED won't mask."""
-        FS2, FS3, FS4 = 50, 51, 52
-        fadd1 = make_fadd(rd=FS2, rs1=FS3, rs2=FS4)
-        fadd2 = make_fadd(rd=FS2, rs1=FS3, rs2=FS4)
+        """Two fadd.s both writing ft0(32); first def is killed.
+        ft0–ft7 (32–39) are caller-saved floats: not in ARG_REGS, not in
+        CALLEE_SAVED, so the ENTRY_SEED won't mask the kill check."""
+        FT0, FT1, FT2 = 32, 33, 34
+        fadd1 = make_fadd(rd=FT0, rs1=FT1, rs2=FT2)
+        fadd2 = make_fadd(rd=FT0, rs1=FT1, rs2=FT2)
         ret   = make_ret()
         bb    = single_block_cfg([fadd1, fadd2, ret])
         result = compute_global_liveness([bb])
-        assert FS2 not in live_in(result, bb)
+        assert FT0 not in live_in(result, bb)
 
     def test_int_and_float_same_numeric_index_independent(self):
         """a0 (int=10) and fa0 (float=42) are different registers in unified namespace.
