@@ -16,6 +16,8 @@ class Instruction:
 
     # Non-instruction lines preceding this instruction
     prefix_lines:  list[str] = field(default_factory=list)
+    # Non-instruction lines following this instruction (trailing directives/blanks)
+    suffix_lines:  list[str] = field(default_factory=list)
 
     # Populated by decoder:
     rd:   Optional[int] = None   # destination register index (0–31 int, 32–63 float)

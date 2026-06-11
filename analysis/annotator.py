@@ -86,6 +86,7 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                 if annotate_liveness:
                     comment_a += f"  live_in={_fmt_live(a.live_in)}"
                 lines.append(f"{a.raw.rstrip()}  {comment_a}")
+                lines.extend(a.suffix_lines)
 
                 for pl in b.prefix_lines:
                     lines.append(pl)
@@ -93,6 +94,7 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                 if annotate_liveness:
                     comment_b += f"  live_in={_fmt_live(b.live_in)}"
                 lines.append(f"{b.raw.rstrip()}  {comment_b}")
+                lines.extend(b.suffix_lines)
                 packet_num += 1
 
             else:  # solo
@@ -113,6 +115,7 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                 if annotate_liveness:
                     comment += f"  live_in={_fmt_live(insn.live_in)}"
                 lines.append(f"{insn.raw.rstrip()}  {comment}")
+            lines.extend(insn.suffix_lines)
 
         lines.append("")
         lines.extend(_stats_comment_lines(fn_stats, f"function: {fn_name}"))

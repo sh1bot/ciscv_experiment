@@ -467,7 +467,7 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
         current_block_insns = []
         current_block_labels = []
         current_is_function_entry = False
-        prefix_buffer = []
+        # prefix_buffer intentionally NOT cleared: carries forward to next block
 
     def _new_block_with_label(lbl: str):
         nonlocal current_block_labels, current_is_function_entry
@@ -498,8 +498,9 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             in_text_section = False
             continue
 
-        # Directives (non-instruction, non-label lines)
+        # Directives (non-instruction, non-label lines): buffer for passthrough
         if stripped.startswith('.') and not re.match(r'^\.', stripped.lstrip().split(':')[0] if ':' in stripped else stripped):
+            prefix_buffer.append(raw)
             continue
 
         # Check for label prefix
@@ -539,11 +540,14 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
                     prefix_buffer.append(f"{lbl}:")
                     stripped = rest_of_line
 
-        # Skip pure directive lines
+        # Pure directive lines: buffer for passthrough
         if stripped.startswith('.'):
+            prefix_buffer.append(raw)
             continue
 
+        # Blank lines: buffer for passthrough
         if not stripped:
+            prefix_buffer.append(raw)
             continue
 
         # Parse instruction
@@ -569,6 +573,14 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             _flush_block()
 
     _flush_block()
+
+    # Attach any remaining buffered lines (trailing directives/blanks) as
+    # suffix_lines on the last instruction of the last non-empty block.
+    if prefix_buffer:
+        for bb in reversed(blocks):
+            if bb.instructions:
+                bb.instructions[-1].suffix_lines = list(prefix_buffer)
+                break
 
     if not blocks:
         return [], []
