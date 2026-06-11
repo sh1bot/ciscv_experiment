@@ -582,7 +582,7 @@ Function boundaries are hard stops:
   orphan blocks after `tail`) are collected into a synthetic anonymous function
   for scheduling purposes and are not merged into any named function.
 
-Because each function is analysed independently, `compute_liveness` and
+Because each function is analysed independently, `compute_global_liveness` and
 `schedule` accept a single `Function` object.  A driver iterates over all
 functions and may dispatch them to a thread pool:
 
@@ -597,16 +597,27 @@ results = pool.map(analyse_and_schedule, functions)
 ## 7. `analysis/liveness.py` — Register liveness
 
 **Two-phase approach.**  The CFG liveness pass runs once over the blocks of a
-single `Function` before per-block scheduling begins, producing a `live_out`
-table keyed by block.  Because function boundaries are hard (§6), the global
-pass is strictly intra-function: no liveness information crosses into or out of
-other functions.  This global pass correctly handles conditional branches, loop
+single `Function` before per-block scheduling begins, producing a `LivenessResult`
+keyed by block.  Because function boundaries are hard (§6), the global pass is
+strictly intra-function: no liveness information crosses into or out of other
+functions.  This global pass correctly handles conditional branches, loop
 back-edges, and fall-throughs within the function.  Per-block scheduling then
 consults this table for the block's `live_out` seed before doing its local
 backward propagation.
 
-The table is keyed by `BasicBlock` identity (object reference), not by label
-string, so blocks with zero labels or multiple labels are handled uniformly.
+```python
+@dataclass
+class LivenessResult:
+    live_in:  dict   # id(BasicBlock) -> frozenset[int]
+    live_out: dict   # id(BasicBlock) -> frozenset[int]
+```
+
+The table is keyed by `id(bb)` (object identity), not by label string, so
+blocks with zero labels or multiple labels are handled uniformly.
+
+`compute_global_liveness(blocks)` runs the global pass and returns a
+`LivenessResult`.  `compute_local_liveness(block, result)` runs the local pass
+for a single block, writing `live_in`/`live_out` onto each `Instruction`.
 
 **Liveness must be recomputed after reordering.**  Pairing rules consult
 per-instruction `live_in`/`live_out`.  After the reorder pass changes instruction
@@ -661,14 +672,19 @@ the call is unioned with its `live_out_seed` before propagating further backward
 **Function-entry seed.**  `ENTRY_SEED[B]` in the equation above:
 
 ```
-where ENTRY_SEED[B] = ARG_REGS   if is_function_entry(B)
-                    = ∅           otherwise
+where ENTRY_SEED[B] = ARG_REGS ∪ CALLEE_SAVED   if is_function_entry(B)
+                    = ∅                           otherwise
 ```
 
-This permanently unions the argument registers into `live_in` of the entry
-block on every iteration, since the caller may have passed values in any of
-them.  `is_function_entry` is set by the function-identification pass (§6) for
-blocks headed by `.globl`-declared or `.type @function` labels.
+This permanently unions argument registers and callee-saved registers into
+`live_in` of the entry block on every iteration.  Argument registers are live
+because the caller may have passed values in any of them.  Callee-saved
+registers are live because they hold the caller's values on function entry and
+the callee must preserve them — without this seed, an instruction that saves a
+callee-saved register early in the function would have no dep-graph path to the
+return, allowing the scheduler to incorrectly move it after the return.
+`is_function_entry` is set by the function-identification pass (§6) for blocks
+headed by `.globl`-declared or `.type @function` labels.
 
 **`ret` seed conservatism.**  The `live_out_seed` for a return instruction is
 `CALLEE_SAVED ∪ RET_REGS`.  Including the full
@@ -728,6 +744,10 @@ class DepGraph:
     instructions: list[Instruction]
     # edges[i] = set of instruction indices that must come after instructions[i]
     edges: list[set[int]]
+
+    @property
+    def n(self) -> int:
+        return len(self.instructions)
 
 def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGraph:
     ...
@@ -969,26 +989,16 @@ dependency graph that maximises the number of pairs under this exact model.
 
 ### Rejection reason collection
 
-The greedy-advance model always tests `can_pair(free, curr)` — `free` is A-slot
-and `curr` is B-slot.  `solo_reasons` records the rejection reasons from those
-exact calls:
+Slot disqualification is checked before `can_pair()` is called.  If `free` is
+A-slot disqualified, it is emitted solo immediately without testing any
+candidate; the disqualifier reason is added only to `free.solo_reasons`.
+Likewise, if `curr` is B-slot disqualified, it is skipped as a candidate and
+the reason is added only to `curr.solo_reasons`.  `can_pair()` is only called
+when both instructions are slot-eligible.
 
-```
-for each (free, curr) pair tested during the pairing pass:
-    reason = can_pair(free, curr)
-    if reason is not None:
-        if reason not from B_SLOT_DISQUALIFIERS:
-            free.solo_reasons.add(reason)   # describes free or the encoding mismatch
-        if reason not from A_SLOT_DISQUALIFIERS:
-            curr.solo_reasons.add(reason)   # describes curr or the encoding mismatch
-```
-
-- A-slot disqualifier reasons (`"A-slot disqualified: is_call"` etc.) describe
-  a property of `free`; they should not be added to `curr.solo_reasons`.
-- B-slot disqualifier reasons (`"B-slot disqualified: …"`) describe a property
-  of `curr`; they should not be added to `free.solo_reasons`.
-- Rule-check rejections (encoding mismatches) describe the pair and are added
-  to both.
+For rule-check rejections (encoding mismatches from `can_pair()`), the reason
+describes the incompatibility between the pair and is added to both
+`free.solo_reasons` and `curr.solo_reasons`.
 
 In `--fast` (forward-scan) mode each instruction is tested against at most one
 adjacent candidate.  In list-scheduling and BnB modes the ready queue may cause
@@ -1092,6 +1102,14 @@ def bound(remaining: int, prev_free: bool) -> int:
    not require `cand` to have already executed — it is safe to emit `cand` before
    `free` in the output ordering).
 3. Tier 3 — remaining ready instructions in index order.
+
+**Pair counting (`_pair_count`):** BnB evaluates candidate orderings by running
+`greedy_pair()` on each complete ordering and counting the pairs it produces.
+`greedy_pair()` has the side effect of populating `solo_reasons` on each
+instruction.  To prevent BnB from polluting `solo_reasons` with reasons from
+orderings that were explored but not chosen, `_pair_count()` snapshots each
+instruction's `solo_reasons` before calling `greedy_pair()` and restores them
+afterward.  Only the final chosen ordering's reasons are kept.
 
 **Best-seen tracking:** BnB tracks the best solution found so far during search.
 On budget exhaustion (`NODE_BUDGET` or `STAGNATION` exceeded), the best-seen
