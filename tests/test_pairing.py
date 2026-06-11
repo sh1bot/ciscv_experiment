@@ -126,36 +126,46 @@ class TestRsdAluPair:
 
 class TestSlotDisqualifiers:
 
-    def test_unknown_in_a_slot_disqualified(self):
-        """An unknown instruction in A-slot must not pair."""
+    def test_unknown_in_a_slot_not_paired(self):
+        """An unknown instruction must not be paired; its solo reason names the disqualifier."""
         unk = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
         unk.is_unknown = True
         stamp_slot_eligibility([unk])
         add = make_add_rsd(13, 14)
-        reason = can_pair(unk, add)
-        assert reason is not None
-        assert "A-slot disqualified: is_unknown" in reason
+        packets = greedy_pair([unk, add])
+        assert all(p[0] == 'solo' for p in packets)
+        assert any("A-slot disqualified: is_unknown" in r for r in unk.solo_reasons)
 
-    def test_unknown_in_b_slot_disqualified(self):
-        """An unknown instruction in B-slot must not pair."""
+    def test_unknown_in_b_slot_not_paired(self):
+        """An unknown B-slot candidate must not be paired; its solo reason names the disqualifier."""
         add = make_add_rsd(10, 11)
         unk = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
         unk.is_unknown = True
         stamp_slot_eligibility([unk])
-        reason = can_pair(add, unk)
-        assert reason is not None
-        assert "B-slot disqualified: is_unknown" in reason
+        packets = greedy_pair([add, unk])
+        assert all(p[0] == 'solo' for p in packets)
+        assert any("B-slot disqualified: is_unknown" in r for r in unk.solo_reasons)
 
-    def test_two_unknown_disqualified(self):
-        """Two unknown instructions must not pair (A-slot check fires first)."""
+    def test_unknown_reason_not_on_eligible_partner(self):
+        """Disqualifier reason belongs only to the disqualified instruction, not its attempted partner."""
+        unk = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
+        unk.is_unknown = True
+        stamp_slot_eligibility([unk])
+        add = make_add_rsd(13, 14)
+        greedy_pair([unk, add])
+        assert not any("disqualified" in r for r in add.solo_reasons)
+
+    def test_two_unknown_each_gets_own_reason(self):
+        """Two unknown instructions both go solo; each gets its own disqualifier reason."""
         unk1 = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
         unk1.is_unknown = True
         unk2 = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
         unk2.is_unknown = True
         stamp_slot_eligibility([unk1, unk2])
-        reason = can_pair(unk1, unk2)
-        assert reason is not None
-        assert "A-slot disqualified: is_unknown" in reason
+        packets = greedy_pair([unk1, unk2])
+        assert all(p[0] == 'solo' for p in packets)
+        assert any("A-slot disqualified: is_unknown" in r for r in unk1.solo_reasons)
+        assert any("B-slot disqualified: is_unknown" in r for r in unk2.solo_reasons)
 
 
 class TestNoApplicableRule:
@@ -204,14 +214,13 @@ class TestSoloReasons:
 
     def test_rule_rejection_goes_to_both(self):
         """Rule-check rejection reasons should go to both instructions."""
-        from scheduler.pairing import _record_solo_reasons
-        a = make_insn("add", rd=10, rs1=10, rs2=11)
-        b = make_insn("add", rd=12, rs1=12, rs2=13)
-        a.solo_reasons = set()
-        b.solo_reasons = set()
-        _record_solo_reasons(a, b, "some-rule: some reason")
-        assert "some-rule: some reason" in a.solo_reasons
-        assert "some-rule: some reason" in b.solo_reasons
+        a = make_add(10, 11, 12)   # not rsd-form — rule rejects, not disqualifier
+        b = make_add(13, 14, 15)
+        greedy_pair([a, b])
+        assert len(a.solo_reasons) > 0
+        assert len(b.solo_reasons) > 0
+        # Both should see the same rule-rejection reason
+        assert a.solo_reasons == b.solo_reasons
 
     def test_greedy_records_solo_reason_on_non_pairable(self):
         """After greedy rejects a pair, both instructions have solo_reasons."""

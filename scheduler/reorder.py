@@ -79,7 +79,8 @@ def _count_pairings_in_ready(insn: Instruction, ready: list) -> int:
     count = 0
     for other in ready:
         if other is not insn:
-            if can_pair(insn, other) is None or can_pair(other, insn) is None:
+            if (insn.a_slot_ok and other.b_slot_ok and can_pair(insn, other) is None) or \
+               (other.a_slot_ok and insn.b_slot_ok and can_pair(other, insn) is None):
                 count += 1
     return count
 
@@ -135,7 +136,9 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
 
     def _pick_tier1_partner(free_insn: Instruction) -> Optional[int]:
         """Pick best B-slot partner for free_insn (free=A, partner=B)."""
-        pairable = [i for i in ready if can_pair(free_insn, insns[i]) is None]
+        pairable = [i for i in ready
+                    if free_insn.a_slot_ok and insns[i].b_slot_ok
+                    and can_pair(free_insn, insns[i]) is None]
         if not pairable:
             return None
         ready_list = _ready_insns()
@@ -150,7 +153,8 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
         free must not violate the topological ordering.
         """
         pairable = [i for i in ready
-                    if can_pair(insns[i], free_insn) is None
+                    if insns[i].a_slot_ok and free_insn.b_slot_ok
+                    and can_pair(insns[i], free_insn) is None
                     and i not in graph.edges[free_idx]]
         if not pairable:
             return None
@@ -283,8 +287,11 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
 
         # Order candidates: tier1 (free=A, cand=B), tier2 (cand=A, free=B), tier3 (rest)
         if free_insn is not None:
-            tier1 = [i for i in ready if can_pair(free_insn, insns[i]) is None]
+            tier1 = [i for i in ready
+                     if free_insn.a_slot_ok and insns[i].b_slot_ok
+                     and can_pair(free_insn, insns[i]) is None]
             tier2 = [i for i in ready if i not in tier1
+                     and insns[i].a_slot_ok and free_insn.b_slot_ok
                      and can_pair(insns[i], free_insn) is None
                      and i not in graph.edges[free_idx]]
             tier3 = [i for i in ready if i not in tier1 and i not in tier2]
@@ -302,8 +309,10 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
             new_order = order + [insn]
 
             if free_insn is not None and (
-                can_pair(free_insn, insn) is None          # tier-1: free=A, insn=B
-                or (can_pair(insn, free_insn) is None      # tier-2: insn=A, free=B
+                (free_insn.a_slot_ok and insn.b_slot_ok
+                 and can_pair(free_insn, insn) is None)          # tier-1
+                or (insn.a_slot_ok and free_insn.b_slot_ok
+                    and can_pair(insn, free_insn) is None        # tier-2
                     and idx not in graph.edges[free_idx])
             ):
                 new_pairs = pairs + 1

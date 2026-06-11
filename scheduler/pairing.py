@@ -36,15 +36,11 @@ def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
 
 
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """Return None if a and b may share a 32-bit packet, or a reason string if not."""
-    if not a.a_slot_ok:
-        for prop in A_SLOT_DISQUALIFIERS:
-            if getattr(a, prop):
-                return f"A-slot disqualified: {prop}"
-    if not b.b_slot_ok:
-        for prop in B_SLOT_DISQUALIFIERS:
-            if getattr(b, prop):
-                return f"B-slot disqualified: {prop}"
+    """Return None if a and b may share a 32-bit packet, or a reason string if not.
+
+    Callers must ensure a.a_slot_ok and b.b_slot_ok before calling; disqualified
+    instructions must be handled upstream and never passed here.
+    """
     reasons: list = []
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):
@@ -72,14 +68,31 @@ def greedy_pair(instructions: list[Instruction]) -> list:
 
     for curr in instructions:
         if free is not None:
-            reason = can_pair(free, curr)
-            if reason is None:
-                result.append(('pair', free, curr))
-                free = None
-            else:
-                _record_solo_reasons(free, curr, reason)
+            if not free.a_slot_ok or not curr.b_slot_ok:
+                # Slot-disqualified instruction cannot participate in this pair.
+                # Record the reason on the disqualified instruction only.
+                if not free.a_slot_ok:
+                    for prop in A_SLOT_DISQUALIFIERS:
+                        if getattr(free, prop):
+                            free.solo_reasons.add(f"A-slot disqualified: {prop}")
+                            break
+                if not curr.b_slot_ok:
+                    for prop in B_SLOT_DISQUALIFIERS:
+                        if getattr(curr, prop):
+                            curr.solo_reasons.add(f"B-slot disqualified: {prop}")
+                            break
                 result.append(('solo', free))
                 free = curr
+            else:
+                reason = can_pair(free, curr)
+                if reason is None:
+                    result.append(('pair', free, curr))
+                    free = None
+                else:
+                    free.solo_reasons.add(reason)
+                    curr.solo_reasons.add(reason)
+                    result.append(('solo', free))
+                    free = curr
         else:
             free = curr
 
@@ -87,9 +100,3 @@ def greedy_pair(instructions: list[Instruction]) -> list:
         result.append(('solo', free))
 
     return result
-
-
-def _record_solo_reasons(free: Instruction, curr: Instruction, reason: str) -> None:
-    """Record rejection reasons onto both instructions."""
-    free.solo_reasons.add(reason)
-    curr.solo_reasons.add(reason)
