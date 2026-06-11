@@ -104,7 +104,7 @@ class TestListMode:
         a = make_add_rsd(10, 11)
         b = make_add_rsd(12, 13)
         c = make_add_rsd(14, 15)
-        d = make_add_rsd(16, 17)
+        d = make_add_rsd(8, 9)
         block = make_block([a, b, c, d])
         graph = build_dep_graph(block)
         result = schedule(block, graph, ScheduleMode.LIST)

@@ -97,9 +97,9 @@ class TestRsdAluPair:
         assert can_pair(a, b) is not None
 
     def test_unsupported_mnemonic_does_not_pair(self):
-        """addi is not in the rsd-alu supported set — even rsd-form should not pair."""
-        a = make_insn("addi", rd=10, rs1=10, imm=1)   # is_rsd: rd==rs1
-        b = make_insn("addi", rd=12, rs1=12, imm=2)
+        """slli is not in the rsd-alu supported set — even rsd-form should not pair."""
+        a = make_insn("slli", rd=10, rs1=10, imm=1)   # is_rsd: rd==rs1
+        b = make_insn("slli", rd=12, rs1=12, imm=2)
         assert can_pair(a, b) is not None
 
     def test_pair_returns_none_for_valid(self):
@@ -272,7 +272,7 @@ class TestGreedyPairing:
         a = make_add_rsd(10, 11)
         b = make_add_rsd(12, 13)
         c = make_add_rsd(14, 15)
-        d = make_add_rsd(16, 17)
+        d = make_add_rsd(8, 9)
         packets = greedy_pair([a, b, c, d])
         assert len(packets) == 2
         assert all(p[0] == 'pair' for p in packets)
