@@ -41,13 +41,12 @@ _RSD_ALU_MN = frozenset({
     "and",  "andn",
     "or",   "xor",
 })
-_RSD_ALU_REGS = frozenset(range(16))         # x0..x15 (4-bit register field)
 _RSD_IMM_MN   = frozenset({"addi", "andi"})  # ops that carry an immediate
 _RSD_IMM_LO, _RSD_IMM_HI = -64, 64          # signed, nonzero
 
 
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """Paired ALU ops: RSD form, registers in x0..x15, immediates -64..64 nonzero.
+    """Paired ALU ops: RSD form, immediates -64..64 nonzero.
 
     Immediate-form ops (addi, andi) require a nonzero immediate in the
     range -64..64.  R-type ops allow rd==rs2 only when commutative.
@@ -55,11 +54,6 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     for slot, insn in (("A", a), ("B", b)):
         if insn.mnemonic not in _RSD_ALU_MN:
             return f"rsd-alu-pair: {slot}-slot mnemonic not in supported set ({insn.mnemonic})"
-        for reg, fname in ((insn.rd, "rd"), (insn.rs1, "rs1")):
-            if reg is not None and reg not in _RSD_ALU_REGS:
-                return f"rsd-alu-pair: {slot}-slot {fname} (x{reg}) not in x0..x15"
-        if insn.rs2 is not None and insn.rs2 not in _RSD_ALU_REGS:
-            return f"rsd-alu-pair: {slot}-slot rs2 (x{insn.rs2}) not in x0..x15"
         if insn.mnemonic in _RSD_IMM_MN:
             imm = insn.imm
             if imm is None or imm == 0 or not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
