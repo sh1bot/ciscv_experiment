@@ -62,72 +62,115 @@ def stamp_solo_reasons(instructions: list[Instruction]) -> None:
                     insn.solo_reasons.add(reason)
 
 
+def _a_eligible_rules(a: Instruction) -> list:
+    """Return the subset of RULES for which a passes A-slot mnemonic and prerequisites.
+
+    This is computed once per A candidate and reused across all B candidates,
+    avoiding redundant re-evaluation of A's properties in the inner loop.
+    """
+    eligible = []
+    for rule in RULES:
+        if rule.a_mnemonic_set is not None and a.mnemonic not in rule.a_mnemonic_set:
+            continue
+        if not all(getattr(a, p) for p in rule.a_prerequisites):
+            continue
+        eligible.append(rule)
+    return eligible
+
+
+def find_b_partners(a: Instruction, candidates: list[Instruction]) -> list[tuple]:
+    """Return [(b, rule), ...] for each candidate that forms a valid pair with a.
+
+    A's eligible rules are computed once; each B candidate is tested only
+    against those rules.  If a is ineligible for all rules the result is always
+    empty and no B candidates are annotated.
+    """
+    eligible = _a_eligible_rules(a)
+    if not eligible:
+        return []
+    results = []
+    for b in candidates:
+        if not b.b_slot_ok:
+            continue
+        for rule in eligible:
+            if rule.b_mnemonic_set is not None and b.mnemonic not in rule.b_mnemonic_set:
+                continue
+            if not all(getattr(b, p) for p in rule.b_prerequisites):
+                continue
+            if rule.check(a, b) is None:
+                results.append((b, rule))
+                break
+    return results
+
+
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Return None if a and b may share a 32-bit packet, or a reason string if not.
 
     Callers must ensure a.a_slot_ok and b.b_slot_ok before calling; disqualified
     instructions must be handled upstream and never passed here.
     """
-    _rule, reason = _try_pair(a, b)
-    return reason
-
-
-def _try_pair(a: Instruction, b: Instruction):
-    """Return (rule, None) on success or (None, reason_str) on failure."""
+    eligible = _a_eligible_rules(a)
+    if not eligible:
+        return "no applicable encoding"
     reasons: list = []
-    for rule in RULES:
-        if rule.a_mnemonic_set is not None and a.mnemonic not in rule.a_mnemonic_set:
-            continue
+    for rule in eligible:
         if rule.b_mnemonic_set is not None and b.mnemonic not in rule.b_mnemonic_set:
-            continue
-        if not all(getattr(a, p) for p in rule.a_prerequisites):
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
         result = rule.check(a, b)
         if result is None:
-            return rule, None   # encoding accepts — pair is valid
+            return None
         reasons.append(result)
-
     if reasons:
-        return None, "; ".join(reasons)
-    return None, "no applicable encoding"
+        return "; ".join(reasons)
+    return "no applicable encoding"
 
 
 def greedy_pair(instructions: list[Instruction]) -> list:
     """Apply the greedy-advance pairing model to an ordered instruction list.
 
     Returns a list of items, each either:
-      ('solo', insn) or ('pair', insn_a, insn_b)
+      ('solo', insn) or ('pair', insn_a, insn_b, rule_name)
     """
     result = []
     free = None
 
     for curr in instructions:
         if free is not None:
-            if not free.a_slot_ok or not curr.b_slot_ok:
-                # Slot-disqualified instruction cannot participate in this pair.
-                # Record the reason on the disqualified instruction only.
-                if not free.a_slot_ok:
-                    for prop in A_SLOT_DISQUALIFIERS:
-                        if getattr(free, prop):
-                            free.solo_reasons.add(f"A-slot disqualified: {prop}")
-                            break
-                if not curr.b_slot_ok:
-                    for prop in B_SLOT_DISQUALIFIERS:
-                        if getattr(curr, prop):
-                            curr.solo_reasons.add(f"B-slot disqualified: {prop}")
-                            break
+            if not free.a_slot_ok:
+                for prop in A_SLOT_DISQUALIFIERS:
+                    if getattr(free, prop):
+                        free.solo_reasons.add(f"A-slot disqualified: {prop}")
+                        break
+                result.append(('solo', free))
+                free = curr
+            elif not curr.b_slot_ok:
+                for prop in B_SLOT_DISQUALIFIERS:
+                    if getattr(curr, prop):
+                        curr.solo_reasons.add(f"B-slot disqualified: {prop}")
+                        break
                 result.append(('solo', free))
                 free = curr
             else:
-                rule, reason = _try_pair(free, curr)
-                if rule is not None:
+                matches = find_b_partners(free, [curr])
+                if matches:
+                    _b, rule = matches[0]
                     result.append(('pair', free, curr, rule.name))
                     free = None
                 else:
-                    free.solo_reasons.add(reason)
-                    curr.solo_reasons.add(reason)
+                    # Only annotate curr with pair-specific failures if free
+                    # was actually eligible for some rule (not A's own fault).
+                    eligible = _a_eligible_rules(free)
+                    if eligible:
+                        for rule in eligible:
+                            if rule.b_mnemonic_set is not None and curr.mnemonic not in rule.b_mnemonic_set:
+                                continue
+                            if not all(getattr(curr, p) for p in rule.b_prerequisites):
+                                continue
+                            reason = rule.check(free, curr)
+                            if reason is not None:
+                                curr.solo_reasons.add(reason)
                     result.append(('solo', free))
                     free = curr
         else:

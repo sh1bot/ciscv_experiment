@@ -14,7 +14,7 @@ from typing import Optional
 from analysis.cfg import BasicBlock
 from analysis.depgraph import DepGraph, build_dep_graph
 from analysis.liveness import compute_local_liveness
-from scheduler.pairing import can_pair, greedy_pair
+from scheduler.pairing import can_pair, greedy_pair, find_b_partners
 from isa.instruction import Instruction
 
 
@@ -76,13 +76,12 @@ def _compute_critical_path(n: int, edges: list) -> list:
 
 def _count_pairings_in_ready(insn: Instruction, ready: list) -> int:
     """Count how many instructions in ready can pair with insn (either direction)."""
-    count = 0
-    for other in ready:
-        if other is not insn:
-            if (insn.a_slot_ok and other.b_slot_ok and can_pair(insn, other) is None) or \
-               (other.a_slot_ok and insn.b_slot_ok and can_pair(other, insn) is None):
-                count += 1
-    return count
+    others = [o for o in ready if o is not insn]
+    # insn as A-slot
+    as_a = len(find_b_partners(insn, [o for o in others if o.b_slot_ok]))
+    # insn as B-slot: each other instruction is A, insn is the single B candidate
+    as_b = sum(1 for o in others if o.a_slot_ok and find_b_partners(o, [insn])) if insn.b_slot_ok else 0
+    return as_a + as_b
 
 
 def _list_schedule(insns: list, graph: DepGraph) -> list:
@@ -136,9 +135,9 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
 
     def _pick_tier1_partner(free_insn: Instruction) -> Optional[int]:
         """Pick best B-slot partner for free_insn (free=A, partner=B)."""
-        pairable = [i for i in ready
-                    if free_insn.a_slot_ok and insns[i].b_slot_ok
-                    and can_pair(free_insn, insns[i]) is None]
+        b_candidates = [insns[i] for i in ready if insns[i].b_slot_ok]
+        matched_bs = {id(b): rule for b, rule in find_b_partners(free_insn, b_candidates)}
+        pairable = [i for i in ready if id(insns[i]) in matched_bs]
         if not pairable:
             return None
         ready_list = _ready_insns()
@@ -153,9 +152,9 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
         free must not violate the topological ordering.
         """
         pairable = [i for i in ready
-                    if insns[i].a_slot_ok and free_insn.b_slot_ok
-                    and can_pair(insns[i], free_insn) is None
-                    and i not in graph.edges[free_idx]]
+                    if insns[i].a_slot_ok
+                    and i not in graph.edges[free_idx]
+                    and find_b_partners(insns[i], [free_insn])]
         if not pairable:
             return None
         ready_list = _ready_insns()
@@ -287,13 +286,13 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
 
         # Order candidates: tier1 (free=A, cand=B), tier2 (cand=A, free=B), tier3 (rest)
         if free_insn is not None:
-            tier1 = [i for i in ready
-                     if free_insn.a_slot_ok and insns[i].b_slot_ok
-                     and can_pair(free_insn, insns[i]) is None]
+            t1_bs = {id(insns[i]) for i in ready if insns[i].b_slot_ok}
+            t1_matched = {id(b) for b, _ in find_b_partners(free_insn, [insns[i] for i in ready if id(insns[i]) in t1_bs])}
+            tier1 = [i for i in ready if id(insns[i]) in t1_matched]
             tier2 = [i for i in ready if i not in tier1
-                     and insns[i].a_slot_ok and free_insn.b_slot_ok
-                     and can_pair(insns[i], free_insn) is None
-                     and i not in graph.edges[free_idx]]
+                     and insns[i].a_slot_ok
+                     and i not in graph.edges[free_idx]
+                     and find_b_partners(insns[i], [free_insn])]
             tier3 = [i for i in ready if i not in tier1 and i not in tier2]
             candidates = tier1 + tier2 + tier3
         else:
@@ -309,11 +308,10 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
             new_order = order + [insn]
 
             if free_insn is not None and (
-                (free_insn.a_slot_ok and insn.b_slot_ok
-                 and can_pair(free_insn, insn) is None)          # tier-1
-                or (insn.a_slot_ok and free_insn.b_slot_ok
-                    and can_pair(insn, free_insn) is None        # tier-2
-                    and idx not in graph.edges[free_idx])
+                (insn.b_slot_ok and find_b_partners(free_insn, [insn]))   # tier-1
+                or (insn.a_slot_ok                                         # tier-2
+                    and idx not in graph.edges[free_idx]
+                    and find_b_partners(insn, [free_insn]))
             ):
                 new_pairs = pairs + 1
                 new_free = None

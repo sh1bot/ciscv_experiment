@@ -7,7 +7,7 @@ Only rsd-alu-pair exists. All other combinations should be rejected.
 import pytest
 from isa.instruction import Instruction
 from scheduler.pairing import (
-    can_pair, greedy_pair, stamp_slot_eligibility, RULES,
+    can_pair, greedy_pair, stamp_slot_eligibility, stamp_solo_reasons, RULES,
 )
 
 
@@ -156,13 +156,15 @@ class TestSlotDisqualifiers:
         assert not any("disqualified" in r for r in add.solo_reasons)
 
     def test_two_unknown_each_gets_own_reason(self):
-        """Two unknown instructions both go solo; each gets its own disqualifier reason."""
+        """Each unknown instruction gets its own disqualifier reason in its own slot."""
         unk1 = make_insn("unknown_op", rd=10, rs1=11, rs2=12)
         unk1.is_unknown = True
-        unk2 = make_insn("unknown_op", rd=13, rs1=14, rs2=15)
+        stamp_slot_eligibility([unk1])
+        add = make_add_rsd(13, 14)
+        unk2 = make_insn("unknown_op", rd=15, rs1=1, rs2=2)
         unk2.is_unknown = True
-        stamp_slot_eligibility([unk1, unk2])
-        packets = greedy_pair([unk1, unk2])
+        stamp_slot_eligibility([unk2])
+        packets = greedy_pair([unk1, add, unk2])
         assert all(p[0] == 'solo' for p in packets)
         assert any("A-slot disqualified: is_unknown" in r for r in unk1.solo_reasons)
         assert any("B-slot disqualified: is_unknown" in r for r in unk2.solo_reasons)
@@ -212,27 +214,29 @@ class TestNoApplicableRule:
 
 class TestSoloReasons:
 
-    def test_rule_rejection_goes_to_both(self):
-        """Rule-check rejection reasons should go to both instructions."""
-        a = make_add(10, 11, 12)   # not rsd-form — rule rejects, not disqualifier
+    def test_intrinsic_reasons_from_stamp(self):
+        """stamp_solo_reasons gives each instruction its own intrinsic reasons."""
+        a = make_add(10, 11, 12)   # not rsd-form
         b = make_add(13, 14, 15)
-        greedy_pair([a, b])
-        assert len(a.solo_reasons) > 0
-        assert len(b.solo_reasons) > 0
-        # Both should see the same rule-rejection reason
-        assert a.solo_reasons == b.solo_reasons
+        stamp_solo_reasons([a, b])
+        assert any("not RSD form" in r for r in a.solo_reasons)
+        assert any("not RSD form" in r for r in b.solo_reasons)
 
-    def test_greedy_records_solo_reason_on_non_pairable(self):
-        """After greedy rejects a pair, both instructions have solo_reasons."""
-        a = make_add(10, 11, 12)   # not rsd-form, can't pair
-        b = make_add(13, 14, 15)
-        a.solo_reasons = set()
-        b.solo_reasons = set()
+    def test_greedy_annotates_b_with_pair_specific_reason(self):
+        """When A is eligible but pair fails, B gets the pair-specific reason."""
+        a = make_add_rsd(10, 11)   # valid A-slot candidate
+        b = make_add(13, 14, 15)   # not rsd-form — B fails
         packets = greedy_pair([a, b])
-        # Both should be solo and have reasons
         assert all(p[0] == 'solo' for p in packets)
-        assert len(a.solo_reasons) > 0
         assert len(b.solo_reasons) > 0
+
+    def test_greedy_no_annotation_when_a_ineligible(self):
+        """When A is ineligible for all rules, B gets no pair-attempt reasons."""
+        a = make_insn("jalr", rd=0, rs1=1, imm=0)   # unsupported mnemonic
+        b = make_add_rsd(10, 11)
+        b.solo_reasons = set()
+        greedy_pair([a, b])
+        assert len(b.solo_reasons) == 0
 
 
 # ---------------------------------------------------------------------------
