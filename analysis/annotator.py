@@ -82,14 +82,14 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
 
                 for pl in a.prefix_lines:
                     lines.append(pl)
-                comment_a = f"# {{packet {packet_num}a}}"
+                comment_a = f"# {{packet {packet_num}a, {rule_name}}}"
                 if annotate_liveness:
                     comment_a += f"  live_in={_fmt_live(a.live_in)}"
                 lines.append(f"{a.raw.rstrip()}  {comment_a}")
 
                 for pl in b.prefix_lines:
                     lines.append(pl)
-                comment_b = f"# {{packet {packet_num}b}}"
+                comment_b = f"# {{packet {packet_num}b, {rule_name}}}"
                 if annotate_liveness:
                     comment_b += f"  live_in={_fmt_live(b.live_in)}"
                 lines.append(f"{b.raw.rstrip()}  {comment_b}")
