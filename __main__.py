@@ -8,38 +8,13 @@ Usage: python -m rv_scheduler [options] input.s
 from __future__ import annotations
 import argparse
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from analysis.parser import parse_file
 from analysis.liveness import compute_global_liveness, compute_local_liveness
-from scheduler.reorder import ScheduleMode
-from scheduler.pairing import stamp_slot_eligibility, stamp_solo_reasons
+from analysis.depgraph import build_dep_graph
+from scheduler.reorder import schedule, ScheduleMode
+from scheduler.pairing import greedy_pair, stamp_slot_eligibility, stamp_solo_reasons
 from analysis.annotator import annotate_output
-
-
-def _process_fn(fn, same_base_reorder, mode):
-    """Process a single function: liveness, dep-graph, schedule, pair."""
-    from analysis.liveness import compute_global_liveness, compute_local_liveness
-    from analysis.depgraph import build_dep_graph
-    from scheduler.reorder import schedule, ScheduleMode
-    from scheduler.pairing import greedy_pair
-
-    fn_name = fn.name if hasattr(fn, 'name') and fn.name else "(unknown)"
-    global_result = compute_global_liveness(fn.blocks)
-    fn_block_packets = []
-    for block in fn.blocks:
-        if not block.instructions:
-            continue
-        compute_local_liveness(block, global_result)
-        graph = None
-        if mode != ScheduleMode.FORWARD:
-            graph = build_dep_graph(block, same_base_reorder=same_base_reorder)
-        ordered = schedule(block, graph, mode)
-        if mode != ScheduleMode.FORWARD:
-            block.instructions = ordered
-            compute_local_liveness(block, global_result)
-        fn_block_packets.extend(greedy_pair(ordered))
-    return fn_name, fn_block_packets
 
 
 def main():
@@ -82,21 +57,28 @@ def main():
             stamp_slot_eligibility(block.instructions)
             stamp_solo_reasons(block.instructions)
 
-    # Process each function independently, in parallel.
-    # Sort by descending instruction count so large functions start first.
-    indexed_fns = sorted(enumerate(functions), key=lambda t: -sum(len(b.instructions) for b in t[1].blocks))
+    # Process each function independently
+    fn_packets = []   # list of (fn_name, packets)
 
-    results = {}
-    with ProcessPoolExecutor() as executor:
-        futures = {
-            executor.submit(_process_fn, fn, args.same_base_reorder, mode): orig_idx
-            for orig_idx, fn in indexed_fns
-        }
-        for future in as_completed(futures):
-            orig_idx = futures[future]
-            results[orig_idx] = future.result()
+    for fn in functions:
+        fn_name = fn.name if hasattr(fn, 'name') and fn.name else "(unknown)"
+        global_result = compute_global_liveness(fn.blocks)
 
-    fn_packets = [results[i] for i in range(len(functions))]
+        fn_block_packets = []
+        for block in fn.blocks:
+            if not block.instructions:
+                continue
+            compute_local_liveness(block, global_result)
+            graph = None
+            if mode != ScheduleMode.FORWARD:
+                graph = build_dep_graph(block, same_base_reorder=args.same_base_reorder)
+            ordered = schedule(block, graph, mode)
+            if mode != ScheduleMode.FORWARD:
+                block.instructions = ordered
+                compute_local_liveness(block, global_result)
+            fn_block_packets.extend(greedy_pair(ordered))
+
+        fn_packets.append((fn_name, fn_block_packets))
 
     # Format output
     output_text = annotate_output(fn_packets, annotate_liveness=args.annotate_liveness)
