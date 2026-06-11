@@ -35,6 +35,25 @@ def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
         insn.b_slot_ok = not any(getattr(insn, p) for p in B_SLOT_DISQUALIFIERS)
 
 
+def stamp_solo_reasons(instructions: list[Instruction]) -> None:
+    """Precompute per-instruction solo reasons from rule self-diagnosis.
+
+    Runs each rule's diagnose_a / diagnose_b against every instruction and
+    records reasons on the instruction itself.  This means every instruction
+    that can never pair knows why, even if it never gets a pairing attempt.
+    """
+    for insn in instructions:
+        for rule in RULES:
+            if rule.diagnose_a is not None:
+                reason = rule.diagnose_a(insn)
+                if reason is not None:
+                    insn.solo_reasons.add(reason)
+            if rule.diagnose_b is not None and rule.diagnose_b is not rule.diagnose_a:
+                reason = rule.diagnose_b(insn)
+                if reason is not None:
+                    insn.solo_reasons.add(reason)
+
+
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Return None if a and b may share a 32-bit packet, or a reason string if not.
 
@@ -95,8 +114,12 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                     result.append(('pair', free, curr, rule.name))
                     free = None
                 else:
-                    free.solo_reasons.add(reason)
-                    curr.solo_reasons.add(reason)
+                    # Only add pair-attempt reason if per-instruction
+                    # self-diagnosis hasn't already explained the rejection.
+                    if not free.solo_reasons:
+                        free.solo_reasons.add(reason)
+                    if not curr.solo_reasons:
+                        curr.solo_reasons.add(reason)
                     result.append(('solo', free))
                     free = curr
         else:
