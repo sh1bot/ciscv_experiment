@@ -870,6 +870,12 @@ non-`None` string constitutes a rejection of that specific encoding.
 
 ### Example rule — RSD ALU pair
 
+The rule currently in `scheduler/rules.py` is a deliberately conservative
+starting point, chosen to establish the mechanics of the rule framework rather
+than to represent the final encoding design.  It serves as a concrete example
+for testing the tooling; the supported mnemonic set and the `rsd` form
+requirement are expected to be revised as the encoding space is explored.
+
 As a worked example, consider pairing two instructions where both have the form
 `{add, sub, and, or, xor, addw, subw} rsd, rs2` — i.e. both are two-register
 ALU ops where the destination is also a source (no immediate, no load/store).
