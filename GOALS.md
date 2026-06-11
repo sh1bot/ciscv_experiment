@@ -50,6 +50,12 @@ a large immediate that cannot fit the compressed field width the rule allows.
 Knowing an instruction is uncapturable is as useful as knowing a rule tweak
 would capture it.
 
+The output also includes summary statistics: a per-function block reporting
+instruction count, pair count, pair rate, and RVC-eligibility rate; and a
+file-level block at the end that aggregates these totals and adds a per-rule
+hit count breakdown.  These statistics are the primary quantitative signal for
+comparing rule sets.
+
 ---
 
 ## 2. Reordering: maximising pairing within dataflow constraints
@@ -111,3 +117,9 @@ output is identical for equivalent inputs.
 Pairing rate measurements use the conservative memory ordering default, in which
 every load/store pair is ordered unless explicitly relaxed.  This is the
 reference point against which rule changes are evaluated.
+
+The RVC-eligibility rate reported alongside the pairing rate serves as a
+ceiling reference: it shows the fraction of instructions that *could* be
+compressed under RVC, independent of pairing constraints.  A large gap between
+the pairing rate and the RVC rate indicates headroom that better rules could
+capture.  A small gap indicates the encoding is near saturation.
