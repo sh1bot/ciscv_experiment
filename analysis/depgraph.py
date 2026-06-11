@@ -110,9 +110,10 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
                     dep = True
                     if mem_ops:
                         prev_idx, prev_base, prev_off, prev_w = mem_ops[-1]
+                        cur_w = insn.access_width if insn.access_width is not None else 4
+                        eff_prev_w = prev_w if prev_w is not None else 4
                         if (prev_base is not None and insn.rs1 == prev_base and
-                                prev_off is not None and insn.imm is not None and
-                                insn.access_width is not None and prev_w is not None):
+                                prev_off is not None and insn.imm is not None):
                             # Check no unknown instruction between them
                             has_unknown = any(
                                 insns[k].is_unknown
@@ -127,9 +128,9 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
                                 if not base_modified:
                                     # Check non-overlapping byte ranges
                                     a_lo = prev_off
-                                    a_hi = prev_off + prev_w
+                                    a_hi = prev_off + eff_prev_w
                                     b_lo = insn.imm
-                                    b_hi = insn.imm + insn.access_width
+                                    b_hi = insn.imm + cur_w
                                     if a_hi <= b_lo or b_hi <= a_lo:
                                         dep = False
                     if dep:

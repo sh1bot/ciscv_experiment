@@ -22,7 +22,7 @@ from isa.registers import ARG_REGS, CALLEE_SAVED
 @dataclass
 class LivenessResult:
     """Result of global liveness pass over a set of blocks."""
-    live_in:    dict = field(default_factory=dict)   # label -> frozenset[int]
+    live_in:    dict = field(default_factory=dict)   # id(BasicBlock) -> frozenset[int]
     live_out:   dict = field(default_factory=dict)
 
 

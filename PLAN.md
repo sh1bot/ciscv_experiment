@@ -813,10 +813,10 @@ this pass.  It must be called once per block after parsing, before scheduling
 or pairing.  Scheduling rules and `can_pair()` read the pre-computed flags
 directly rather than re-evaluating the disqualifier lists on every call.
 
-`can_pair()` checks these flags first, before evaluating any `PairingRule`.  If
-`a` is disqualified, the function returns immediately without examining `b` at
-all — there is no point searching for a B-slot partner when the A-slot candidate
-is already known to be ineligible.
+Slot eligibility is checked by the caller before `can_pair()` is invoked.
+`can_pair()` itself is a pure rule-check that assumes both instructions are
+already slot-eligible.  This means disqualified instructions are short-circuited
+at the scheduling layer, never reaching the encoding tests at all.
 
 Current contents:
 
@@ -924,28 +924,19 @@ pairing policy.
 
 ### `can_pair()`
 
-Slot disqualifiers are checked first, before any rule is consulted.  An
-instruction that fails a slot disqualifier cannot appear in that slot regardless
-of what rules exist.  Current disqualifiers:
-
-| Slot | Property | Rationale |
-|---|---|---|
-| A or B | `is_unknown` | Side effects are unknown; cannot safely pair with anything. |
+`can_pair()` is a pure rule-check: it assumes both instructions are already
+slot-eligible (`a.a_slot_ok` and `b.b_slot_ok` are both True).  Callers are
+responsible for checking slot eligibility before calling it; disqualified
+instructions must never be passed here.
 
 ```python
 def can_pair(a: Instruction, b: Instruction) -> str | None:
     """Return None if a and b may share a 32-bit packet,
-    or a short reason string if not."""
-    # Per-slot disqualifiers: fast-out using pre-computed flags.
-    if not a.a_slot_ok:
-        for prop in A_SLOT_DISQUALIFIERS:
-            if getattr(a, prop):
-                return f"A-slot disqualified: {prop}"
-    if not b.b_slot_ok:
-        for prop in B_SLOT_DISQUALIFIERS:
-            if getattr(b, prop):
-                return f"B-slot disqualified: {prop}"
+    or a short reason string if not.
 
+    Precondition: a.a_slot_ok and b.b_slot_ok — callers must check slot
+    eligibility before calling; disqualified instructions are not passed here.
+    """
     reasons: list[str] = []
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):

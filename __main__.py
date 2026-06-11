@@ -58,7 +58,6 @@ def main():
 
     # Process each function independently
     all_packets = []
-    all_trailing_lines = []
 
     for fn in functions:
         # Global liveness pass
