@@ -41,11 +41,12 @@ def annotate_output(packets: list, annotate_liveness: bool = False) -> str:
             for pl in insn.prefix_lines:
                 lines.append(pl)
             rvc = _rvc_marker(insn)
+            prefix = f"{rvc}  " if rvc else ""
             if insn.solo_reasons:
                 reasons_str = ", ".join(sorted(insn.solo_reasons))
-                comment = f"# {rvc}  {{solo: {reasons_str}}}"
+                comment = f"# {prefix}{{solo: {reasons_str}}}"
             else:
-                comment = f"# {rvc}  {{solo}}"
+                comment = f"# {prefix}{{solo}}"
             if annotate_liveness:
                 comment += f"  live_in={_fmt_live(insn.live_in)}"
             lines.append(f"{insn.raw.rstrip()}  {comment}")
@@ -58,7 +59,7 @@ def _rvc_marker(insn: Instruction) -> str:
         return "[?]"
     if insn.rvc_eligible:
         return "[C]"
-    return "[~C]"
+    return ""
 
 
 def _fmt_live(live: frozenset) -> str:

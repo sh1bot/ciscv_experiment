@@ -1140,13 +1140,13 @@ preceded by any `prefix_lines`, followed by a comment.  The comment format is:
     add  a0, a1, a2     # [C]  {packet 7a}
     slli t0, t0, 3      # [C]  {packet 7b}
     lw   s0, 0(sp)      # [C]  {solo: RAW hazard on t1, not RSD}
-    mul  a1, a2, a3     # [~C] {solo}
+    mul  a1, a2, a3     # {solo}
     foo  a0, a1         # [?]  {solo}
 ```
 
 Fields in the comment:
 
-- `[C]` / `[~C]` — RVC eligibility.  `[?]` for unknown instructions.
+- `[C]` — RVC-eligible (present only when true).  `[?]` for unknown instructions.
 - `{packet Nb}` / `{packet Na}` — paired; `a` is the first instruction of the
   packet, `b` the second.  Packet numbers are sequential per output file,
   starting from 1.
