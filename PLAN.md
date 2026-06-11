@@ -818,32 +818,25 @@ directly rather than re-evaluating the disqualifier lists on every call.
 all — there is no point searching for a B-slot partner when the A-slot candidate
 is already known to be ineligible.
 
-Initial contents (subject to change as rules evolve):
+Current contents:
 
 ```python
 A_SLOT_DISQUALIFIERS = [
-    "is_branch",    # branch in A-slot: the processor leaves before B executes
-    "is_jump",      # same applies to unconditional jumps and returns
-    "is_return",
-    "is_call",      # calls belong in B-slot only (see below)
-    "is_tail",      # tail-call pseudo transfers control; not a JAL/JALR so not caught by is_jump
+    "is_unknown",   # side effects unknown — always disqualified from both slots
 ]
 
 B_SLOT_DISQUALIFIERS = [
-    # none initially — to be populated as constraints are discovered
+    "is_unknown",
 ]
 ```
 
-Calls are A-slot disqualified because placing a call in A-slot would transfer
-control before the B-slot instruction executes.  In B-slot a call executes after
-the A-slot instruction completes, which is the intended sequencing.
-
-**Branches and jumps in B-slot** are explicitly permitted by the packet format:
-the B-slot instruction executes after A-slot, so a branch or jump in B-slot
-redirects control after A has committed — which is correct.  This is why
-`is_branch`, `is_jump`, and `is_return` appear only in `A_SLOT_DISQUALIFIERS`
-and not in `B_SLOT_DISQUALIFIERS`.  Pairing an ALU instruction in A-slot with a
-branch in B-slot is a meaningful optimisation target.
+This is the minimal starting point.  The disqualifier lists are the primary
+mechanism for expressing slot constraints as the encoding design evolves.
+Branches, calls, and returns are not currently in these lists — whether they
+require slot restrictions depends on the specific packet encoding being
+explored and is left to future rule iteration.  The `is_branch`, `is_call`,
+etc. properties exist on `Instruction` so they can be added to either list
+without any other code changes.
 
 ### What a rule represents
 

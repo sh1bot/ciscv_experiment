@@ -75,18 +75,38 @@ instructions across branches.  The tool processes compiler output: the compiler
 already made those larger-scope decisions, and the tool's job is to pack what
 it was given as efficiently as possible, not to re-optimise the code structure.
 
+Dividing the problem at function boundaries, and within functions at basic-block
+boundaries, is what keeps the analysis tractable for large real-world codebases.
+A whole-program or cross-block reordering problem would be too expensive for the
+intended use case of fast iteration.
+
 ---
 
 ## 4. Unknown instructions
 
 When an unknown opcode appears the tool annotates it with `[?]` and excludes it
-from pairing.  Best-effort dependency analysis is applied so that reordering
-around it is not completely blind, but the heuristic is an interim measure.
-The correct response to an unknown opcode is to add it to the decoder.
+from pairing.  A best-effort guess at its behaviour is made from its operands:
+instructions with a recognisable memory-addressing operand are treated as memory
+accesses; registers appearing in operand positions are treated as uses.  This
+lets the scheduler move other instructions around an unknown one without being
+completely blind to its effects.  The heuristic is an interim measure — the
+correct response to an unknown opcode is to add it to the decoder.
 
 ---
 
-## 5. Measurement baseline
+## 5. Pseudo-instructions
+
+The tool must produce the same pairing results regardless of whether the input
+assembly uses pseudo-instructions or their explicit encodings.  `mv a0, a1` and
+`addi a0, a1, 0` are the same instruction; `ret` and `jalr x0, ra, 0` are the
+same instruction.  This invariant may be satisfied either by normalising all
+pseudos to their canonical forms on input, or by handling each form explicitly
+throughout the tool — either approach is acceptable as long as the observable
+output is identical for equivalent inputs.
+
+---
+
+## 6. Measurement baseline
 
 Pairing rate measurements use the conservative memory ordering default, in which
 every load/store pair is ordered unless explicitly relaxed.  This is the
