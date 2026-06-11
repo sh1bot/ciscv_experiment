@@ -512,14 +512,12 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             if lbl in barrier_labels:
                 # Start a new block
                 _new_block_with_label(lbl)
-                # Process any buffered prefix lines on the new block's first instruction
-                # (they'll be attached to the first instruction when it's added)
-                # Any prefix_buffer from before this barrier label becomes
-                # prefix for the first insn of the new block
                 if not rest_of_line or rest_of_line.startswith('.'):
-                    # Label is on its own line — the block starts here
+                    # Label is on its own line — emit it and move on
+                    prefix_buffer.append(raw)
                     continue
-                # else: fall through to process rest_of_line as an instruction
+                # Label shares a line with an instruction — emit just the label
+                prefix_buffer.append(f"{lbl}:")
                 stripped = rest_of_line
                 # Process as normal instruction below
                 lm2 = re.match(r'^(\S+):\s*(.*)', rest_of_line)
@@ -527,9 +525,10 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
                     # More labels chained
                     lbl2 = lm2.group(1)
                     if lbl2 in barrier_labels:
+                        prefix_buffer.append(f"{lbl2}:")
                         current_block_labels.append(lbl2)
                     else:
-                        prefix_buffer.append(raw)
+                        prefix_buffer.append(f"{lbl2}:")
                     stripped = lm2.group(2).strip()
             else:
                 # Non-barrier label: add to prefix buffer

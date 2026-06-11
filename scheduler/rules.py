@@ -23,10 +23,10 @@ class PairingRule:
     # check(a, b) -> None means encoding accepts; str -> encoding rejects (reason).
     check: Callable
 
-    # Mnemonic allowlist: both instructions must be in this set for the rule to
-    # apply.  Checked before prerequisites and check(), like a symmetric
-    # prerequisite covering mnemonic membership.
-    mnemonic_set: Optional[frozenset] = None
+    # Per-slot mnemonic allowlists: checked before prerequisites and check(),
+    # like slot-specific prerequisites for mnemonic membership.
+    a_mnemonic_set: Optional[frozenset] = None
+    b_mnemonic_set: Optional[frozenset] = None
 
     # Properties that must be True on a for the rule to be applicable.
     a_prerequisites: list = field(default_factory=list)
@@ -136,7 +136,8 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
-        mnemonic_set=_RSD_ALU_MN,
+        a_mnemonic_set=_RSD_ALU_MN,
+        b_mnemonic_set=_RSD_ALU_MN,
         a_prerequisites=["is_rsd"],
         b_prerequisites=["is_rsd"],
         check=_rsd_alu_pair,
@@ -145,7 +146,8 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="chain-alu-pair",
-        mnemonic_set=_RSD_ALU_MN,
+        a_mnemonic_set=_RSD_ALU_MN,
+        b_mnemonic_set=_RSD_ALU_MN,
         check=_chain_alu_pair,
         diagnose_a=_chain_alu_diagnose,
         diagnose_b=_chain_alu_diagnose,

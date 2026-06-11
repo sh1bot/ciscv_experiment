@@ -43,14 +43,20 @@ def stamp_solo_reasons(instructions: list[Instruction]) -> None:
     """
     for insn in instructions:
         for rule in RULES:
-            if rule.mnemonic_set is not None and insn.mnemonic not in rule.mnemonic_set:
+            a_ok = rule.a_mnemonic_set is None or insn.mnemonic in rule.a_mnemonic_set
+            b_ok = rule.b_mnemonic_set is None or insn.mnemonic in rule.b_mnemonic_set
+            if not a_ok and not b_ok:
                 insn.solo_reasons.add(f"{rule.name}: unsupported mnemonic ({insn.mnemonic})")
                 continue
-            if rule.diagnose_a is not None:
+            if not a_ok:
+                insn.solo_reasons.add(f"{rule.name}: unsupported A-slot mnemonic ({insn.mnemonic})")
+            elif rule.diagnose_a is not None:
                 reason = rule.diagnose_a(insn)
                 if reason is not None:
                     insn.solo_reasons.add(reason)
-            if rule.diagnose_b is not None and rule.diagnose_b is not rule.diagnose_a:
+            if not b_ok:
+                insn.solo_reasons.add(f"{rule.name}: unsupported B-slot mnemonic ({insn.mnemonic})")
+            elif rule.diagnose_b is not None and rule.diagnose_b is not rule.diagnose_a:
                 reason = rule.diagnose_b(insn)
                 if reason is not None:
                     insn.solo_reasons.add(reason)
@@ -70,9 +76,10 @@ def _try_pair(a: Instruction, b: Instruction):
     """Return (rule, None) on success or (None, reason_str) on failure."""
     reasons: list = []
     for rule in RULES:
-        if rule.mnemonic_set is not None:
-            if a.mnemonic not in rule.mnemonic_set or b.mnemonic not in rule.mnemonic_set:
-                continue
+        if rule.a_mnemonic_set is not None and a.mnemonic not in rule.a_mnemonic_set:
+            continue
+        if rule.b_mnemonic_set is not None and b.mnemonic not in rule.b_mnemonic_set:
+            continue
         if not all(getattr(a, p) for p in rule.a_prerequisites):
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
