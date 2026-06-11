@@ -23,6 +23,11 @@ class PairingRule:
     # check(a, b) -> None means encoding accepts; str -> encoding rejects (reason).
     check: Callable
 
+    # Mnemonic allowlist: both instructions must be in this set for the rule to
+    # apply.  Checked before prerequisites and check(), like a symmetric
+    # prerequisite covering mnemonic membership.
+    mnemonic_set: Optional[frozenset] = None
+
     # Properties that must be True on a for the rule to be applicable.
     a_prerequisites: list = field(default_factory=list)
 
@@ -31,14 +36,13 @@ class PairingRule:
 
     # Per-slot self-diagnosis: diagnose_a(insn) / diagnose_b(insn) -> reason str
     # or None if the instruction passes all per-slot constraints for that slot.
-    # Used by stamp_solo_reasons() to explain why an instruction can never pair
-    # in a given slot, independent of any specific partner.
+    # Called after mnemonic_set passes; need not re-check mnemonic membership.
     diagnose_a: Optional[Callable] = None
     diagnose_b: Optional[Callable] = None
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Shared constants
 # ---------------------------------------------------------------------------
 
 _RSD_ALU_MN = frozenset({
@@ -53,14 +57,12 @@ _RSD_IMM_MN   = frozenset({"addi", "andi"})  # ops that carry an immediate
 _RSD_IMM_LO, _RSD_IMM_HI = -64, 64          # signed, nonzero
 
 
-def _alu_diagnose(rule_name: str, insn: Instruction) -> Optional[str]:
-    """Per-slot self-diagnosis shared by both ALU pairing rules.
+# ---------------------------------------------------------------------------
+# Shared per-slot helpers (mnemonic already confirmed by rule.mnemonic_set)
+# ---------------------------------------------------------------------------
 
-    Checks mnemonic membership, register range, and immediate constraints.
-    Does NOT check RSD form — that is rsd-alu-pair's additional requirement.
-    """
-    if insn.mnemonic not in _RSD_ALU_MN:
-        return f"{rule_name}: unsupported mnemonic ({insn.mnemonic})"
+def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction) -> Optional[str]:
+    """Check register range and immediate constraints only; mnemonic already ok."""
     for reg, fname in ((insn.rd, "rd"), (insn.rs1, "rs1")):
         if reg is not None and reg not in _RSD_ALU_REGS:
             return f"{rule_name}: {fname} (x{reg}) not in x0..x15"
@@ -78,7 +80,7 @@ def _alu_diagnose(rule_name: str, insn: Instruction) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _rsd_alu_diagnose(insn: Instruction) -> Optional[str]:
-    reason = _alu_diagnose("rsd-alu-pair", insn)
+    reason = _alu_diagnose_regs_imm("rsd-alu-pair", insn)
     if reason:
         return reason
     if not insn.is_rsd:
@@ -102,11 +104,8 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _chain_alu_diagnose(insn: Instruction) -> Optional[str]:
-    """Per-slot self-diagnosis for chain-alu-pair (slot-symmetric).
-
-    No RSD requirement — chain-alu-pair allows free choice of rd and rs1.
-    """
-    return _alu_diagnose("chain-alu-pair", insn)
+    """Per-slot self-diagnosis for chain-alu-pair (no RSD requirement)."""
+    return _alu_diagnose_regs_imm("chain-alu-pair", insn)
 
 
 def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
@@ -137,6 +136,7 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
+        mnemonic_set=_RSD_ALU_MN,
         a_prerequisites=["is_rsd"],
         b_prerequisites=["is_rsd"],
         check=_rsd_alu_pair,
@@ -145,6 +145,7 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="chain-alu-pair",
+        mnemonic_set=_RSD_ALU_MN,
         check=_chain_alu_pair,
         diagnose_a=_chain_alu_diagnose,
         diagnose_b=_chain_alu_diagnose,

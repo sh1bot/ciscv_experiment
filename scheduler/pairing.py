@@ -38,12 +38,14 @@ def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
 def stamp_solo_reasons(instructions: list[Instruction]) -> None:
     """Precompute per-instruction solo reasons from rule self-diagnosis.
 
-    Runs each rule's diagnose_a / diagnose_b against every instruction and
-    records reasons on the instruction itself.  This means every instruction
-    that can never pair knows why, even if it never gets a pairing attempt.
+    Checks mnemonic_set membership, then runs diagnose_a / diagnose_b against
+    every instruction and records reasons on the instruction itself.
     """
     for insn in instructions:
         for rule in RULES:
+            if rule.mnemonic_set is not None and insn.mnemonic not in rule.mnemonic_set:
+                insn.solo_reasons.add(f"{rule.name}: unsupported mnemonic ({insn.mnemonic})")
+                continue
             if rule.diagnose_a is not None:
                 reason = rule.diagnose_a(insn)
                 if reason is not None:
@@ -68,6 +70,9 @@ def _try_pair(a: Instruction, b: Instruction):
     """Return (rule, None) on success or (None, reason_str) on failure."""
     reasons: list = []
     for rule in RULES:
+        if rule.mnemonic_set is not None:
+            if a.mnemonic not in rule.mnemonic_set or b.mnemonic not in rule.mnemonic_set:
+                continue
         if not all(getattr(a, p) for p in rule.a_prerequisites):
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
