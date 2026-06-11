@@ -114,12 +114,8 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                     result.append(('pair', free, curr, rule.name))
                     free = None
                 else:
-                    # Only add pair-attempt reason if per-instruction
-                    # self-diagnosis hasn't already explained the rejection.
-                    if not free.solo_reasons:
-                        free.solo_reasons.add(reason)
-                    if not curr.solo_reasons:
-                        curr.solo_reasons.add(reason)
+                    free.solo_reasons.add(reason)
+                    curr.solo_reasons.add(reason)
                     result.append(('solo', free))
                     free = curr
         else:
