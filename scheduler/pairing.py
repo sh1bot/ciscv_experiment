@@ -41,6 +41,12 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     Callers must ensure a.a_slot_ok and b.b_slot_ok before calling; disqualified
     instructions must be handled upstream and never passed here.
     """
+    _rule, reason = _try_pair(a, b)
+    return reason
+
+
+def _try_pair(a: Instruction, b: Instruction):
+    """Return (rule, None) on success or (None, reason_str) on failure."""
     reasons: list = []
     for rule in RULES:
         if not all(getattr(a, p) for p in rule.a_prerequisites):
@@ -49,12 +55,12 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
             continue
         result = rule.check(a, b)
         if result is None:
-            return None   # encoding accepts — pair is valid
+            return rule, None   # encoding accepts — pair is valid
         reasons.append(result)
 
     if reasons:
-        return "; ".join(reasons)
-    return "no applicable encoding"
+        return None, "; ".join(reasons)
+    return None, "no applicable encoding"
 
 
 def greedy_pair(instructions: list[Instruction]) -> list:
@@ -84,9 +90,9 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                 result.append(('solo', free))
                 free = curr
             else:
-                reason = can_pair(free, curr)
-                if reason is None:
-                    result.append(('pair', free, curr))
+                rule, reason = _try_pair(free, curr)
+                if rule is not None:
+                    result.append(('pair', free, curr, rule.name))
                     free = None
                 else:
                     free.solo_reasons.add(reason)

@@ -57,12 +57,14 @@ def main():
             stamp_slot_eligibility(block.instructions)
 
     # Process each function independently
-    all_packets = []
+    fn_packets = []   # list of (fn_name, packets)
 
     for fn in functions:
+        fn_name = fn.name if hasattr(fn, 'name') and fn.name else "(unknown)"
         # Global liveness pass
         global_result = compute_global_liveness(fn.blocks)
 
+        fn_block_packets = []
         for block in fn.blocks:
             if not block.instructions:
                 continue
@@ -84,11 +86,12 @@ def main():
                 compute_local_liveness(block, global_result)
 
             # Greedy pairing
-            packets = greedy_pair(ordered)
-            all_packets.extend(packets)
+            fn_block_packets.extend(greedy_pair(ordered))
+
+        fn_packets.append((fn_name, fn_block_packets))
 
     # Format output
-    output_text = annotate_output(all_packets, annotate_liveness=args.annotate_liveness)
+    output_text = annotate_output(fn_packets, annotate_liveness=args.annotate_liveness)
 
     if args.output:
         with open(args.output, 'w') as f:
