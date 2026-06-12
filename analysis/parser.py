@@ -482,20 +482,26 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
         stripped = re.sub(r'#.*$', '', line).strip()
 
         if not stripped:
+            # Blank line or comment-only line: buffer for passthrough.
+            prefix_buffer.append(raw)
             continue
 
         # Track section
         if re.match(r'^\.section\s+\.(text|text\.\S+)', stripped):
             in_text_section = True
+            prefix_buffer.append(raw)
             continue
         if re.match(r'^\.section\s+\.(data|bss|rodata|rodata\.\S+)', stripped):
             in_text_section = False
+            prefix_buffer.append(raw)
             continue
         if re.match(r'^\.text\b', stripped):
             in_text_section = True
+            prefix_buffer.append(raw)
             continue
         if re.match(r'^\.data\b|^\.bss\b|^\.rodata\b', stripped):
             in_text_section = False
+            prefix_buffer.append(raw)
             continue
 
         # Directives (non-instruction, non-label lines): buffer for passthrough

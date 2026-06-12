@@ -166,10 +166,17 @@ class Instruction:
     raw:           str            # original source line, reproduced verbatim on output
     label:         str | None     # label on this line, if any
 
-    # Non-instruction lines (assembler-internal labels such as .Lpcrel_hi*)
-    # that immediately precede this instruction in the source are stored here
-    # so they travel with the instruction if it is reordered.
+    # Non-instruction lines (blank lines, comments, assembler-internal labels
+    # such as .Lpcrel_hi*, directives) that immediately precede this instruction
+    # in the source are stored here so they travel with the instruction if it
+    # is reordered.
     prefix_lines:  list[str] = field(default_factory=list)
+
+    # Non-instruction lines that follow this instruction in the source but
+    # precede the next instruction (or appear at end-of-file).  Used to attach
+    # trailing blank lines, comments, and directives to the last instruction of
+    # a block so they are emitted in the correct position in the output.
+    suffix_lines:  list[str] = field(default_factory=list)
 
     # Populated by the decoder subclass:
     rd:   int | None              # destination register index (0–31 int, 32–63 float)
@@ -583,14 +590,10 @@ Function boundaries are hard stops:
   for scheduling purposes and are not merged into any named function.
 
 Because each function is analysed independently, `compute_global_liveness` and
-`schedule` accept a single `Function` object.  A driver iterates over all
-functions and may dispatch them to a thread pool:
-
-```python
-functions: list[Function] = identify_functions(blocks)
-# Each function is independent — safe to parallelise:
-results = pool.map(analyse_and_schedule, functions)
-```
+`schedule` accept a single `Function` object.  The driver achieves parallelism
+by splitting the raw source text at function boundaries before parsing, so each
+worker process receives a plain string and constructs its own independent object
+graph.  See §13 for details.
 
 ---
 
@@ -774,6 +777,11 @@ class PairingRule:
     # "rsd-alu-pair: mnemonic not in supported set".
     check: Callable[[Instruction, Instruction], str | None]
 
+    # Per-slot mnemonic allowlists.  If set, a candidate is rejected for that
+    # slot before prerequisites are tested.  None means "any mnemonic".
+    a_mnemonic_set: Optional[frozenset] = None
+    b_mnemonic_set: Optional[frozenset] = None
+
     # Properties that must be True on the A-slot instruction (first of pair).
     # If any fails, this rule is skipped (not applicable — does not reject).
     a_prerequisites: list[str] = field(default_factory=list)
@@ -922,6 +930,44 @@ pairing policy.
 
 ## 10. `scheduler/pairing.py`
 
+### `stamp_slot_eligibility()` and `stamp_solo_reasons()`
+
+Two preprocessing passes run once per block immediately after parsing:
+
+`stamp_slot_eligibility(instructions)` precomputes `a_slot_ok` / `b_slot_ok`
+on each instruction from the `A_SLOT_DISQUALIFIERS` / `B_SLOT_DISQUALIFIERS`
+lists.  This is a fast O(n) pass that avoids re-evaluating the disqualifier
+lists on every scheduling or pairing query.
+
+`stamp_solo_reasons(instructions)` precomputes each instruction's intrinsic
+rejection reasons — those that arise from the instruction's own properties
+independent of any pairing partner.  For each rule it checks mnemonic-set
+membership and per-slot prerequisites and records reasons on the instruction.
+This gives `solo_reasons` meaningful content even for instructions that are
+never offered a pairing candidate (e.g. the sole instruction in a block).
+
+### `_a_eligible_rules()` and `find_b_partners()`
+
+The inner pairing loop tests one A candidate against many B candidates.
+Re-evaluating A's mnemonic-set and prerequisite checks for every B candidate
+is wasteful.  Two helpers factor out the A-side work:
+
+```python
+def _a_eligible_rules(a: Instruction) -> list[PairingRule]:
+    """Rules for which a passes a_mnemonic_set and a_prerequisites.
+    Computed once per A; reused across all B candidates."""
+
+def find_b_partners(a: Instruction, candidates: list[Instruction]
+                    ) -> list[tuple[Instruction, PairingRule]]:
+    """Return [(b, rule), ...] for each candidate that forms a valid pair
+    with a.  If a is ineligible for all rules, returns [] immediately and
+    no B candidate is annotated."""
+```
+
+`find_b_partners` is the primary query used by the list scheduler and BnB.
+`can_pair` is a thin wrapper over the same logic for callers that want a
+single yes/no answer with a reason string.
+
 ### `can_pair()`
 
 `can_pair()` is a pure rule-check: it assumes both instructions are already
@@ -932,26 +978,21 @@ instructions must never be passed here.
 ```python
 def can_pair(a: Instruction, b: Instruction) -> str | None:
     """Return None if a and b may share a 32-bit packet,
-    or a short reason string if not.
-
-    Precondition: a.a_slot_ok and b.b_slot_ok — callers must check slot
-    eligibility before calling; disqualified instructions are not passed here.
-    """
+    or a short reason string if not."""
+    eligible = _a_eligible_rules(a)
+    if not eligible:
+        return "no applicable encoding"
     reasons: list[str] = []
-    for rule in RULES:
-        if not all(getattr(a, p) for p in rule.a_prerequisites):
+    for rule in eligible:
+        if rule.b_mnemonic_set is not None and b.mnemonic not in rule.b_mnemonic_set:
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
-        # This encoding applies.  Check whether it can represent the pair.
         result = rule.check(a, b)
         if result is None:
-            return None          # encoding accepts — the pair is valid
-        reasons.append(result)  # check() already includes rule name as prefix
-    # No encoding could represent this pair.
-    if reasons:
-        return "; ".join(reasons)
-    return "no applicable encoding"
+            return None
+        reasons.append(result)
+    return "; ".join(reasons) if reasons else "no applicable encoding"
 ```
 
 ### Greedy-advance pairing model
@@ -962,8 +1003,8 @@ candidate (the last unmatched instruction).
 ```
 free = None
 for curr in instructions:               # ← loop over ordered instruction list
-    if free is not None and can_pair(free, curr) is None:
-        emit (free, curr) as pair packet
+    if free is not None and find_b_partners(free, [curr]):
+        emit (free, curr) as pair packet   # ← includes matched rule name
         free = None
     else:
         if free is not None:
@@ -977,18 +1018,25 @@ A solo instruction never blocks the following instruction from pairing.  The
 list scheduler and BnB (§11) find the instruction ordering over the block's
 dependency graph that maximises the number of pairs under this exact model.
 
+Each pair packet records the matched rule name: `('pair', a, b, rule_name)`.
+Solo packets are `('solo', insn)`.
+
 ### Rejection reason collection
 
-Slot disqualification is checked before `can_pair()` is called.  If `free` is
-A-slot disqualified, it is emitted solo immediately without testing any
-candidate; the disqualifier reason is added only to `free.solo_reasons`.
-Likewise, if `curr` is B-slot disqualified, it is skipped as a candidate and
-the reason is added only to `curr.solo_reasons`.  `can_pair()` is only called
-when both instructions are slot-eligible.
+Slot disqualification is checked before `find_b_partners()` is called.  If
+`free` is A-slot disqualified, it is emitted solo immediately and the
+disqualifier reason is added only to `free.solo_reasons`.  Likewise, if `curr`
+is B-slot disqualified, the reason is added only to `curr.solo_reasons`.
 
-For rule-check rejections (encoding mismatches from `can_pair()`), the reason
-describes the incompatibility between the pair and is added to both
-`free.solo_reasons` and `curr.solo_reasons`.
+For rule-check rejections, the reason is added to `curr.solo_reasons` only —
+and only when A is actually eligible for at least one rule (i.e.
+`_a_eligible_rules(free)` is non-empty).  If A is ineligible for all rules, B
+gets no pair-attempt annotation because the failure is entirely A's fault; B
+should not accumulate spurious reasons from a pairing attempt it had no chance
+of succeeding.
+
+Intrinsic reasons (those arising from an instruction's own properties) are
+pre-populated by `stamp_solo_reasons()` before any pairing is attempted.
 
 In `--fast` (forward-scan) mode each instruction is tested against at most one
 adjacent candidate.  In list-scheduling and BnB modes the ready queue may cause
@@ -1133,12 +1181,23 @@ This is a best-effort heuristic; a complete fix would require assembler support.
 
 ## 12. `output/annotator.py`
 
-Each instruction is emitted as its original source line (verbatim `raw` field),
-preceded by any `prefix_lines`, followed by a comment.  The comment format is:
+Each instruction is emitted as:
+1. Its `prefix_lines` (blank lines, comments, directives, non-barrier labels
+   that precede it in the source), verbatim.
+2. Its original source line (verbatim `raw` field), with a scheduler comment
+   appended.
+3. Its `suffix_lines` (trailing lines that follow this instruction and precede
+   the next instruction, or appear at end-of-file), verbatim.
+
+All non-instruction source lines — blank lines, comments (`# ...`), assembler
+directives, section switches — travel as `prefix_lines` or `suffix_lines` and
+are reproduced verbatim in the output.  No source line is dropped.
+
+The comment format is:
 
 ```asm
-    add  a0, a1, a2     # [C]  {packet 7a}
-    slli t0, t0, 3      # [C]  {packet 7b}
+    add  a0, a1, a2     # [C]  {packet 7a, rsd-alu-pair}
+    slli t0, t0, 3      # [C]  {packet 7b, rsd-alu-pair}
     lw   s0, 0(sp)      # [C]  {solo: RAW hazard on t1, not RSD}
     mul  a1, a2, a3     # {solo}
     foo  a0, a1         # [?]  {solo}
@@ -1147,16 +1206,27 @@ preceded by any `prefix_lines`, followed by a comment.  The comment format is:
 Fields in the comment:
 
 - `[C]` — RVC-eligible (present only when true).  `[?]` for unknown instructions.
-- `{packet Nb}` / `{packet Na}` — paired; `a` is the first instruction of the
-  packet, `b` the second.  Packet numbers are sequential per output file,
-  starting from 1.
+- `{packet Na, rule_name}` / `{packet Nb, rule_name}` — paired; `a` is the
+  first instruction of the packet, `b` the second.  Packet numbers are
+  sequential per output file, starting from 1.  `rule_name` is the name of the
+  `PairingRule` that accepted the pair.
 - `{solo}` — unpaired with no rejection reason recorded.
 - `{solo: reason1, reason2}` — unpaired; the reasons are the deduplicated union
-  of all `can_pair()` rejection strings collected for this instruction across
-  all adjacent candidates examined during the pairing pass.  Reasons are sorted
+  of all rejection strings collected for this instruction across all adjacent
+  candidates examined during the pairing pass.  Reasons are sorted
   lexicographically before rendering for deterministic output.
 
 With `--annotate-liveness`, the live-in set is also appended to the comment.
+
+### Statistics
+
+After each function's instructions, a comment block is emitted reporting:
+- Instruction count, packet count, pair count, solo count.
+- Pair rate (percentage of instructions that were paired).
+- RVC-eligible rate (percentage of instructions marked `[C]`).
+
+After all functions, a file-level totals block repeats the same metrics and
+adds a per-rule hit count breakdown showing how many pairs each rule matched.
 
 ---
 
@@ -1181,6 +1251,24 @@ Options:
 ```
 
 If both `--fast` and `--thorough` are given, `--thorough` takes precedence.
+
+### Parallel processing
+
+The driver splits the raw source text into per-function chunks at
+`.globl` / `.type @function` boundaries before any parsing.  Each chunk is a
+self-contained string.  A `ProcessPoolExecutor` dispatches each chunk to a
+worker process that runs the full parse → stamp → liveness → schedule → pair
+pipeline independently.  Workers share no state and communicate only plain
+strings (in) and flat packet lists (out), so there is no pickling of complex
+object graphs.
+
+Chunks are sorted by descending size before dispatch so the heaviest functions
+start first.  Results are reassembled in original source order before
+annotation.
+
+This design provides near-linear scaling for BnB mode (3× on 4 cores on a
+large file) and modest gains for list-scheduling mode, where per-function work
+is typically too small to overcome inter-process overhead.
 
 ### Scheduling modes
 
