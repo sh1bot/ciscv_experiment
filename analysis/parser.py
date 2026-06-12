@@ -693,20 +693,20 @@ def identify_functions(blocks: list) -> list:
         if _visited(bb):
             continue
         if bb.is_function_entry or not bb.predecessors:
-            # BFS from this block
+            # BFS from this block to collect all reachable blocks in this function
             fname = bb.label or f"<anon@{id(bb)}>"
-            fn_blocks = []
-            queue = [bb]
             fn_visited: set = set()
+            queue = [bb]
             while queue:
                 b = queue.pop(0)
                 if id(b) in fn_visited:
                     continue
                 fn_visited.add(id(b))
-                fn_blocks.append(b)
                 for s in b.successors:
                     if id(s) not in fn_visited and not s.is_function_entry:
                         queue.append(s)
+            # Preserve source order: filter the global blocks list to this function's set
+            fn_blocks = [b for b in blocks if id(b) in fn_visited]
             functions.append(Function(name=fname, entry=bb, blocks=fn_blocks))
             for b in fn_blocks:
                 _mark(b)
