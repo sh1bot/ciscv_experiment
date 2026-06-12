@@ -49,7 +49,7 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode) -> l
     from analysis.liveness import compute_global_liveness, compute_local_liveness
     from analysis.depgraph import build_dep_graph
     from scheduler.reorder import schedule
-    from scheduler.pairing import greedy_pair, stamp_slot_eligibility, stamp_solo_reasons
+    from scheduler.pairing import greedy_pair, stamp_slot_eligibility
 
     _blocks, functions = parse_file(chunk)
 
@@ -58,7 +58,6 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode) -> l
         fn_name = fn.name if fn.name else "(unknown)"
         for block in fn.blocks:
             stamp_slot_eligibility(block.instructions)
-            stamp_solo_reasons(block.instructions)
 
         global_result = compute_global_liveness(fn.blocks)
         fn_block_packets = []

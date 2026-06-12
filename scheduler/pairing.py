@@ -159,14 +159,18 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                     result.append(('pair', free, curr, rule.name))
                     free = None
                 else:
-                    # Only annotate curr with pair-specific failures if free
-                    # was actually eligible for some rule (not A's own fault).
+                    # Annotate curr only when free had eligible rules.
+                    # For each such rule report why curr failed it: failed
+                    # prerequisites (by name) or the check() reason string.
                     eligible = _a_eligible_rules(free)
                     if eligible:
                         for rule in eligible:
                             if rule.b_mnemonic_set is not None and curr.mnemonic not in rule.b_mnemonic_set:
+                                curr.solo_reasons.add(f"{rule.name}: mnemonic not supported")
                                 continue
-                            if not all(getattr(curr, p) for p in rule.b_prerequisites):
+                            failed = [p for p in rule.b_prerequisites if not getattr(curr, p)]
+                            if failed:
+                                curr.solo_reasons.update(f"{rule.name}: {p}" for p in failed)
                                 continue
                             reason = rule.check(free, curr)
                             if reason is not None:
