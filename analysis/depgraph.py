@@ -48,6 +48,7 @@ def build_dep_graph(block: BasicBlock, same_base_reorder: bool = False) -> DepGr
         # --- Barrier edges ---
         is_barrier = (insn.is_atomic or insn.is_fence or insn.is_csr or
                       insn.is_call or insn.is_tail or
+                      insn.is_return or insn.is_branch or insn.is_jump or
                       insn.mnemonic in ("ecall", "ebreak"))
 
         if is_barrier:

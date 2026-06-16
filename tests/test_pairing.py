@@ -117,6 +117,214 @@ class TestRsdAluPair:
 
 
 # ---------------------------------------------------------------------------
+# dual-op-pair: two ops from a canonical tuple sharing inputs, distinct outputs
+# ---------------------------------------------------------------------------
+
+class TestDualOpPair:
+
+    # --- arith2 ---
+
+    def test_add_sub_same_sources_pairs(self):
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sub", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_add_sub_different_sources_no_pair(self):
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sub", rd=11, rs1=14, rs2=15)
+        assert can_pair(a, b) is not None
+
+    def test_add_sub_swapped_operand_order_no_pair(self):
+        """sub is non-commutative: rs1/rs2 must match positionally."""
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sub", rd=11, rs1=13, rs2=12)
+        assert can_pair(a, b) is not None
+
+    def test_add_sub_same_dest_no_pair(self):
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sub", rd=10, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_a_clobbers_shared_source_no_pair(self):
+        """A-slot op writing a shared source corrupts B's read.
+
+        min/max chosen so no chain/rsd rule applies — isolates dual-op-pair.
+        """
+        a = make_insn("min", rd=12, rs1=12, rs2=13)   # rd == shared rs1
+        b = make_insn("max", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_b_writes_shared_source_canonical_ok(self):
+        """Canonical order: B writing a shared source is a legal WAR."""
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sub", rd=12, rs1=12, rs2=13)   # rd == shared rs1
+        assert can_pair(a, b) is None
+
+    def test_reversed_independent_pairs(self):
+        """Reverse order accepted when fully independent."""
+        a = make_insn("sub", rd=11, rs1=12, rs2=13)
+        b = make_insn("add", rd=10, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_reversed_with_conflict_no_pair(self):
+        """Reverse order rejected when a dest is a shared source."""
+        a = make_insn("sub", rd=11, rs1=12, rs2=13)
+        b = make_insn("add", rd=12, rs1=12, rs2=13)   # b.rd in a.uses
+        assert can_pair(a, b) is not None
+
+    def test_min_max_pairs(self):
+        a = make_insn("min", rd=10, rs1=12, rs2=13)
+        b = make_insn("max", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_minu_maxu_pairs(self):
+        a = make_insn("minu", rd=10, rs1=12, rs2=13)
+        b = make_insn("maxu", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_mul_mulh_pairs(self):
+        a = make_insn("mul", rd=10, rs1=12, rs2=13)
+        b = make_insn("mulh", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_mul_mulhu_pairs(self):
+        a = make_insn("mul", rd=10, rs1=12, rs2=13)
+        b = make_insn("mulhu", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_div_rem_pairs(self):
+        a = make_insn("div", rd=10, rs1=12, rs2=13)
+        b = make_insn("rem", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_divuw_remuw_pairs(self):
+        a = make_insn("divuw", rd=10, rs1=12, rs2=13)
+        b = make_insn("remuw", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_unrelated_mnemonics_no_pair(self):
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("xor", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_same_mnemonic_no_tuple(self):
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("add", rd=11, rs1=12, rs2=13)
+        # (add, add) is not a tuple; falls to other rules (not rsd here) — no pair
+        assert can_pair(a, b) is not None
+
+    # --- load_addi ---
+
+    def test_load_addi_same_base_imm_pairs(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=16)    # width 8, 16 = 2*8, in [8,256]
+        b = make_insn("addi", rd=11, rs1=12, imm=16)
+        assert can_pair(a, b) is None
+
+    def test_load_addi_imm_mismatch_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=16)
+        b = make_insn("addi", rd=11, rs1=12, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_load_addi_imm_not_width_multiple_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=12)    # 12 not a multiple of 8
+        b = make_insn("addi", rd=11, rs1=12, imm=12)
+        assert can_pair(a, b) is not None
+
+    def test_load_addi_zero_imm_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=12, imm=0)
+        assert can_pair(a, b) is not None
+
+    def test_load_addi_base_mismatch_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=8)
+        b = make_insn("addi", rd=11, rs1=14, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_lw_addi_width4(self):
+        a = make_insn("lw", rd=10, rs1=12, imm=4)
+        b = make_insn("addi", rd=11, rs1=12, imm=4)
+        assert can_pair(a, b) is None
+
+    def test_lb_addi_width1(self):
+        a = make_insn("lb", rd=10, rs1=12, imm=5)     # width 1, any nonzero 1..32
+        b = make_insn("addi", rd=11, rs1=12, imm=5)
+        assert can_pair(a, b) is None
+
+    def test_load_addi_reversed_pairs(self):
+        a = make_insn("addi", rd=11, rs1=12, imm=16)
+        b = make_insn("ld", rd=10, rs1=12, imm=16)
+        assert can_pair(a, b) is None
+
+    # --- load_shadd ---
+
+    def test_load_shadd_base_match_zero_offset(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_load_shadd_nonzero_offset_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=8)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_load_shadd_base_mismatch_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("sh3add", rd=11, rs1=14, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_load_shadd_wrong_width_no_pair(self):
+        """lw pairs with sh2add, not sh3add."""
+        a = make_insn("lw", rd=10, rs1=12, imm=0)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_lw_sh2add_pairs(self):
+        a = make_insn("lw", rd=10, rs1=12, imm=0)
+        b = make_insn("sh2add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_load_shadd_a_feeds_b_no_pair(self):
+        """Load dest == shadd's second source: A feeds B (chain, not dual)."""
+        a = make_insn("ld", rd=13, rs1=12, imm=0)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    # --- store_shadd ---
+
+    def test_store_shadd_regset_match(self):
+        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_store_shadd_regset_match_swapped(self):
+        """Store {base,value} vs shadd sources compared as a set."""
+        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        b = make_insn("sh3add", rd=11, rs1=13, rs2=12)
+        assert can_pair(a, b) is None
+
+    def test_store_shadd_zero_offset_no_pair(self):
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_store_shadd_regs_mismatch_no_pair(self):
+        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        b = make_insn("sh3add", rd=11, rs1=12, rs2=14)
+        assert can_pair(a, b) is not None
+
+    def test_sw_sh2add_pairs(self):
+        a = make_insn("sw", rs1=12, rs2=13, imm=4)
+        b = make_insn("sh2add", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_store_shadd_shadd_clobbers_store_reg_reversed_no_pair(self):
+        """Reversed (shadd, store): shadd dest is a store source -> corrupts store."""
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)   # rd == store base
+        b = make_insn("sd", rs1=12, rs2=13, imm=8)
+        assert can_pair(a, b) is not None
+
+
+# ---------------------------------------------------------------------------
 # Combinations that should not pair (no applicable rule)
 # ---------------------------------------------------------------------------
 

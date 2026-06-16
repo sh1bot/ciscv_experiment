@@ -736,10 +736,13 @@ for correctness.
   ensuring that e.g. a value held in a caller-saved register has a dep-graph edge
   to any subsequent call that clobbers it.
 - **Barrier edges**: AMOs, `fence`, `fence.i`, `ecall`, `ebreak`, CSR
-  instructions (`is_csr`), `call`, and `tail` instructions get ordering edges
-  from all preceding instructions in the block.  Unknown instructions are **not**
-  treated as full barriers; they participate only via their inferred register
-  dependencies and any detected memory operand.
+  instructions (`is_csr`), `call`, `tail`, and the control-flow terminators
+  (`is_return`, `is_branch`, `is_jump`) get ordering edges from all preceding
+  instructions in the block.  Terminators are always the last instruction of
+  their block (the parser flushes there), so the barrier edge simply pins them
+  last and prevents independent instructions from floating past them.  Unknown
+  instructions are **not** treated as full barriers; they participate only via
+  their inferred register dependencies and any detected memory operand.
 
 ```python
 @dataclass
