@@ -408,6 +408,77 @@ class TestDualOpPair:
         assert can_pair(a, b) is not None
 
 
+
+# ---------------------------------------------------------------------------
+# pre-inc-pair
+# ---------------------------------------------------------------------------
+
+class TestPreIncPair:
+
+    def test_addi_ld_rsd_pairs(self):
+        """addi in RSD form pre-increments pointer; ld loads from zero offset."""
+        a = make_insn("addi", rd=12, rs1=12, imm=8)   # a1 += 8
+        b = make_insn("ld", rd=10, rs1=12, imm=0)     # load from new a1
+        assert can_pair(a, b) is None
+
+    def test_sh2add_lw_rsd_pairs(self):
+        """sh2add in RSD form updates pointer; lw loads from zero offset."""
+        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)  # a1 = a1*4 + a2
+        b = make_insn("lw", rd=10, rs1=12, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_add_slt_rsd_pairs(self):
+        """add in RSD form; slt uses the result as left operand."""
+        a = make_insn("add", rd=12, rs1=12, rs2=13)
+        b = make_insn("slt", rd=10, rs1=12, rs2=14)
+        assert can_pair(a, b) is None
+
+    def test_add_commutative_rsd_pairs(self):
+        """add is commutative: rd==rs2 is also RSD form."""
+        a = make_insn("add", rd=13, rs1=12, rs2=13)   # rd==rs2
+        b = make_insn("slt", rd=10, rs1=13, rs2=14)
+        assert can_pair(a, b) is None
+
+    def test_addi_ld_not_rsd_no_pair(self):
+        """A does not update its own source: not RSD form."""
+        a = make_insn("addi", rd=11, rs1=12, imm=8)   # rd != rs1
+        b = make_insn("ld", rd=10, rs1=11, imm=0)
+        assert can_pair(a, b) is not None
+
+    def test_addi_ld_b_reads_wrong_reg_no_pair(self):
+        """B rs1 does not match A's rd."""
+        a = make_insn("addi", rd=12, rs1=12, imm=8)
+        b = make_insn("ld", rd=10, rs1=14, imm=0)     # loads from a3, not a1
+        assert can_pair(a, b) is not None
+
+    def test_addi_ld_nonzero_offset_no_pair(self):
+        """B memory offset must be zero."""
+        a = make_insn("addi", rd=12, rs1=12, imm=8)
+        b = make_insn("ld", rd=10, rs1=12, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_addi_ld_same_rd_no_pair(self):
+        """A and B must not write the same register."""
+        a = make_insn("addi", rd=12, rs1=12, imm=8)
+        b = make_insn("ld", rd=12, rs1=12, imm=0)     # B clobbers the pointer
+        assert can_pair(a, b) is not None
+
+    def test_post_inc_pairs_as_dual_not_pre_inc(self):
+        """(ld, addi) is the canonical post-increment order and matches dual-op-pair/load_addi.
+        pre-inc-pair only matches (addi, ld), not the reverse."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=8)
+        assert can_pair(a, b) is None  # accepted — but by dual-op-pair, not pre-inc-pair
+
+    def test_unrecognised_tuple_no_pair(self):
+        """addi+sd is not in the pre-inc tuple table."""
+        a = make_insn("addi", rd=12, rs1=12, imm=8)
+        b = make_insn("sd", rs1=12, rs2=10, imm=0)
+        # sd is not in _PRE_INC_B_MN so b_slot_ok would be False and it won't
+        # even reach the check; just verify no pair.
+        assert can_pair(a, b) is not None
+
+
 # ---------------------------------------------------------------------------
 # Combinations that should not pair (no applicable rule)
 # ---------------------------------------------------------------------------

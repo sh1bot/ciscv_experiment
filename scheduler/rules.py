@@ -288,9 +288,44 @@ def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
     return None
 
 
+
 # ---------------------------------------------------------------------------
-# Policy tables — edit these when iterating on pairing rules
+# pre-inc-pair
 # ---------------------------------------------------------------------------
+# A is in RSD form: rd == rs1 (or commutative: rd == rs2).  A writes its
+# result back to its own source register — a pre-increment or accumulate.
+# B reads A's rd as its rs1 — the updated pointer (for loads/stores) or the
+# left-hand side of a comparison.  For memory B, the offset must be zero.
+#
+# Canonical order only: B depends on A's result, so the pair cannot be
+# reversed.  A's rd must not be destroyed by B (B.rd != A.rd) since
+# the updated pointer or value typically survives the pair.
+
+_PRE_INC_TUPLES: frozenset = frozenset({
+    ("addi",   "ld"),   # pre-increment pointer (8-byte stride) then load qword
+    ("sh2add", "lw"),   # scaled-index update then load word
+    ("add",    "slt"),  # accumulate then compare
+})
+
+_PRE_INC_A_MN = frozenset(a for a, _ in _PRE_INC_TUPLES)
+_PRE_INC_B_MN = frozenset(b for _, b in _PRE_INC_TUPLES)
+
+
+def _pre_inc_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A (RSD form) updates a register; B reads that register as rs1."""
+    if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
+        return f"pre-inc-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple"
+    if not a.is_rsd:
+        return "pre-inc-pair: A not in RSD form (rd not a source register)"
+    if a.rd is None:
+        return "pre-inc-pair: A has no destination"
+    if b.rs1 != a.rd:
+        return f"pre-inc-pair: B rs1 (x{b.rs1}) does not match A result (x{a.rd})"
+    if b.has_mem_operand and b.imm not in (0, None):
+        return "pre-inc-pair: B memory offset must be zero"
+    if b.rd is not None and b.rd == a.rd:
+        return "pre-inc-pair: A and B write same register"
+    return None
 
 RULES: list[PairingRule] = [
     PairingRule(
@@ -316,6 +351,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_DUAL_MN,
         b_mnemonic_set=_DUAL_MN,
         check=_dual_op_pair,
+    ),
+    PairingRule(
+        name="pre-inc-pair",
+        a_mnemonic_set=_PRE_INC_A_MN,
+        b_mnemonic_set=_PRE_INC_B_MN,
+        a_prerequisites=["is_rsd"],
+        check=_pre_inc_pair,
     ),
 ]
 
