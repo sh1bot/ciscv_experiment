@@ -17,24 +17,41 @@ from scheduler.reorder import ScheduleMode
 
 
 def _split_source(source: str) -> list[str]:
-    """Split assembly source into per-function chunks at .globl/.type @function boundaries.
+    """Split assembly source into per-function chunks.
 
-    Each chunk starts at the line that opens a new function (the .globl or
-    .type directive, or any preceding blank/comment lines that belong to it)
-    and ends just before the next such boundary.  The file header (anything
-    before the first function marker) is returned as the first chunk.
+    Each chunk starts at the earliest line belonging to a new function:
+    the .globl/.weak declaration (if any) preceding a .type @function marker,
+    or the .type @function line itself.  File header content (before the first
+    function marker) is returned as the first chunk.
     """
     lines = source.splitlines(keepends=True)
-    # A line is a function boundary if it contains .globl/.global/.weak or
-    # .type <name>, @function.
-    boundary = re.compile(
-        r'^\s*(\.(globl|global|weak)\s+\S+|\.type\s+\S+\s*,\s*@function)'
-    )
-    # Find indices of boundary lines
-    cuts = [i for i, ln in enumerate(lines) if boundary.match(ln)]
-    if not cuts:
+    _globl = re.compile(r'^\s*\.(globl|global|weak)\s+\S+')
+    _type_fn = re.compile(r'^\s*\.type\s+\S+\s*,\s*@function')
+
+    # Primary split points: .type @function lines.
+    type_indices = [i for i, ln in enumerate(lines) if _type_fn.match(ln)]
+    if not type_indices:
         return [source]
 
+    # For each .type line, search backward to absorb any preceding .globl/.weak
+    # lines (skipping over blank/comment-only lines) into the same chunk.
+    cut_set: set = set()
+    for ti in type_indices:
+        cut = ti
+        j = ti - 1
+        while j >= 0:
+            stripped = re.sub(r'#.*$', '', lines[j]).strip()
+            if not stripped:
+                j -= 1
+                continue
+            if _globl.match(lines[j]):
+                cut = j
+                j -= 1
+            else:
+                break
+        cut_set.add(cut)
+
+    cuts = sorted(cut_set)
     chunks = []
     prev = 0
     for cut in cuts[1:]:
@@ -72,6 +89,8 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode) -> l
             if mode != ScheduleMode.FORWARD:
                 block.instructions = ordered
                 compute_local_liveness(block, global_result)
+            if block.prefix_lines:
+                fn_block_packets.append(('block_prefix', block.prefix_lines))
             fn_block_packets.extend(greedy_pair(ordered))
 
         fn_packets.append((fn_name, fn_block_packets))

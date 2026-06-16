@@ -445,12 +445,15 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
     current_block_insns: list[Instruction] = []
     current_block_labels: list[str] = []
     current_is_function_entry: bool = False
-    prefix_buffer: list[str] = []  # non-barrier labels/lines buffered for next insn
+    prefix_buffer: list[str] = []  # lines buffered between instructions
+    block_entry_lines: list[str] = []  # lines that belong to the block header
+    at_block_entry: bool = True  # True until the first instruction of a block
 
     _anon_counter = [0]
 
     def _flush_block():
-        nonlocal current_block_insns, current_block_labels, current_is_function_entry, prefix_buffer
+        nonlocal current_block_insns, current_block_labels, current_is_function_entry
+        nonlocal prefix_buffer, block_entry_lines, at_block_entry
         if current_block_insns or current_block_labels:
             if current_block_labels:
                 label = current_block_labels[0]
@@ -462,16 +465,25 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
                 labels=list(current_block_labels),
                 instructions=list(current_block_insns),
                 is_function_entry=current_is_function_entry,
+                prefix_lines=list(block_entry_lines),
             )
             blocks.append(bb)
         current_block_insns = []
         current_block_labels = []
         current_is_function_entry = False
+        block_entry_lines = []
+        at_block_entry = True
         # prefix_buffer intentionally NOT cleared: carries forward to next block
 
     def _new_block_with_label(lbl: str):
         nonlocal current_block_labels, current_is_function_entry
-        _flush_block()
+        nonlocal prefix_buffer, block_entry_lines, at_block_entry
+        # Lines accumulated before the barrier label belong to the new block's header.
+        # They may be in block_entry_lines (if at block start) or prefix_buffer (mid-block).
+        saved = list(block_entry_lines) + list(prefix_buffer)
+        prefix_buffer = []
+        _flush_block()  # resets block_entry_lines=[] and at_block_entry=True
+        block_entry_lines = saved
         current_block_labels = [lbl]
         current_is_function_entry = lbl in function_entries
 
@@ -481,32 +493,39 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
         raw = line
         stripped = re.sub(r'#.*$', '', line).strip()
 
+        def _buf(line):
+            """Buffer a passthrough line to block header or instruction prefix."""
+            if at_block_entry:
+                block_entry_lines.append(line)
+            else:
+                prefix_buffer.append(line)
+
         if not stripped:
             # Blank line or comment-only line: buffer for passthrough.
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
 
         # Track section
         if re.match(r'^\.section\s+\.(text|text\.\S+)', stripped):
             in_text_section = True
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
         if re.match(r'^\.section\s+\.(data|bss|rodata|rodata\.\S+)', stripped):
             in_text_section = False
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
         if re.match(r'^\.text\b', stripped):
             in_text_section = True
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
         if re.match(r'^\.data\b|^\.bss\b|^\.rodata\b', stripped):
             in_text_section = False
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
 
         # Directives (non-instruction, non-label lines): buffer for passthrough
         if stripped.startswith('.') and not re.match(r'^\.', stripped.lstrip().split(':')[0] if ':' in stripped else stripped):
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
 
         # Check for label prefix
@@ -516,14 +535,14 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             rest_of_line = lm.group(2).strip()
 
             if lbl in barrier_labels:
-                # Start a new block
+                # Start a new block — lines so far go to new block's header
                 _new_block_with_label(lbl)
                 if not rest_of_line or rest_of_line.startswith('.'):
-                    # Label is on its own line — emit it and move on
-                    prefix_buffer.append(raw)
+                    # Label is on its own line — emit it to block header
+                    block_entry_lines.append(raw)
                     continue
                 # Label shares a line with an instruction — emit just the label
-                prefix_buffer.append(f"{lbl}:")
+                block_entry_lines.append(f"{lbl}:")
                 stripped = rest_of_line
                 # Process as normal instruction below
                 lm2 = re.match(r'^(\S+):\s*(.*)', rest_of_line)
@@ -531,28 +550,28 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
                     # More labels chained
                     lbl2 = lm2.group(1)
                     if lbl2 in barrier_labels:
-                        prefix_buffer.append(f"{lbl2}:")
+                        block_entry_lines.append(f"{lbl2}:")
                         current_block_labels.append(lbl2)
                     else:
-                        prefix_buffer.append(f"{lbl2}:")
+                        block_entry_lines.append(f"{lbl2}:")
                     stripped = lm2.group(2).strip()
             else:
-                # Non-barrier label: add to prefix buffer
+                # Non-barrier label: buffer for passthrough
                 if not rest_of_line or rest_of_line.startswith('.'):
-                    prefix_buffer.append(raw)
+                    _buf(raw)
                     continue
                 else:
-                    prefix_buffer.append(f"{lbl}:")
+                    _buf(f"{lbl}:")
                     stripped = rest_of_line
 
         # Pure directive lines: buffer for passthrough
         if stripped.startswith('.'):
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
 
         # Blank lines: buffer for passthrough
         if not stripped:
-            prefix_buffer.append(raw)
+            _buf(raw)
             continue
 
         # Parse instruction
@@ -565,6 +584,7 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
 
         insn = _decode_instruction(mnemonic, operands, raw, None)
         insn.prefix_lines = list(prefix_buffer)
+        at_block_entry = False
         prefix_buffer = []
 
         current_block_insns.append(insn)

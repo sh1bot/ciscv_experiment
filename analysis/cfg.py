@@ -18,6 +18,10 @@ class BasicBlock:
     # Allow multi-label blocks (used by parser)
     labels: list = field(default_factory=list)
 
+    # Lines that must appear before any instruction in this block
+    # (barrier labels, .globl/.type directives, blanks before the entry label)
+    prefix_lines: list = field(default_factory=list)
+
     def __post_init__(self):
         # Ensure labels list is populated from label field if not provided
         if not self.labels and self.label is not None:

@@ -71,6 +71,10 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
         fn_stats = PairingStats()
 
         for item in packets:
+            if item[0] == 'block_prefix':
+                lines.extend(item[1])
+                continue
+
             if item[0] == 'pair':
                 _, a, b, rule_name = item
                 fn_stats.pairs += 1
@@ -115,7 +119,7 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                 if annotate_liveness:
                     comment += f"  live_in={_fmt_live(insn.live_in)}"
                 lines.append(f"{insn.raw.rstrip()}  {comment}")
-            lines.extend(insn.suffix_lines)
+                lines.extend(insn.suffix_lines)
 
         lines.append("")
         lines.extend(_stats_comment_lines(fn_stats, f"function: {fn_name}"))
