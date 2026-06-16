@@ -170,34 +170,36 @@ _DUAL_TUPLES: dict = {
     ("divu", "remu"):     "arith2",
     ("divw", "remw"):     "arith2",
     ("divuw", "remuw"):   "arith2",
-    # load + addi — load a value and materialise the address it came from
-    ("ld", "addi"):       "load_addi",
-    ("lw", "addi"):       "load_addi",
+    # load + addi — 32/64-bit only; zero load offset; addi imm = width-scaled stride
+    ("ld",  "addi"):      "load_addi",
+    ("lw",  "addi"):      "load_addi",
     ("lwu", "addi"):      "load_addi",
-    ("lh", "addi"):       "load_addi",
-    ("lhu", "addi"):      "load_addi",
-    ("lb", "addi"):       "load_addi",
-    ("lbu", "addi"):      "load_addi",
-    # load + shNadd — register post-increment (base match, zero offset)
-    ("ld", "sh3add"):     "load_shadd",
-    ("lw", "sh2add"):     "load_shadd",
+    # store + addi — 32/64-bit only; zero store offset; addi imm = width-scaled stride
+    ("sd",  "addi"):      "store_addi",
+    ("sw",  "addi"):      "store_addi",
+    # load + shNadd — zero load offset
+    ("ld",  "sh3add"):    "load_shadd",
+    ("lw",  "sh2add"):    "load_shadd",
     ("lwu", "sh2add"):    "load_shadd",
-    ("lh", "sh1add"):     "load_shadd",
-    ("lhu", "sh1add"):    "load_shadd",
-    # store + shNadd — store a value and compute a scaled index of the same regs
-    ("sd", "sh3add"):     "store_shadd",
-    ("sw", "sh2add"):     "store_shadd",
-    ("sh", "sh1add"):     "store_shadd",
+    # store + shNadd — zero store offset
+    ("sd",  "sh3add"):    "store_shadd",
+    ("sw",  "sh2add"):    "store_shadd",
+    # consecutive same-width loads — same base, offsets differ by exactly data width
+    ("ld",  "ld"):        "mem_pair",
+    ("lw",  "lw"):        "mem_pair",
+    ("lwu", "lwu"):       "mem_pair",
+    # consecutive same-width stores — same base, offsets differ by exactly data width
+    ("sd",  "sd"):        "mem_pair",
+    ("sw",  "sw"):        "mem_pair",
 }
 
 _DUAL_MN = frozenset(m for pair in _DUAL_TUPLES for m in pair)
 
 
-def _dual_width_imm_ok(mem: Instruction) -> bool:
-    """Offset is a nonzero unsigned 5-bit immediate with remap, scaled by the
-    memory op's implied data width (multiple of width, in [width, 32*width])."""
+def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
+    """stride_insn.imm is a nonzero uimm5-with-remap scaled by mem's data width."""
     shift = mem.access_shift if mem.access_shift is not None else 0
-    return mem.uimm_fits(5, shift, nonzero='remap')
+    return stride_insn.uimm_fits(5, shift, nonzero='remap')
 
 
 def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optional[str]:
@@ -211,10 +213,20 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
     if kind == "load_addi":
         if first.rs1 != second.rs1:
             return "dual-op-pair: base register differs from addi source"
-        if first.imm != second.imm:
-            return "dual-op-pair: load offset differs from addi immediate"
-        if not _dual_width_imm_ok(first):
-            return f"dual-op-pair: offset not a nonzero {first.access_width}-scaled uimm5"
+        if first.imm not in (0, None):
+            return "dual-op-pair: load offset must be zero"
+        if not _width_stride_ok(first, second):
+            return (f"dual-op-pair: addi immediate not a nonzero "
+                    f"{first.access_width}-scaled uimm5")
+        return None
+    if kind == "store_addi":
+        if first.rs1 != second.rs1:
+            return "dual-op-pair: base register differs from addi source"
+        if first.imm not in (0, None):
+            return "dual-op-pair: store offset must be zero"
+        if not _width_stride_ok(first, second):
+            return (f"dual-op-pair: addi immediate not a nonzero "
+                    f"{first.access_width}-scaled uimm5")
         return None
     if kind == "load_shadd":
         if first.rs1 != second.rs1:
@@ -227,8 +239,17 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
             return "dual-op-pair: missing register operand"
         if {first.rs1, first.rs2} != {second.rs1, second.rs2}:
             return "dual-op-pair: store regs differ from shadd sources"
-        if not _dual_width_imm_ok(first):
-            return f"dual-op-pair: offset not a nonzero {first.access_width}-scaled uimm5"
+        if first.imm not in (0, None):
+            return "dual-op-pair: store offset must be zero"
+        return None
+    if kind == "mem_pair":
+        if first.rs1 != second.rs1:
+            return "dual-op-pair: base registers differ"
+        if first.imm is None or second.imm is None:
+            return "dual-op-pair: missing memory offset"
+        width = first.access_width or (1 << (first.access_shift or 0))
+        if abs(first.imm - second.imm) != width:
+            return f"dual-op-pair: offsets must differ by exactly {width}"
         return None
     return "dual-op-pair: unknown match kind"
 

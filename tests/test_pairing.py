@@ -215,45 +215,77 @@ class TestDualOpPair:
 
     # --- load_addi ---
 
-    def test_load_addi_same_base_imm_pairs(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=16)    # width 8, 16 = 2*8, in [8,256]
-        b = make_insn("addi", rd=11, rs1=12, imm=16)
+    def test_load_addi_zero_offset_pairs(self):
+        """Zero load offset + valid stride addi: post-increment load."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=12, imm=16)   # stride = 2*8, valid uimm5*8
         assert can_pair(a, b) is None
 
-    def test_load_addi_imm_mismatch_no_pair(self):
+    def test_load_addi_nonzero_offset_no_pair(self):
+        """Non-zero load offset is not allowed."""
         a = make_insn("ld", rd=10, rs1=12, imm=16)
-        b = make_insn("addi", rd=11, rs1=12, imm=8)
+        b = make_insn("addi", rd=11, rs1=12, imm=16)
         assert can_pair(a, b) is not None
 
-    def test_load_addi_imm_not_width_multiple_no_pair(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=12)    # 12 not a multiple of 8
-        b = make_insn("addi", rd=11, rs1=12, imm=12)
+    def test_load_addi_stride_not_width_multiple_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=12, imm=12)   # 12 not a multiple of 8
         assert can_pair(a, b) is not None
 
-    def test_load_addi_zero_imm_no_pair(self):
+    def test_load_addi_zero_stride_no_pair(self):
         a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("addi", rd=11, rs1=12, imm=0)
         assert can_pair(a, b) is not None
 
     def test_load_addi_base_mismatch_no_pair(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=8)
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("addi", rd=11, rs1=14, imm=8)
         assert can_pair(a, b) is not None
 
     def test_lw_addi_width4(self):
-        a = make_insn("lw", rd=10, rs1=12, imm=4)
-        b = make_insn("addi", rd=11, rs1=12, imm=4)
+        a = make_insn("lw", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=12, imm=4)    # stride = 1*4
         assert can_pair(a, b) is None
 
-    def test_lb_addi_width1(self):
-        a = make_insn("lb", rd=10, rs1=12, imm=5)     # width 1, any nonzero 1..32
-        b = make_insn("addi", rd=11, rs1=12, imm=5)
-        assert can_pair(a, b) is None
+    def test_lb_addi_no_longer_supported(self):
+        """lb+addi is not in the tuple table (only 32/64-bit variants)."""
+        a = make_insn("lb", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=12, imm=1)
+        assert can_pair(a, b) is not None
 
     def test_load_addi_reversed_pairs(self):
+        """Reversed (addi, ld) is accepted when load offset is zero."""
         a = make_insn("addi", rd=11, rs1=12, imm=16)
-        b = make_insn("ld", rd=10, rs1=12, imm=16)
+        b = make_insn("ld", rd=10, rs1=12, imm=0)
         assert can_pair(a, b) is None
+
+    # --- store_addi ---
+
+    def test_store_addi_sd_zero_offset_pairs(self):
+        """sd + addi: post-increment store, zero offset, stride = data width."""
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=8)    # stride = 1*8
+        assert can_pair(a, b) is None
+
+    def test_store_addi_sw_pairs(self):
+        a = make_insn("sw", rs1=12, rs2=13, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=4)    # stride = 1*4
+        assert can_pair(a, b) is None
+
+    def test_store_addi_nonzero_offset_no_pair(self):
+        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        b = make_insn("addi", rd=12, rs1=12, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_store_addi_base_mismatch_no_pair(self):
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
+        b = make_insn("addi", rd=14, rs1=14, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_store_addi_stride_not_width_multiple_no_pair(self):
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=12)   # 12 not a multiple of 8
+        assert can_pair(a, b) is not None
 
     # --- load_shadd ---
 
@@ -292,35 +324,87 @@ class TestDualOpPair:
     # --- store_shadd ---
 
     def test_store_shadd_regset_match(self):
-        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        """sd + sh3add with zero offset: store and compute index from same regs."""
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
         b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
     def test_store_shadd_regset_match_swapped(self):
         """Store {base,value} vs shadd sources compared as a set."""
-        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
         b = make_insn("sh3add", rd=11, rs1=13, rs2=12)
         assert can_pair(a, b) is None
 
-    def test_store_shadd_zero_offset_no_pair(self):
-        a = make_insn("sd", rs1=12, rs2=13, imm=0)
+    def test_store_shadd_nonzero_offset_no_pair(self):
+        """Non-zero store offset is not allowed."""
+        a = make_insn("sd", rs1=12, rs2=13, imm=8)
         b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_store_shadd_regs_mismatch_no_pair(self):
-        a = make_insn("sd", rs1=12, rs2=13, imm=8)
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
         b = make_insn("sh3add", rd=11, rs1=12, rs2=14)
         assert can_pair(a, b) is not None
 
     def test_sw_sh2add_pairs(self):
-        a = make_insn("sw", rs1=12, rs2=13, imm=4)
+        a = make_insn("sw", rs1=12, rs2=13, imm=0)
         b = make_insn("sh2add", rd=11, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
     def test_store_shadd_shadd_clobbers_store_reg_reversed_no_pair(self):
         """Reversed (shadd, store): shadd dest is a store source -> corrupts store."""
         a = make_insn("sh3add", rd=12, rs1=12, rs2=13)   # rd == store base
-        b = make_insn("sd", rs1=12, rs2=13, imm=8)
+        b = make_insn("sd", rs1=12, rs2=13, imm=0)
+        assert can_pair(a, b) is not None
+
+    # --- mem_pair ---
+
+    def test_mem_pair_ld_ld_pairs(self):
+        """Two ld from same base, offsets differ by 8 (data width)."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("ld", rd=11, rs1=12, imm=8)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_ld_ld_reversed_pairs(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=8)
+        b = make_insn("ld", rd=11, rs1=12, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_lw_lw_pairs(self):
+        a = make_insn("lw", rd=10, rs1=12, imm=0)
+        b = make_insn("lw", rd=11, rs1=12, imm=4)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_sd_sd_pairs(self):
+        a = make_insn("sd", rs1=12, rs2=10, imm=0)
+        b = make_insn("sd", rs1=12, rs2=11, imm=8)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_sw_sw_pairs(self):
+        a = make_insn("sw", rs1=12, rs2=10, imm=0)
+        b = make_insn("sw", rs1=12, rs2=11, imm=4)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_base_differs_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("ld", rd=11, rs1=14, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_mem_pair_offset_gap_wrong_no_pair(self):
+        """Offsets differ by 16, not the 8-byte ld width."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("ld", rd=11, rs1=12, imm=16)
+        assert can_pair(a, b) is not None
+
+    def test_mem_pair_same_dest_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("ld", rd=10, rs1=12, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_mem_pair_mixed_widths_no_pair(self):
+        """ld and lw are different mnemonics — not a recognised mem_pair tuple."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("lw", rd=11, rs1=12, imm=8)
         assert can_pair(a, b) is not None
 
 
