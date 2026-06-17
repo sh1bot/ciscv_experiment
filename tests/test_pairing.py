@@ -385,10 +385,16 @@ class TestDualOpPair:
         b = make_insn("sw", rs1=2, rs2=11, imm=4)
         assert can_pair(a, b) is None
 
-    def test_mem_pair_non_sp_base_no_pair(self):
-        """mem_pair requires is_local (sp as base)."""
+    def test_mem_pair_general_base_pairs(self):
+        """mem_pair works with any shared base register, not just sp."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("ld", rd=11, rs1=12, imm=8)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_different_base_no_pair(self):
+        """mem_pair requires the same base register on both ops."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("ld", rd=11, rs1=13, imm=8)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_offset_gap_wrong_no_pair(self):

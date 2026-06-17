@@ -253,8 +253,10 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
             return "dual-op-pair: store offset must be zero"
         return None
     if kind == "mem_pair":
-        if not first.is_local or not second.is_local:
-            return "dual-op-pair: not an sp-relative 32/64-bit load/store (is_local)"
+        if first.rs1 is None or second.rs1 is None:
+            return "dual-op-pair: missing base register"
+        if first.rs1 != second.rs1:
+            return "dual-op-pair: base registers differ"
         if first.imm is None or second.imm is None:
             return "dual-op-pair: missing memory offset"
         width = first.access_width or (1 << (first.access_shift or 0))
