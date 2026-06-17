@@ -471,11 +471,9 @@ class TestPreIncPair:
         assert can_pair(a, b) is None  # accepted — but by dual-op-pair, not pre-inc-pair
 
     def test_unrecognised_tuple_no_pair(self):
-        """addi+sd is not in the pre-inc tuple table."""
+        """addi+slt is not in the pre-inc tuple table."""
         a = make_insn("addi", rd=12, rs1=12, imm=8)
-        b = make_insn("sd", rs1=12, rs2=10, imm=0)
-        # sd is not in _PRE_INC_B_MN so b_slot_ok would be False and it won't
-        # even reach the check; just verify no pair.
+        b = make_insn("slt", rd=10, rs1=12, rs2=14)
         assert can_pair(a, b) is not None
 
 

@@ -303,7 +303,9 @@ def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 _PRE_INC_TUPLES: frozenset = frozenset({
     ("addi",   "ld"),   # pre-increment pointer (8-byte stride) then load qword
+    ("addi",   "sd"),   # pre-increment pointer then store qword
     ("sh2add", "lw"),   # scaled-index update then load word
+    ("sh2add", "sw"),   # scaled-index update then store word
     ("add",    "slt"),  # accumulate then compare
 })
 
