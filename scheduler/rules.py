@@ -211,7 +211,7 @@ def _is_li_mv_addi4spn(insn: Instruction) -> bool:
     """True for the three addi pseudo-ops that qualify for indep_pair."""
     if insn.rs1 == 0:                                          return True  # li
     if insn.imm in (0, None):                                  return True  # mv
-    if insn.rs1 == 2 and insn.imm % 4 == 0:                   return True  # addi4spn
+    if insn.rs1 == 2 and insn.uimm_fits(5, 2, nonzero='remap'): return True  # addi4spn [4,128]
     return False
 
 
@@ -263,6 +263,10 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
         width = first.access_width or (1 << (first.access_shift or 0))
         if abs(first.imm - second.imm) != width:
             return f"dual-op-pair: offsets must differ by exactly {width}"
+        shift = first.access_shift or 0
+        for insn in (first, second):
+            if not insn.uimm_fits(5, shift):
+                return f"dual-op-pair: offset {insn.imm} exceeds 5-bit range (max {31 << shift})"
         return None
     if kind == "indep_pair":
         # Restricted to: li (rs1==x0), mv (imm==0), addi4spn (rs1==sp, imm
