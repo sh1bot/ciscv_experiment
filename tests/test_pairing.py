@@ -432,14 +432,36 @@ class TestIndepPair:
         b = make_insn("addi", rd=11, rs1=0,  imm=5)
         assert can_pair(a, b) is None
 
+    def test_addi4spn_addi4spn_pairs(self):
+        """Two addi4spn (addi rd, sp, 4k) — rs1==sp, nonzero multiple of 4."""
+        a = make_insn("addi", rd=10, rs1=2, imm=8)    # sp = x2
+        b = make_insn("addi", rd=11, rs1=2, imm=16)
+        assert can_pair(a, b) is None
+
+    def test_addi4spn_li_pairs(self):
+        a = make_insn("addi", rd=10, rs1=2, imm=8)
+        b = make_insn("addi", rd=11, rs1=0, imm=5)
+        assert can_pair(a, b) is None
+
+    def test_addi4spn_mv_pairs(self):
+        a = make_insn("addi", rd=10, rs1=2, imm=8)
+        b = make_insn("addi", rd=11, rs1=12, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_addi4spn_non_multiple_of_4_no_pair(self):
+        """addi rd, sp, 6 is not a valid addi4spn (6 not a multiple of 4)."""
+        a = make_insn("addi", rd=10, rs1=2, imm=6)
+        b = make_insn("addi", rd=11, rs1=0, imm=5)
+        assert can_pair(a, b) is not None
+
     def test_general_addi_addi_no_pair(self):
-        """General addi (rs1!=0 and imm!=0) is not li or mv."""
+        """General addi (rs1!=0/sp and imm!=0) is not li, mv, or addi4spn."""
         a = make_insn("addi", rd=10, rs1=12, imm=4)
         b = make_insn("addi", rd=11, rs1=13, imm=8)
         assert can_pair(a, b) is not None
 
     def test_mixed_general_and_li_no_pair(self):
-        """One li, one general addi — general addi is not a li/mv."""
+        """One li, one general addi — general addi is not a li/mv/addi4spn."""
         a = make_insn("addi", rd=10, rs1=0,  imm=5)
         b = make_insn("addi", rd=11, rs1=13, imm=4)
         assert can_pair(a, b) is not None

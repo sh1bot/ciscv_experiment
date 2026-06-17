@@ -192,7 +192,10 @@ _DUAL_TUPLES: dict = {
     ("sd",  "sd"):        "mem_pair",
     ("sw",  "sw"):        "mem_pair",
     # independent single-output pairs — no shared operands required
-    ("addi", "addi"):     "indep_pair",   # covers li+li, mv+mv, mv+li
+    # ("addi", "addi") is overloaded: it covers three pseudo-ops (li, mv,
+    # addi4spn) giving 6 order-insensitive combinations: li+li, mv+mv,
+    # addi4spn+addi4spn, li+mv, li+addi4spn, mv+addi4spn.
+    ("addi", "addi"):     "indep_pair",
 }
 
 _DUAL_MN = frozenset(m for pair in _DUAL_TUPLES for m in pair)
@@ -202,6 +205,14 @@ def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
     """stride_insn.imm is a nonzero uimm5-with-remap scaled by mem's data width."""
     shift = mem.access_shift if mem.access_shift is not None else 0
     return stride_insn.uimm_fits(5, shift, nonzero='remap')
+
+
+def _is_li_mv_addi4spn(insn: Instruction) -> bool:
+    """True for the three addi pseudo-ops that qualify for indep_pair."""
+    if insn.rs1 == 0:                                          return True  # li
+    if insn.imm in (0, None):                                  return True  # mv
+    if insn.rs1 == 2 and insn.imm % 4 == 0:                   return True  # addi4spn
+    return False
 
 
 def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optional[str]:
@@ -254,10 +265,12 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
             return f"dual-op-pair: offsets must differ by exactly {width}"
         return None
     if kind == "indep_pair":
-        # Restricted to li (rs1==x0) and mv (imm==0) patterns only.
+        # Restricted to: li (rs1==x0), mv (imm==0), addi4spn (rs1==sp, imm
+        # nonzero multiple of 4).  Each instruction must be one of these three.
         for insn in (first, second):
-            if insn.rs1 != 0 and insn.imm not in (0, None):
-                return f"dual-op-pair: not a li/mv pattern (x{insn.rd} = x{insn.rs1} + {insn.imm})"
+            if not _is_li_mv_addi4spn(insn):
+                return (f"dual-op-pair: not a li/mv/addi4spn pattern "
+                        f"(x{insn.rd} = x{insn.rs1} + {insn.imm})")
         # Check both directions of independence (reversed_order never set for
         # symmetric tuples, so the outer function only checks A→B).
         if second.rd is not None and second.rd in first.uses_regs:
