@@ -191,6 +191,8 @@ _DUAL_TUPLES: dict = {
     # consecutive same-width stores — same base, offsets differ by exactly data width
     ("sd",  "sd"):        "mem_pair",
     ("sw",  "sw"):        "mem_pair",
+    # independent single-output pairs — no shared operands required
+    ("addi", "addi"):     "indep_pair",   # covers li+li, mv+mv, mv+li
 }
 
 _DUAL_MN = frozenset(m for pair in _DUAL_TUPLES for m in pair)
@@ -250,6 +252,13 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
         width = first.access_width or (1 << (first.access_shift or 0))
         if abs(first.imm - second.imm) != width:
             return f"dual-op-pair: offsets must differ by exactly {width}"
+        return None
+    if kind == "indep_pair":
+        # No shared operands required.  Check both directions of independence
+        # (the outer function only checks A→B; for symmetric tuples reversed_order
+        # is never set so B→A must be verified here).
+        if second.rd is not None and second.rd in first.uses_regs:
+            return f"dual-op-pair: B result (x{second.rd}) feeds A"
         return None
     return "dual-op-pair: unknown match kind"
 
