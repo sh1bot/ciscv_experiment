@@ -254,9 +254,12 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
             return f"dual-op-pair: offsets must differ by exactly {width}"
         return None
     if kind == "indep_pair":
-        # No shared operands required.  Check both directions of independence
-        # (the outer function only checks A→B; for symmetric tuples reversed_order
-        # is never set so B→A must be verified here).
+        # Restricted to li (rs1==x0) and mv (imm==0) patterns only.
+        for insn in (first, second):
+            if insn.rs1 != 0 and insn.imm not in (0, None):
+                return f"dual-op-pair: not a li/mv pattern (x{insn.rd} = x{insn.rs1} + {insn.imm})"
+        # Check both directions of independence (reversed_order never set for
+        # symmetric tuples, so the outer function only checks A→B).
         if second.rd is not None and second.rd in first.uses_regs:
             return f"dual-op-pair: B result (x{second.rd}) feeds A"
         return None

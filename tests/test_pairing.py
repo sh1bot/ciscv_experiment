@@ -408,6 +408,54 @@ class TestDualOpPair:
         assert can_pair(a, b) is not None
 
 
+# ---------------------------------------------------------------------------
+# indep_pair (li+li, mv+mv, mv+li)
+# ---------------------------------------------------------------------------
+
+class TestIndepPair:
+
+    def test_li_li_pairs(self):
+        """Two li (addi rd, x0, imm) — both rs1==0."""
+        a = make_insn("addi", rd=10, rs1=0, imm=5)
+        b = make_insn("addi", rd=11, rs1=0, imm=7)
+        assert can_pair(a, b) is None
+
+    def test_mv_mv_pairs(self):
+        """Two mv (addi rd, rs1, 0) — both imm==0."""
+        a = make_insn("addi", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=13, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_mv_li_pairs(self):
+        """mv + li."""
+        a = make_insn("addi", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=11, rs1=0,  imm=5)
+        assert can_pair(a, b) is None
+
+    def test_general_addi_addi_no_pair(self):
+        """General addi (rs1!=0 and imm!=0) is not li or mv."""
+        a = make_insn("addi", rd=10, rs1=12, imm=4)
+        b = make_insn("addi", rd=11, rs1=13, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_mixed_general_and_li_no_pair(self):
+        """One li, one general addi — general addi is not a li/mv."""
+        a = make_insn("addi", rd=10, rs1=0,  imm=5)
+        b = make_insn("addi", rd=11, rs1=13, imm=4)
+        assert can_pair(a, b) is not None
+
+    def test_same_dest_no_pair(self):
+        a = make_insn("addi", rd=10, rs1=0, imm=5)
+        b = make_insn("addi", rd=10, rs1=0, imm=7)
+        assert can_pair(a, b) is not None
+
+    def test_b_feeds_a_no_pair(self):
+        """B's result is a source of A."""
+        a = make_insn("addi", rd=10, rs1=11, imm=0)   # mv: reads x11
+        b = make_insn("addi", rd=11, rs1=0,  imm=5)   # li: writes x11
+        assert can_pair(a, b) is not None
+
+
 
 # ---------------------------------------------------------------------------
 # pre-inc-pair
