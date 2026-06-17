@@ -360,51 +360,52 @@ class TestDualOpPair:
     # --- mem_pair ---
 
     def test_mem_pair_ld_ld_pairs(self):
-        """Two ld from same base, offsets differ by 8 (data width)."""
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("ld", rd=11, rs1=12, imm=8)
+        """Two sp-relative ld, offsets differ by 8 (data width)."""
+        a = make_insn("ld", rd=10, rs1=2, imm=0)
+        b = make_insn("ld", rd=11, rs1=2, imm=8)
         assert can_pair(a, b) is None
 
     def test_mem_pair_ld_ld_reversed_pairs(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=8)
-        b = make_insn("ld", rd=11, rs1=12, imm=0)
+        a = make_insn("ld", rd=10, rs1=2, imm=8)
+        b = make_insn("ld", rd=11, rs1=2, imm=0)
         assert can_pair(a, b) is None
 
     def test_mem_pair_lw_lw_pairs(self):
-        a = make_insn("lw", rd=10, rs1=12, imm=0)
-        b = make_insn("lw", rd=11, rs1=12, imm=4)
+        a = make_insn("lw", rd=10, rs1=2, imm=0)
+        b = make_insn("lw", rd=11, rs1=2, imm=4)
         assert can_pair(a, b) is None
 
     def test_mem_pair_sd_sd_pairs(self):
-        a = make_insn("sd", rs1=12, rs2=10, imm=0)
-        b = make_insn("sd", rs1=12, rs2=11, imm=8)
+        a = make_insn("sd", rs1=2, rs2=10, imm=0)
+        b = make_insn("sd", rs1=2, rs2=11, imm=8)
         assert can_pair(a, b) is None
 
     def test_mem_pair_sw_sw_pairs(self):
-        a = make_insn("sw", rs1=12, rs2=10, imm=0)
-        b = make_insn("sw", rs1=12, rs2=11, imm=4)
+        a = make_insn("sw", rs1=2, rs2=10, imm=0)
+        b = make_insn("sw", rs1=2, rs2=11, imm=4)
         assert can_pair(a, b) is None
 
-    def test_mem_pair_base_differs_no_pair(self):
+    def test_mem_pair_non_sp_base_no_pair(self):
+        """mem_pair requires is_local (sp as base)."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("ld", rd=11, rs1=14, imm=8)
+        b = make_insn("ld", rd=11, rs1=12, imm=8)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_offset_gap_wrong_no_pair(self):
         """Offsets differ by 16, not the 8-byte ld width."""
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("ld", rd=11, rs1=12, imm=16)
+        a = make_insn("ld", rd=10, rs1=2, imm=0)
+        b = make_insn("ld", rd=11, rs1=2, imm=16)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_same_dest_no_pair(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("ld", rd=10, rs1=12, imm=8)
+        a = make_insn("ld", rd=10, rs1=2, imm=0)
+        b = make_insn("ld", rd=10, rs1=2, imm=8)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_mixed_widths_no_pair(self):
         """ld and lw are different mnemonics — not a recognised mem_pair tuple."""
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("lw", rd=11, rs1=12, imm=8)
+        a = make_insn("ld", rd=10, rs1=2, imm=0)
+        b = make_insn("lw", rd=11, rs1=2, imm=8)
         assert can_pair(a, b) is not None
 
 

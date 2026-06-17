@@ -209,10 +209,7 @@ def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
 
 def _is_li_mv_addi4spn(insn: Instruction) -> bool:
     """True for the three addi pseudo-ops that qualify for indep_pair."""
-    if insn.rs1 == 0:                                          return True  # li
-    if insn.imm in (0, None):                                  return True  # mv
-    if insn.rs1 == 2 and insn.uimm_fits(5, 2, nonzero='remap'): return True  # addi4spn [4,128]
-    return False
+    return insn.is_li or insn.is_mv or insn.is_addi4spn
 
 
 def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optional[str]:
@@ -256,8 +253,8 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
             return "dual-op-pair: store offset must be zero"
         return None
     if kind == "mem_pair":
-        if first.rs1 != second.rs1:
-            return "dual-op-pair: base registers differ"
+        if not first.is_local or not second.is_local:
+            return "dual-op-pair: not an sp-relative 32/64-bit load/store (is_local)"
         if first.imm is None or second.imm is None:
             return "dual-op-pair: missing memory offset"
         width = first.access_width or (1 << (first.access_shift or 0))
@@ -269,12 +266,14 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
                 return f"dual-op-pair: offset {insn.imm} exceeds 5-bit range (max {31 << shift})"
         return None
     if kind == "indep_pair":
-        # Restricted to: li (rs1==x0), mv (imm==0), addi4spn (rs1==sp, imm
-        # nonzero multiple of 4).  Each instruction must be one of these three.
+        # Restricted to: li (is_li), mv (is_mv), addi4spn (is_addi4spn).
+        # addi4spn also requires the immediate fits the 5-bit encoding [4,128].
         for insn in (first, second):
             if not _is_li_mv_addi4spn(insn):
                 return (f"dual-op-pair: not a li/mv/addi4spn pattern "
                         f"(x{insn.rd} = x{insn.rs1} + {insn.imm})")
+            if insn.is_addi4spn and not insn.uimm_fits(5, 2, nonzero='remap'):
+                return f"dual-op-pair: addi4spn immediate {insn.imm} out of range [4,128]"
         # Check both directions of independence (reversed_order never set for
         # symmetric tuples, so the outer function only checks A→B).
         if second.rd is not None and second.rd in first.uses_regs:

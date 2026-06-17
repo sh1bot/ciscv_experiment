@@ -178,6 +178,29 @@ class Instruction:
         return self.rd is not None and (self.rd == self.rs1 or self.rd == self.rs2)
 
     @property
+    def is_li(self) -> bool:
+        """addi rd, x0, imm — load immediate (rs1 == x0)."""
+        return self.mnemonic == "addi" and self.rs1 == 0
+
+    @property
+    def is_mv(self) -> bool:
+        """addi rd, rs1, 0 — register copy (imm == 0)."""
+        return self.mnemonic == "addi" and self.imm in (0, None)
+
+    @property
+    def is_addi4spn(self) -> bool:
+        """addi rd, sp, imm — sp-relative address (rs1==sp, nonzero multiple of 4).
+        Not range-constrained; use uimm_fits for encoding checks."""
+        return (self.mnemonic == "addi" and self.rs1 == 2
+                and self.imm is not None and self.imm != 0 and self.imm % 4 == 0)
+
+    @property
+    def is_local(self) -> bool:
+        """32- or 64-bit load/store with sp (x2) as base address.
+        Not range-constrained; use uimm_fits for encoding checks."""
+        return self.rs1 == 2 and self.mnemonic in {"lw", "lwu", "ld", "sw", "sd"}
+
+    @property
     def is_commutative(self) -> bool:
         return self.mnemonic in {
             "add", "addw", "mul", "mulh", "mulhu", "mulhsu",
