@@ -352,20 +352,6 @@ class Instruction:
     # Immediate helpers
     # -----------------------------------------------------------------------
 
-    def imm_bits(self, n: int) -> bool:
-        """True if self.imm fits in a signed n-bit two's-complement field."""
-        if self.imm is None:
-            return False
-        lo = -(1 << (n - 1))
-        hi = (1 << (n - 1)) - 1
-        return lo <= self.imm <= hi
-
-    def uimm_bits(self, n: int) -> bool:
-        """True if self.imm fits in an unsigned n-bit field."""
-        if self.imm is None:
-            return False
-        return 0 <= self.imm < (1 << n)
-
     def imm_multiple(self, shift: int) -> bool:
         """True if self.imm is a non-None multiple of (1 << shift)."""
         if self.imm is None:
@@ -377,42 +363,38 @@ class Instruction:
     def imm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
         """Signed range + alignment check.
 
-        nonzero=False   — [-(2**(n-1))<<shift, (2**(n-1)-1)<<shift]  (normal)
+        nonzero=False   — [-(2**(n-1))<<shift, (2**(n-1)-1)<<shift]
         nonzero=True    — same range, zero excluded (nzimm)
         nonzero='remap' — [-(2**(n-1))<<shift, -(1<<shift)] ∪ [(1<<shift), 2**(n-1)<<shift]
                           Zero maps to 2**(n-1)<<shift, balancing the range.
         """
-        if self.imm is None:
+        if self.imm is None or not self.imm_multiple(shift):
             return False
-        step = 1 << shift
+        v = self.imm >> shift
         half = 1 << (n - 1)
         if nonzero == 'remap':
-            return self.imm != 0 and self.imm_multiple(shift) and -half * step <= self.imm <= half * step
-        if not self.imm_bits(n):
+            return v != 0 and -half <= v <= half
+        if not (-half <= v <= half - 1):
             return False
-        if shift > 0 and not self.imm_multiple(shift):
-            return False
-        if nonzero and self.imm == 0:
+        if nonzero and v == 0:
             return False
         return True
 
     def uimm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
         """Unsigned range + alignment check.
 
-        nonzero=False   — [0, (2**n - 1) << shift]  (start-inclusive, normal)
-        nonzero=True    — [1<<shift, (2**n-1)<<shift] (both-exclusive, nzuimm)
-        nonzero='remap' — [1<<shift, 2**n<<shift]    (end-inclusive, zero→max+1)
+        nonzero=False   — [0, (2**n - 1) << shift]
+        nonzero=True    — [1<<shift, (2**n-1)<<shift]  (nzuimm)
+        nonzero='remap' — [1<<shift, 2**n<<shift]      (zero bit-pattern encodes max+1)
         """
-        if self.imm is None:
+        if self.imm is None or not self.imm_multiple(shift):
             return False
-        step = 1 << shift
+        v = self.imm >> shift
+        cap = 1 << n
         if nonzero == 'remap':
-            # zero bit-pattern encodes 2**n << shift; valid range is [step, 2**n * step]
-            return self.imm != 0 and self.imm_multiple(shift) and 0 < self.imm <= (1 << n) * step
-        if not self.uimm_bits(n):
+            return 0 < v <= cap
+        if not (0 <= v < cap):
             return False
-        if shift > 0 and not self.imm_multiple(shift):
-            return False
-        if nonzero and self.imm == 0:
+        if nonzero and v == 0:
             return False
         return True
