@@ -61,12 +61,17 @@ _RSD_IMM_LO, _RSD_IMM_HI = -64, 64          # signed, nonzero
 # Shared per-slot helpers (mnemonic already confirmed by rule.mnemonic_set)
 # ---------------------------------------------------------------------------
 
-def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction) -> Optional[str]:
-    """Check register range and immediate constraints only; mnemonic already ok."""
+def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction,
+                           exclude: Optional[int] = None) -> Optional[str]:
+    """Check register range and immediate constraints only; mnemonic already ok.
+
+    exclude: a register number that is exempt from the range check (the chain
+    register, which is not encoded in the packet and may be anywhere).
+    """
     for reg, fname in ((insn.rd, "rd"), (insn.rs1, "rs1")):
-        if reg is not None and reg not in _RSD_ALU_REGS:
+        if reg is not None and reg != exclude and reg not in _RSD_ALU_REGS:
             return f"{rule_name}: {fname} (x{reg}) not in x0..x15"
-    if insn.rs2 is not None and insn.rs2 not in _RSD_ALU_REGS:
+    if insn.rs2 is not None and insn.rs2 != exclude and insn.rs2 not in _RSD_ALU_REGS:
         return f"{rule_name}: rs2 (x{insn.rs2}) not in x0..x15"
     if insn.mnemonic in _RSD_IMM_MN:
         imm = insn.imm
@@ -115,10 +120,13 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     (or rs2 if B is commutative).  A's rd must be dead after B — either B
     overwrites it (b.rd == a.rd) or it is not live in b.live_out.
     """
-    for insn in (a, b):
-        r = _chain_alu_diagnose(insn)
-        if r:
-            return r
+    # a.rd is the chain register — not encoded in the packet; exempt from range.
+    r = _alu_diagnose_regs_imm("chain-alu-pair", a, exclude=a.rd)
+    if r:
+        return r
+    r = _alu_diagnose_regs_imm("chain-alu-pair", b, exclude=a.rd)
+    if r:
+        return r
     if a.rd is None:
         return "chain-alu-pair: A has no destination register"
     uses_chain = (b.rs1 == a.rd) or (b.is_commutative and b.rs2 == a.rd)
@@ -171,7 +179,8 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     r = _load_chain_diagnose_a(a)
     if r:
         return r
-    r = _load_chain_diagnose_b(b)
+    # a.rd is the loaded chain value — not encoded; exempt from range check.
+    r = _alu_diagnose_regs_imm("load-chain-alu-pair", b, exclude=a.rd)
     if r:
         return r
     if a.rd is None:
@@ -194,7 +203,8 @@ def _store_chain_diagnose_b(insn: Instruction) -> Optional[str]:
 
 def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
-    r = _store_chain_diagnose_a(a)
+    # a.rd is the chain result — not encoded in the packet; exempt from range check.
+    r = _alu_diagnose_regs_imm("store-chain-alu-pair", a, exclude=a.rd)
     if r:
         return r
     r = _store_chain_diagnose_b(b)
