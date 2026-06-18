@@ -196,6 +196,9 @@ _DUAL_TUPLES: dict = {
     # addi4spn) giving 6 order-insensitive combinations: li+li, mv+mv,
     # addi4spn+addi4spn, li+mv, li+addi4spn, mv+addi4spn.
     ("addi", "addi"):     "indep_pair",
+    # epilogue: sp restore + return/jump; A=addi sp,sp,+N  B=ret or jalr rd∈{0,1}
+    ("addi", "jalr"):     "epilogue_pair",
+    ("addi", "ret"):      "epilogue_pair",
 }
 
 _DUAL_MN = frozenset(m for pair in _DUAL_TUPLES for m in pair)
@@ -270,6 +273,18 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
         for insn in (first, second):
             if not insn.uimm_fits(imm_bits, shift):
                 return f"dual-op-pair: offset {insn.imm} exceeds {imm_bits}-bit scaled range (max {max_off})"
+        return None
+    if kind == "epilogue_pair":
+        # first=addi sp,sp,+N  second=ret or jalr rd∈{0,1}
+        if first.rd != 2 or first.rs1 != 2:
+            return "epilogue_pair: A not addi sp, sp"
+        if not first.uimm_fits(7, 4, nonzero=True):
+            return (f"epilogue_pair: sp adjustment {first.imm} not a nonzero "
+                    f"7-bit uimm×16 (max {127*16})")
+        if second.rd not in (0, 1):
+            return f"epilogue_pair: B rd (x{second.rd}) must be x0 or x1"
+        if not second.imm_fits(12):
+            return f"epilogue_pair: jalr offset {second.imm} out of 12-bit range"
         return None
     if kind == "indep_pair":
         # Restricted to: li (is_li), mv (is_mv), addi4spn (is_addi4spn).

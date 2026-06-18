@@ -453,6 +453,54 @@ class TestIndepPair:
         b = make_insn("addi", rd=11, rs1=13, imm=0)
         assert can_pair(a, b) is None
 
+    # --- epilogue_pair ---
+
+    def test_epilogue_addi_ret_pairs(self):
+        a = make_insn("addi", rd=2, rs1=2, imm=48)   # addi sp, sp, 48
+        b = make_insn("ret",  rd=0, rs1=1, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_epilogue_addi_jalr_zero_pairs(self):
+        a = make_insn("addi", rd=2, rs1=2, imm=112)  # addi sp, sp, 112
+        b = make_insn("jalr", rd=0, rs1=15, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_epilogue_addi_jalr_nonzero_imm_pairs(self):
+        """jalr with nonzero 12-bit offset (PIC call pattern) also pairs."""
+        a = make_insn("addi", rd=2, rs1=2, imm=96)
+        b = make_insn("jalr", rd=0, rs1=1, imm=-92)
+        assert can_pair(a, b) is None
+
+    def test_epilogue_jalr_rd1_pairs(self):
+        """jalr with rd=1 (link register) provisionally allowed."""
+        a = make_insn("addi", rd=2, rs1=2, imm=16)
+        b = make_insn("jalr", rd=1, rs1=15, imm=0)
+        assert can_pair(a, b) is None
+
+    def test_epilogue_reversed_order_pairs(self):
+        """ret before addi sp,sp also pairs (order-insensitive)."""
+        a = make_insn("ret",  rd=0, rs1=1, imm=0)
+        b = make_insn("addi", rd=2, rs1=2, imm=48)
+        assert can_pair(a, b) is None
+
+    def test_epilogue_non_sp_addi_no_pair(self):
+        """addi to a non-sp register doesn't qualify."""
+        a = make_insn("addi", rd=10, rs1=10, imm=48)
+        b = make_insn("ret",  rd=0, rs1=1, imm=0)
+        assert can_pair(a, b) is not None
+
+    def test_epilogue_negative_sp_no_pair(self):
+        """Negative sp adjustment (prologue) doesn't qualify."""
+        a = make_insn("addi", rd=2, rs1=2, imm=-48)
+        b = make_insn("ret",  rd=0, rs1=1, imm=0)
+        assert can_pair(a, b) is not None
+
+    def test_epilogue_sp_adjust_out_of_range_no_pair(self):
+        """sp adjustment beyond 7-bit uimm×16 (>2032) doesn't pair."""
+        a = make_insn("addi", rd=2, rs1=2, imm=2048)  # 128×16, needs 8 bits
+        b = make_insn("ret",  rd=0, rs1=1, imm=0)
+        assert can_pair(a, b) is not None
+
     def test_mv_li_pairs(self):
         """mv + li."""
         a = make_insn("addi", rd=10, rs1=12, imm=0)
@@ -690,7 +738,7 @@ class TestSoloReasons:
 
     def test_greedy_no_annotation_when_a_ineligible(self):
         """When A is ineligible for all rules, B gets no pair-attempt reasons."""
-        a = make_insn("jalr", rd=0, rs1=1, imm=0)   # unsupported mnemonic
+        a = make_insn("auipc", rd=1, imm=0)   # unsupported mnemonic
         b = make_add_rsd(10, 11)
         b.solo_reasons = set()
         greedy_pair([a, b])
