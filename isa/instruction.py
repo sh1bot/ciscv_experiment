@@ -243,20 +243,20 @@ class Instruction:
         rd, rs1, rs2 = self.rd, self.rs1, self.rs2
         imm = self.imm
 
-        # c.addi4spn rd', nzuimm
-        if m == "addi" and self.rd_in_rvc_range and rs1 == 2 and self.uimm_fits(10, 2, nonzero=True):
+        # c.addi4spn rd', nzuimm[9:2] — 8 significant bits scaled by 4
+        if m == "addi" and self.rd_in_rvc_range and rs1 == 2 and self.uimm_fits(8, 2, nonzero=True):
             return True
-        # c.lw rd', imm(rs1')
-        if m == "lw" and self.rd_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(7, 2):
+        # c.lw rd', imm(rs1') — uimm[6:2], 5 significant bits scaled by 4
+        if m == "lw" and self.rd_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(5, 2):
             return True
-        # c.sw rs2', imm(rs1')
-        if m == "sw" and self.rs2_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(7, 2):
+        # c.sw rs2', imm(rs1') — uimm[6:2], 5 significant bits scaled by 4
+        if m == "sw" and self.rs2_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(5, 2):
             return True
-        # c.ld rd', imm(rs1') — RV64
-        if m == "ld" and self.rd_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(8, 3):
+        # c.ld rd', imm(rs1') — RV64, uimm[7:3], 5 significant bits scaled by 8
+        if m == "ld" and self.rd_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(5, 3):
             return True
-        # c.sd rs2', imm(rs1') — RV64
-        if m == "sd" and self.rs2_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(8, 3):
+        # c.sd rs2', imm(rs1') — RV64, uimm[7:3], 5 significant bits scaled by 8
+        if m == "sd" and self.rs2_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(5, 3):
             return True
         # c.addi rd, nzimm
         if m == "addi" and rd == rs1 and rd is not None and rd != 0 and self.imm_fits(6, nonzero=True):
@@ -267,8 +267,8 @@ class Instruction:
         # c.li rd, imm
         if m == "addi" and rs1 == 0 and rd is not None and rd != 0 and self.imm_fits(6):
             return True
-        # c.addi16sp — addi x2, x2, imm
-        if m == "addi" and rd == 2 and rs1 == 2 and self.imm_fits(10, 4, nonzero=True):
+        # c.addi16sp — addi x2, x2, nzimm[9:4], 6 significant bits scaled by 16
+        if m == "addi" and rd == 2 and rs1 == 2 and self.imm_fits(6, 4, nonzero=True):
             return True
         # c.lui rd, nzimm
         if m == "lui" and rd is not None and rd != 0 and rd != 2 and self.imm_fits(6, nonzero=True):
@@ -315,11 +315,11 @@ class Instruction:
         # c.slli rd, shamt
         if m == "slli" and rd is not None and rd != 0 and rd == rs1 and self.uimm_fits(6, nonzero=True):
             return True
-        # c.lwsp rd, imm — lw rd, imm(x2)
-        if m == "lw" and rd is not None and rd != 0 and rs1 == 2 and self.uimm_fits(8, 2):
+        # c.lwsp rd, imm — lw rd, imm(x2), uimm[7:2], 6 significant bits scaled by 4
+        if m == "lw" and rd is not None and rd != 0 and rs1 == 2 and self.uimm_fits(6, 2):
             return True
-        # c.ldsp rd, imm — RV64: ld rd, imm(x2)
-        if m == "ld" and rd is not None and rd != 0 and rs1 == 2 and self.uimm_fits(9, 3):
+        # c.ldsp rd, imm — RV64: ld rd, imm(x2), uimm[8:3], 6 significant bits scaled by 8
+        if m == "ld" and rd is not None and rd != 0 and rs1 == 2 and self.uimm_fits(6, 3):
             return True
         # c.jr rs1 — jalr x0, rs1, 0
         if m == "jalr" and rd == 0 and rs1 is not None and rs1 != 0 and self.imm == 0:
@@ -339,11 +339,11 @@ class Instruction:
         # c.add rd, rs2 — add rd, rd, rs2
         if m == "add" and rd is not None and rd != 0 and rd == rs1 and rs2 is not None and rs2 != 0:
             return True
-        # c.swsp rs2, imm — sw rs2, imm(x2)
-        if m == "sw" and rs1 == 2 and self.uimm_fits(8, 2):
+        # c.swsp rs2, imm — sw rs2, imm(x2), uimm[7:2], 6 significant bits scaled by 4
+        if m == "sw" and rs1 == 2 and self.uimm_fits(6, 2):
             return True
-        # c.sdsp rs2, imm — RV64: sd rs2, imm(x2)
-        if m == "sd" and rs1 == 2 and self.uimm_fits(9, 3):
+        # c.sdsp rs2, imm — RV64: sd rs2, imm(x2), uimm[8:3], 6 significant bits scaled by 8
+        if m == "sd" and rs1 == 2 and self.uimm_fits(6, 3):
             return True
 
         return False
