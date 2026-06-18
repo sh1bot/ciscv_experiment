@@ -263,9 +263,16 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
         if abs(first.imm - second.imm) != width:
             return f"dual-op-pair: offsets must differ by exactly {width}"
         shift = first.access_shift or 0
+        # sp-relative pairs get an 8-bit scaled offset (255 * data_width);
+        # general-base pairs use a 5-bit scaled offset (31 * data_width).
+        # uimm_fits(n, shift) checks raw imm < 2**n and aligned, so n includes
+        # the shift bits.
+        scaled_bits = 8 if first.is_local else 5
+        imm_bits = scaled_bits + shift
+        max_off = ((1 << scaled_bits) - 1) << shift
         for insn in (first, second):
-            if not insn.uimm_fits(5, shift):
-                return f"dual-op-pair: offset {insn.imm} exceeds 5-bit range (max {31 << shift})"
+            if not insn.uimm_fits(imm_bits, shift):
+                return f"dual-op-pair: offset {insn.imm} exceeds {scaled_bits}-bit scaled range (max {max_off})"
         return None
     if kind == "indep_pair":
         # Restricted to: li (is_li), mv (is_mv), addi4spn (is_addi4spn).

@@ -414,6 +414,26 @@ class TestDualOpPair:
         b = make_insn("lw", rd=11, rs1=2, imm=8)
         assert can_pair(a, b) is not None
 
+    def test_mem_pair_sp_8bit_offset_pairs(self):
+        """sp-relative ld pair with 8-bit scaled offset (>5-bit range) pairs."""
+        # scaled offset 183 = 0xB7, raw = 183*8 = 1464, needs 8 bits
+        a = make_insn("ld", rd=10, rs1=2, imm=1464)
+        b = make_insn("ld", rd=11, rs1=2, imm=1472)
+        assert can_pair(a, b) is None
+
+    def test_mem_pair_non_sp_5bit_limit(self):
+        """Non-sp base uses 5-bit limit; offset beyond that fails."""
+        # scaled offset 32 > 31, so fails 5-bit; rs1=12 (not sp)
+        a = make_insn("ld", rd=10, rs1=12, imm=256)
+        b = make_insn("ld", rd=11, rs1=12, imm=264)
+        assert can_pair(a, b) is not None
+
+    def test_mem_pair_non_sp_5bit_in_range_pairs(self):
+        """Non-sp base within 5-bit range still pairs."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
+        b = make_insn("ld", rd=11, rs1=12, imm=8)
+        assert can_pair(a, b) is None
+
 
 # ---------------------------------------------------------------------------
 # indep_pair (li+li, mv+mv, mv+li)
