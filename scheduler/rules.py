@@ -130,6 +130,140 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# load-chain-alu-pair / store-chain-alu-pair
+# ---------------------------------------------------------------------------
+# Two variants of chain-alu-pair where one slot is an sp-relative memory access
+# carrying an 8-bit scaled offset.  The ALU slot draws from the same table
+# (_RSD_ALU_MN) and uses the same register/immediate checks as chain-alu-pair,
+# so all three rules evolve together as the allowed-op set is tuned.
+#
+#   load-chain:  A = sp-relative load (8-bit scaled offset); B = ALU op that
+#                consumes the loaded value as its input.  The value is dead
+#                after B.
+#   store-chain: A = ALU op; B = sp-relative store (8-bit scaled offset) that
+#                writes A's result to the stack.  The result is dead after B.
+
+_SP_LOAD_MN  = frozenset({"lw", "lwu", "ld"})
+_SP_STORE_MN = frozenset({"sw", "sd"})
+
+
+def _sp_mem_diagnose(rule_name: str, insn: Instruction) -> Optional[str]:
+    """sp-relative memory op with a nonnegative 8-bit scaled offset."""
+    if insn.rs1 != 2:
+        return f"{rule_name}: memory base is not sp (x2)"
+    shift = insn.access_shift or 0
+    if not insn.uimm_fits(8, shift):
+        max_off = ((1 << 8) - 1) << shift
+        return f"{rule_name}: offset {insn.imm} exceeds 8-bit scaled range (max {max_off})"
+    return None
+
+
+def _load_chain_diagnose_a(insn: Instruction) -> Optional[str]:
+    return _sp_mem_diagnose("load-chain-alu-pair", insn)
+
+
+def _load_chain_diagnose_b(insn: Instruction) -> Optional[str]:
+    return _alu_diagnose_regs_imm("load-chain-alu-pair", insn)
+
+
+def _load_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
+    r = _load_chain_diagnose_a(a)
+    if r:
+        return r
+    r = _load_chain_diagnose_b(b)
+    if r:
+        return r
+    if a.rd is None:
+        return "load-chain-alu-pair: load has no destination register"
+    uses_chain = (b.rs1 == a.rd) or (b.is_commutative and b.rs2 == a.rd)
+    if not uses_chain:
+        return f"load-chain-alu-pair: B does not consume loaded value (x{a.rd})"
+    if b.rd != a.rd and a.rd in b.live_out:
+        return f"load-chain-alu-pair: loaded value (x{a.rd}) escapes after B"
+    return None
+
+
+def _store_chain_diagnose_a(insn: Instruction) -> Optional[str]:
+    return _alu_diagnose_regs_imm("store-chain-alu-pair", insn)
+
+
+def _store_chain_diagnose_b(insn: Instruction) -> Optional[str]:
+    return _sp_mem_diagnose("store-chain-alu-pair", insn)
+
+
+def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
+    r = _store_chain_diagnose_a(a)
+    if r:
+        return r
+    r = _store_chain_diagnose_b(b)
+    if r:
+        return r
+    if a.rd is None:
+        return "store-chain-alu-pair: A has no destination register"
+    if b.rs2 != a.rd:
+        return f"store-chain-alu-pair: store value (x{b.rs2}) is not A's result (x{a.rd})"
+    if a.rd in b.live_out:
+        return f"store-chain-alu-pair: stored value (x{a.rd}) escapes after B"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# deref-chain-load-pair / base-chain-load-pair
+# ---------------------------------------------------------------------------
+# Two load+load chains that pack into a single word as
+# {opcode-tuple, rtmp, rd, rb, imm10}, where imm10 is a 10-bit width-scaled
+# unsigned offset and the other load's offset is implied zero.
+#
+#   deref-chain: A = load rtmp, imm10(rb);  B = load rd, 0(rtmp)
+#                — pointer chase: A's loaded value is B's base address.
+#   base-chain:  A = load rtmp, 0(rb);      B = load rd, imm10(rb)
+#                — two loads off the same base; A's value (rtmp) is discarded.
+#
+# In both, rtmp (A's destination) is dead after B.
+
+_CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
+
+
+def _deref_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
+    if a.rs1 is None or a.rd is None:
+        return "deref-chain-load-pair: A missing base/dest register"
+    shift = a.access_shift or 0
+    if not a.uimm_fits(10, shift):
+        max_off = ((1 << 10) - 1) << shift
+        return f"deref-chain-load-pair: A offset {a.imm} exceeds 10-bit scaled range (max {max_off})"
+    if b.rs1 != a.rd:
+        return f"deref-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})"
+    if b.imm not in (0, None):
+        return "deref-chain-load-pair: B offset must be zero"
+    if b.rd != a.rd and a.rd in b.live_out:
+        return f"deref-chain-load-pair: pointer (x{a.rd}) escapes after B"
+    return None
+
+
+def _base_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A and B load off the same base rb; A's value (rtmp) is discarded after B."""
+    if a.rs1 is None or b.rs1 is None or a.rd is None:
+        return "base-chain-load-pair: missing base/dest register"
+    if a.rs1 != b.rs1:
+        return "base-chain-load-pair: base registers differ"
+    if a.imm not in (0, None):
+        return "base-chain-load-pair: A offset must be zero"
+    shift = b.access_shift or 0
+    if not b.uimm_fits(10, shift):
+        max_off = ((1 << 10) - 1) << shift
+        return f"base-chain-load-pair: B offset {b.imm} exceeds 10-bit scaled range (max {max_off})"
+    # A executes first; it must not clobber the shared base before B reads it.
+    if a.rd == b.rs1:
+        return f"base-chain-load-pair: A overwrites shared base (x{a.rd})"
+    if a.rd in b.live_out:
+        return f"base-chain-load-pair: tmp (x{a.rd}) escapes after B"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # dual-op-pair
 # ---------------------------------------------------------------------------
 # Two instructions drawn from the same canonical opcode tuple that share their
@@ -409,6 +543,34 @@ RULES: list[PairingRule] = [
         check=_chain_alu_pair,
         diagnose_a=_chain_alu_diagnose,
         diagnose_b=_chain_alu_diagnose,
+    ),
+    PairingRule(
+        name="load-chain-alu-pair",
+        a_mnemonic_set=_SP_LOAD_MN,
+        b_mnemonic_set=_RSD_ALU_MN,
+        check=_load_chain_alu_pair,
+        diagnose_a=_load_chain_diagnose_a,
+        diagnose_b=_load_chain_diagnose_b,
+    ),
+    PairingRule(
+        name="store-chain-alu-pair",
+        a_mnemonic_set=_RSD_ALU_MN,
+        b_mnemonic_set=_SP_STORE_MN,
+        check=_store_chain_alu_pair,
+        diagnose_a=_store_chain_diagnose_a,
+        diagnose_b=_store_chain_diagnose_b,
+    ),
+    PairingRule(
+        name="deref-chain-load-pair",
+        a_mnemonic_set=_CHAIN_LOAD_MN,
+        b_mnemonic_set=_CHAIN_LOAD_MN,
+        check=_deref_chain_load_pair,
+    ),
+    PairingRule(
+        name="base-chain-load-pair",
+        a_mnemonic_set=_CHAIN_LOAD_MN,
+        b_mnemonic_set=_CHAIN_LOAD_MN,
+        check=_base_chain_load_pair,
     ),
     PairingRule(
         name="dual-op-pair",

@@ -398,20 +398,23 @@ class TestDualOpPair:
         assert can_pair(a, b) is not None
 
     def test_mem_pair_offset_gap_wrong_no_pair(self):
-        """Offsets differ by 16, not the 8-byte ld width."""
-        a = make_insn("ld", rd=10, rs1=2, imm=0)
-        b = make_insn("ld", rd=11, rs1=2, imm=16)
+        """Offsets differ by 24, not the 8-byte ld width.
+        A's offset is nonzero so base-chain-load-pair (zero A offset) is out."""
+        a = make_insn("ld", rd=10, rs1=2, imm=8)
+        b = make_insn("ld", rd=11, rs1=2, imm=32)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_same_dest_no_pair(self):
-        a = make_insn("ld", rd=10, rs1=2, imm=0)
-        b = make_insn("ld", rd=10, rs1=2, imm=8)
+        """A's offset is nonzero so base-chain-load-pair (zero A offset) is out."""
+        a = make_insn("ld", rd=10, rs1=2, imm=8)
+        b = make_insn("ld", rd=10, rs1=2, imm=16)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_mixed_widths_no_pair(self):
-        """ld and lw are different mnemonics — not a recognised mem_pair tuple."""
-        a = make_insn("ld", rd=10, rs1=2, imm=0)
-        b = make_insn("lw", rd=11, rs1=2, imm=8)
+        """ld and lw are different mnemonics — not a recognised mem_pair tuple.
+        A's offset is nonzero so base-chain-load-pair (zero A offset) is out."""
+        a = make_insn("ld", rd=10, rs1=2, imm=8)
+        b = make_insn("lw", rd=11, rs1=2, imm=16)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_sp_8bit_offset_pairs(self):
@@ -684,8 +687,10 @@ class TestNoApplicableRule:
         assert can_pair(lw, add) is not None
 
     def test_alu_store_does_not_pair(self):
+        # sw stores x13, not the add's result x10, so store-chain-alu-pair
+        # (which requires the store value to be A's destination) does not apply.
         add = make_add(10, 11, 12)
-        sw = make_sw(rs1=2, rs2=10)
+        sw = make_sw(rs1=2, rs2=13)
         assert can_pair(add, sw) is not None
 
     def test_alu_branch_does_not_pair(self):
@@ -796,3 +801,122 @@ class TestGreedyPairing:
         assert len(packets) == 2
         assert packets[0][0] == 'pair'
         assert packets[1][0] == 'solo'
+
+
+def make_ld(rd, rs1, imm=0):
+    return make_insn("ld", rd=rd, rs1=rs1, imm=imm)
+
+
+def make_sd(rs1, rs2, imm=0):
+    return make_insn("sd", rs1=rs1, rs2=rs2, imm=imm)
+
+
+class TestLoadChainAluPair:
+    """A = sp-relative load (8-bit scaled offset); B = ALU consuming the value."""
+
+    def test_basic_pairs(self):
+        # ld x10, 64(sp); add x10, x10, x11  — B consumes loaded x10
+        a = make_ld(10, 2, imm=64)
+        b = make_add(10, 10, 11)
+        assert can_pair(a, b) is None
+
+    def test_commutative_rs2_chain(self):
+        # add is commutative; B may consume A's result as rs2
+        a = make_ld(10, 2, imm=64)
+        b = make_add(12, 11, 10)
+        assert can_pair(a, b) is None
+
+    def test_non_sp_base_no_pair(self):
+        a = make_ld(10, 12, imm=64)   # base x12, not sp
+        b = make_add(10, 10, 11)
+        assert can_pair(a, b) is not None
+
+    def test_offset_over_8bit_no_pair(self):
+        # ld scale 8: 8-bit max scaled offset = 255*8 = 2040; 2048 is too big
+        a = make_ld(10, 2, imm=2048)
+        b = make_add(10, 10, 11)
+        assert can_pair(a, b) is not None
+
+    def test_b_does_not_consume_no_pair(self):
+        a = make_ld(10, 2, imm=64)
+        b = make_add(12, 13, 14)      # does not read x10
+        assert can_pair(a, b) is not None
+
+
+class TestStoreChainAluPair:
+    """A = ALU op; B = sp-relative store (8-bit scaled offset) of A's result."""
+
+    def test_basic_pairs(self):
+        # add x10, x11, x12; sd x10, 64(sp)  — B stores the computed x10
+        a = make_add(10, 11, 12)
+        b = make_sd(rs1=2, rs2=10, imm=64)
+        assert can_pair(a, b) is None
+
+    def test_store_value_mismatch_no_pair(self):
+        a = make_add(10, 11, 12)
+        b = make_sd(rs1=2, rs2=13, imm=64)   # stores x13, not x10
+        assert can_pair(a, b) is not None
+
+    def test_non_sp_base_no_pair(self):
+        a = make_add(10, 11, 12)
+        b = make_sd(rs1=14, rs2=10, imm=64)  # base x14, not sp
+        assert can_pair(a, b) is not None
+
+    def test_offset_over_8bit_no_pair(self):
+        a = make_add(10, 11, 12)
+        b = make_sd(rs1=2, rs2=10, imm=2048)
+        assert can_pair(a, b) is not None
+
+
+class TestDerefChainLoadPair:
+    """A = load rtmp, imm10(rb); B = load rd, 0(rtmp); rtmp dead after B."""
+
+    def test_basic_pairs(self):
+        a = make_ld(10, 12, imm=512)   # ld x10, 512(x12)
+        b = make_ld(11, 10, imm=0)     # ld x11, 0(x10)
+        assert can_pair(a, b) is None
+
+    def test_b_offset_nonzero_no_pair(self):
+        a = make_ld(10, 12, imm=512)
+        b = make_ld(11, 10, imm=8)     # B must dereference at offset zero
+        assert can_pair(a, b) is not None
+
+    def test_b_base_mismatch_no_pair(self):
+        a = make_ld(10, 12, imm=512)
+        b = make_ld(11, 13, imm=0)     # B base is not A's result
+        assert can_pair(a, b) is not None
+
+    def test_a_offset_over_10bit_no_pair(self):
+        # ld scale 8: 10-bit max scaled = 1023*8 = 8184; 8192 too big
+        a = make_ld(10, 12, imm=8192)
+        b = make_ld(11, 10, imm=0)
+        assert can_pair(a, b) is not None
+
+
+class TestBaseChainLoadPair:
+    """A = load rtmp, 0(rb); B = load rd, imm10(rb); rtmp discarded after B."""
+
+    def test_basic_pairs(self):
+        a = make_ld(10, 12, imm=0)     # ld x10, 0(x12)
+        b = make_ld(11, 12, imm=512)   # ld x11, 512(x12)
+        assert can_pair(a, b) is None
+
+    def test_a_offset_nonzero_no_pair(self):
+        a = make_ld(10, 12, imm=8)
+        b = make_ld(11, 12, imm=512)
+        assert can_pair(a, b) is not None
+
+    def test_base_mismatch_no_pair(self):
+        a = make_ld(10, 12, imm=0)
+        b = make_ld(11, 13, imm=512)
+        assert can_pair(a, b) is not None
+
+    def test_a_overwrites_base_no_pair(self):
+        a = make_ld(12, 12, imm=0)     # A's dest == shared base x12
+        b = make_ld(11, 12, imm=512)
+        assert can_pair(a, b) is not None
+
+    def test_b_offset_over_10bit_no_pair(self):
+        a = make_ld(10, 12, imm=0)
+        b = make_ld(11, 12, imm=8192)
+        assert can_pair(a, b) is not None
