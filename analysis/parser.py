@@ -206,6 +206,15 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
             insn.rs2 = REG_ALIASES.get(ops[1].lower())
             return insn
 
+        # --- jr pseudo-op: jr rs1  →  jalr x0, rs1, 0 ---
+        if m == "jr":
+            insn.mnemonic = "jalr"
+            insn.rd = 0
+            if len(ops) >= 1:
+                insn.rs1 = REG_ALIASES.get(ops[0].lower())
+            insn.imm = 0
+            return insn
+
         # --- ret, call, tail: retain as-is ---
         if m in ("ret", "call", "tail"):
             if m == "ret":
@@ -271,10 +280,15 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                         insn.rd = rd_maybe; insn.rs1 = rs1_maybe
                         insn.imm = _parse_imm(ops[1])
             elif len(ops) == 1:
-                # jalr rs1
+                # jalr rs1  or  jalr imm(rs1)
                 insn.rd = 0
-                insn.rs1 = REG_ALIASES.get(ops[0].lower())
-                insn.imm = 0
+                imm_r = _parse_mem_operand(ops[0])
+                if imm_r[1] is not None:
+                    insn.rs1 = imm_r[1]
+                    insn.imm = imm_r[0]
+                else:
+                    insn.rs1 = REG_ALIASES.get(ops[0].lower())
+                    insn.imm = 0
             return insn
 
         # --- Load instructions ---
