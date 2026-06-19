@@ -737,7 +737,7 @@ def identify_functions(blocks: list) -> list:
                     continue
                 fn_visited.add(id(b))
                 for s in b.successors:
-                    if id(s) not in fn_visited and not s.is_function_entry:
+                    if id(s) not in fn_visited and not s.is_function_entry and not _visited(s):
                         queue.append(s)
             # Preserve source order: filter the global blocks list to this function's set
             fn_blocks = [b for b in blocks if id(b) in fn_visited]
