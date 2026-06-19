@@ -153,6 +153,8 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 _SP_LOAD_MN  = frozenset({"lw", "lwu", "ld"})
 _SP_STORE_MN = frozenset({"sw", "sd"})
+_ALL_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
+_ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})
 
 
 def _sp_mem_diagnose(rule_name: str, insn: Instruction) -> Optional[str]:
@@ -217,6 +219,48 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     if a.rd in b.live_out:
         return f"store-chain-alu-pair: stored value (x{a.rd}) escapes after B"
     return None
+
+
+# ---------------------------------------------------------------------------
+# load-sp-branch / load-base-branch
+# ---------------------------------------------------------------------------
+# Load a value; branch on whether it is zero/nonzero; value kept alive.
+# The two variants differ in base register and offset range:
+#
+#   load-sp-branch:   A = any load with sp (x2) as base, 10-bit unsigned
+#                     byte offset.  Captures deep stack frames.
+#   load-base-branch: A = any load with any base register, 5-bit unsigned
+#                     byte offset.  Covers shallow struct fields.
+#
+# rd is NOT required to be dead — the common case is a null-check where the
+# pointer is tested and then used on the non-null path.  Dead-after cases
+# are also matched as a subset.
+
+def _load_branch_check(a: Instruction, b: Instruction,
+                       rule: str, imm_bits: int) -> Optional[str]:
+    if a.rs1 is None:
+        return f"{rule}: load has no base register"
+    if a.rd is None:
+        return f"{rule}: load has no destination"
+    if a.base_from_auipc:
+        return f"{rule}: load base is auipc-derived (GOT access)"
+    if not a.uimm_fits(imm_bits):
+        return f"{rule}: offset {a.imm} exceeds {imm_bits}-bit unsigned range"
+    if b.rs1 != a.rd:
+        return f"{rule}: branch tests x{b.rs1} but load produces x{a.rd}"
+    return None
+
+
+def _load_sp_branch(a: Instruction, b: Instruction) -> Optional[str]:
+    """sp-relative load (uimm10 byte offset) -> beqz/bnez; rd kept alive."""
+    if a.rs1 != 2:
+        return "load-sp-branch: base is not sp (x2)"
+    return _load_branch_check(a, b, "load-sp-branch", 10)
+
+
+def _load_base_branch(a: Instruction, b: Instruction) -> Optional[str]:
+    """Any-base load (uimm5 byte offset) -> beqz/bnez; rd kept alive."""
+    return _load_branch_check(a, b, "load-base-branch", 5)
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +708,19 @@ RULES: list[PairingRule] = [
         check=_store_chain_alu_pair,
         diagnose_a=_store_chain_diagnose_a,
         diagnose_b=_store_chain_diagnose_b,
+    ),
+    PairingRule(
+        name="load-sp-branch",
+        a_mnemonic_set=_ALL_LOAD_MN,
+        b_mnemonic_set=_ZERO_BRANCH_MN,
+        a_prerequisites=["reads_stack"],
+        check=_load_sp_branch,
+    ),
+    PairingRule(
+        name="load-base-branch",
+        a_mnemonic_set=_ALL_LOAD_MN,
+        b_mnemonic_set=_ZERO_BRANCH_MN,
+        check=_load_base_branch,
     ),
     PairingRule(
         name="deref-chain-load-pair",
