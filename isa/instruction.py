@@ -306,17 +306,16 @@ class Instruction:
         # c.addw rd', rs2' — RV64
         if m == "addw" and self.rd_in_rvc_range and self.rs2_in_rvc_range and rd == rs1:
             return True
-        # c.j offset — jal x0, offset
-        if m == "jal" and rd == 0:
+        # c.j offset — jal x0, offset (also the bare `j` pseudo-op)
+        if m == "j" or (m == "jal" and rd == 0):
             return True
-        # c.jal offset — RV32 only: jal x1, offset
-        if m == "jal" and rd == 1:
+        # NB: c.jal (jal x1) is RV32C-only; on RV64 that slot is c.addiw, so a
+        # real `jal ra, target` does NOT compress.
+        # c.beqz rs1', offset — `beq rs,x0` or the `beqz` pseudo-op
+        if (m == "beqz" or (m == "beq" and rs2 == 0)) and self.rs1_in_rvc_range:
             return True
-        # c.beqz rs1', offset
-        if m == "beq" and self.rs1_in_rvc_range and rs2 == 0:
-            return True
-        # c.bnez rs1', offset
-        if m == "bne" and self.rs1_in_rvc_range and rs2 == 0:
+        # c.bnez rs1', offset — `bne rs,x0` or the `bnez` pseudo-op
+        if (m == "bnez" or (m == "bne" and rs2 == 0)) and self.rs1_in_rvc_range:
             return True
         # c.slli rd, shamt
         if m == "slli" and rd is not None and rd != 0 and rd == rs1 and self.uimm_fits(6, nonzero=True):
@@ -327,11 +326,19 @@ class Instruction:
         # c.ldsp rd, imm — RV64: ld rd, imm(x2), uimm[8:3], 6 significant bits scaled by 8
         if m == "ld" and rd is not None and rd != 0 and rs1 == 2 and self.uimm_fits(6, 3):
             return True
-        # c.jr rs1 — jalr x0, rs1, 0
+        # c.jr rs1 — jalr x0, rs1, 0 (also the bare `ret` pseudo-op = c.jr ra)
+        if m == "ret":
+            return True
         if m == "jalr" and rd == 0 and rs1 is not None and rs1 != 0 and self.imm == 0:
             return True
-        # c.mv rd, rs2 — add rd, x0, rs2
+        # c.mv rd, rs2 — add rd, x0, rs2; or the `mv` pseudo-op, which the parser
+        # folds into `addi rd, rs1, 0` (rd != 0, rs1 != 0).
         if m == "add" and rs1 == 0 and rd is not None and rd != 0 and rs2 is not None and rs2 != 0:
+            return True
+        if m == "mv" and rd is not None and rd != 0 and rs1 is not None and rs1 != 0:
+            return True
+        if (m == "addi" and imm in (0, None) and rd is not None and rd != 0
+                and rs1 is not None and rs1 != 0):
             return True
         # c.nop — addi x0, x0, 0
         if m == "addi" and rd == 0 and rs1 == 0 and imm == 0:

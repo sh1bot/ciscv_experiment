@@ -930,3 +930,34 @@ class TestBaseChainLoadPair:
         a.base_from_auipc = True
         b = make_ld(11, 10, imm=512)
         assert can_pair(a, b) is not None
+
+
+class TestRvcEligiblePseudoOps:
+    """RVC eligibility must recognise pseudo-op spellings, and reject RV32-only
+    c.jal on an RV64 target."""
+
+    def test_mv_as_addi_imm0_compresses(self):
+        # mv folded into `addi rd, rs1, 0` → c.mv
+        assert make_insn("addi", rd=10, rs1=11, imm=0).rvc_eligible
+
+    def test_mv_mnemonic_compresses(self):
+        assert make_insn("mv", rd=10, rs1=11).rvc_eligible
+
+    def test_beqz_compresses(self):
+        assert make_insn("beqz", rs1=10).rvc_eligible          # x10 in x8..x15
+        assert not make_insn("beqz", rs1=5).rvc_eligible       # x5 out of range
+
+    def test_bnez_compresses(self):
+        assert make_insn("bnez", rs1=12).rvc_eligible
+        assert not make_insn("bnez", rs1=2).rvc_eligible
+
+    def test_j_compresses(self):
+        assert make_insn("j", branch_target="L").rvc_eligible
+        assert make_insn("jal", rd=0).rvc_eligible             # jal x0 == j
+
+    def test_ret_compresses(self):
+        assert make_insn("ret").rvc_eligible                   # c.jr ra
+
+    def test_jal_ra_does_not_compress_on_rv64(self):
+        # c.jal is RV32C-only; jal ra, target must NOT compress on RV64.
+        assert not make_insn("jal", rd=1).rvc_eligible
