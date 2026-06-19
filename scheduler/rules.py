@@ -483,7 +483,7 @@ def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # The RSD case (rd==rs in A) is intentionally included — if the source is
 # also dead it is valid, and the encoding can decide whether to compress it.
 
-_BIT_BRANCH_A_MN = frozenset({"andi", "slli", "srli", "srai"})
+_BIT_BRANCH_A_MN = frozenset({"andi", "slli", "srli"})
 _BIT_BRANCH_B_MN = frozenset({"beqz", "bnez", "beq", "bne"})
 
 
@@ -491,17 +491,39 @@ def _is_pow2_imm(v) -> bool:
     return v is not None and v > 0 and (v & (v - 1)) == 0
 
 
+def _shift_for_zero_test(imm) -> Optional[tuple]:
+    """If `andi rd, rs, imm; beqz/bnez` can be rewritten as `slli/srli rd, rs, N;
+    beqz/bnez` (same branch type), return (shift_op, N).  Covers:
+      2^N - 1  (low N bits all zero?)  → slli (64-N); beqz/bnez
+      ~(2^N-1) (high bits all zero?)   → srli N;      beqz/bnez
+    Does not cover plain pow2 (single bit) — those encode as andi directly."""
+    if imm is None:
+        return None
+    if imm > 1 and (imm & (imm + 1)) == 0:          # 2^N - 1
+        return ("slli", 64 - imm.bit_length())
+    if imm < -1 and (-imm & (-imm - 1)) == 0:        # ~(2^N - 1) = -(2^N)
+        return ("srli", (-imm).bit_length() - 1)
+    return None
+
+
 def _bit_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """A isolates a bit; B branches on it; A's result is dead after B."""
+    """A isolates or masks bits; B branches on zero/nonzero; A's result is dead after B.
+
+    andi with a pow2 immediate isolates a single bit and encodes directly.
+    andi with a 2^N-1 or ~(2^N-1) immediate will be rewritten to slli/srli at
+    emit time — accepted here because the zero/nonzero test is equivalent.
+    slli/srli are accepted directly for any shift amount.
+    All forms require a zero-test branch (beqz/bnez or beq/bne with rs2==x0).
+    """
     if a.rd is None:
         return "bit-branch-pair: A has no destination"
-    if a.mnemonic == "andi":
-        if not _is_pow2_imm(a.imm):
-            return f"bit-branch-pair: andi immediate {a.imm} is not a power of two"
-    # slli/srli/srai: any shift amount is fine — the compiler chose it to isolate a bit
-    # beq/bne with zero are aliases for beqz/bnez; require rs2==0
+    # beq/bne with zero are aliases for beqz/bnez; non-zero comparisons not supported
     if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
         return "bit-branch-pair: beq/bne B slot requires rs2==zero"
+    if a.mnemonic == "andi":
+        if not _is_pow2_imm(a.imm) and _shift_for_zero_test(a.imm) is None:
+            return f"bit-branch-pair: andi immediate {a.imm} not pow2 or shift-expressible"
+    # slli/srli: any shift amount is accepted
     if b.rs1 != a.rd:
         return f"bit-branch-pair: B tests x{b.rs1} but A's result is x{a.rd}"
     if b.rd != a.rd and a.rd in b.live_out:
