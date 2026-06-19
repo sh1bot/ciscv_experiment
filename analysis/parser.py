@@ -130,6 +130,48 @@ def _generic_decode(insn: 'Instruction', ops: list) -> None:
             insn.imm = imm
 
 
+_C_RSD = frozenset({
+    "add", "sub", "and", "or", "xor", "addw", "subw", "mul",  # c.op rd,rs -> op rd,rd,rs
+    "addi", "addiw", "andi", "slli", "srli", "srai",          # c.op rd,imm -> op rd,rd,imm
+})
+_C_SP_MEM = {
+    "lwsp": "lw", "ldsp": "ld", "flwsp": "flw", "fldsp": "fld",
+    "swsp": "sw", "sdsp": "sd", "fswsp": "fsw", "fsdsp": "fsd",
+}
+
+
+def _expand_compressed(m: str, ops: list) -> tuple[Optional[str], list]:
+    """Expand an explicit RVC mnemonic (c.*) to its canonical base form.
+
+    Disassemblers emitting compressed mnemonics drop the implicit operands that
+    the base instruction carries (the destination doubling as a source in
+    c.add/c.addi/..., or the implicit sp in c.*sp).  Re-inflate them so the
+    existing base-instruction decode produces identical fields to the aliased
+    disassembly.  Returns (base_mnemonic, new_ops); (None, ops) if not c.*.
+    """
+    if not m.startswith("c."):
+        return None, ops
+    base = m[2:]
+    if base in _C_RSD and len(ops) >= 2:
+        # c.op rd, x  ->  op rd, rd, x
+        return base, [ops[0], ops[0], ops[1]]
+    if base == "addi4spn":
+        # c.addi4spn rd, sp, imm  ->  addi rd, sp, imm  (operands already explicit)
+        return "addi", ops
+    if base == "addi16sp" and len(ops) >= 2:
+        # c.addi16sp sp, imm  ->  addi sp, sp, imm
+        return "addi", [ops[0], ops[0], ops[1]]
+    if base in _C_SP_MEM:
+        # c.lwsp rd, imm(sp) / c.swsp rs, imm(sp)  ->  lw/sw with same operands
+        return _C_SP_MEM[base], ops
+    if base == "jalr" and len(ops) >= 1:
+        # c.jalr rs  ->  jalr ra, rs, 0  (1-operand jalr decodes rd=x0, wrong here)
+        return "jalr", ["ra", ops[0], "0"]
+    # Everything else keeps its operands verbatim: c.mv/c.li/c.lui, c.lw/c.sw/
+    # c.ld/c.sd, c.j, c.jr, c.beqz/c.bnez, c.nop, c.ebreak, ...
+    return base, ops
+
+
 def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional[str]) -> Instruction:
     """Decode a RISC-V instruction from mnemonic and operand tokens."""
     insn = Instruction(
@@ -141,6 +183,13 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
 
     m = mnemonic.lower()
     ops = [o.strip().rstrip(",") for o in operands]
+
+    # Normalise explicit compressed (c.*) mnemonics to their base form so the
+    # two alias-flag disassemblies of the same program decode identically.
+    base_m, ops = _expand_compressed(m, ops)
+    if base_m is not None:
+        m = base_m
+        insn.mnemonic = base_m
 
     known = True
     try:
