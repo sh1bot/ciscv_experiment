@@ -228,10 +228,12 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 #
 #   deref-chain: A = load rtmp, imm10(rb);  B = load rd, 0(rtmp)
 #                — pointer chase: A's loaded value is B's base address.
-#   base-chain:  A = load rtmp, 0(rb);      B = load rd, imm10(rb)
-#                — two loads off the same base; A's value (rtmp) is discarded.
+#   base-chain:  A = load rtmp, 0(rb);       B = load rd, imm10(rtmp)
+#                — pointer chase with the offset on the second load; A's loaded
+#                value is B's base address.
 #
-# In both, rtmp (A's destination) is dead after B.
+# In both, B dereferences A's loaded value (rtmp), which is dead after B.  They
+# differ only in which load carries the imm10 offset.
 
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 
@@ -254,22 +256,19 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 
 def _base_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """A and B load off the same base rb; A's value (rtmp) is discarded after B."""
-    if a.rs1 is None or b.rs1 is None or a.rd is None:
-        return "base-chain-load-pair: missing base/dest register"
-    if a.rs1 != b.rs1:
-        return "base-chain-load-pair: base registers differ"
+    """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
+    if a.rs1 is None or a.rd is None:
+        return "base-chain-load-pair: A missing base/dest register"
     if a.imm not in (0, None):
         return "base-chain-load-pair: A offset must be zero"
+    if b.rs1 != a.rd:
+        return f"base-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})"
     shift = b.access_shift or 0
     if not b.uimm_fits(10, shift):
         max_off = ((1 << 10) - 1) << shift
         return f"base-chain-load-pair: B offset {b.imm} exceeds 10-bit scaled range (max {max_off})"
-    # A executes first; it must not clobber the shared base before B reads it.
-    if a.rd == b.rs1:
-        return f"base-chain-load-pair: A overwrites shared base (x{a.rd})"
-    if a.rd in b.live_out:
-        return f"base-chain-load-pair: tmp (x{a.rd}) escapes after B"
+    if b.rd != a.rd and a.rd in b.live_out:
+        return f"base-chain-load-pair: pointer (x{a.rd}) escapes after B"
     return None
 
 

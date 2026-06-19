@@ -894,29 +894,24 @@ class TestDerefChainLoadPair:
 
 
 class TestBaseChainLoadPair:
-    """A = load rtmp, 0(rb); B = load rd, imm10(rb); rtmp discarded after B."""
+    """A = load rtmp, 0(rb); B = load rd, imm10(rtmp); rtmp dead after B."""
 
     def test_basic_pairs(self):
         a = make_ld(10, 12, imm=0)     # ld x10, 0(x12)
-        b = make_ld(11, 12, imm=512)   # ld x11, 512(x12)
+        b = make_ld(11, 10, imm=512)   # ld x11, 512(x10)
         assert can_pair(a, b) is None
 
     def test_a_offset_nonzero_no_pair(self):
-        a = make_ld(10, 12, imm=8)
-        b = make_ld(11, 12, imm=512)
+        a = make_ld(10, 12, imm=8)     # A must dereference at offset zero
+        b = make_ld(11, 10, imm=512)
         assert can_pair(a, b) is not None
 
-    def test_base_mismatch_no_pair(self):
+    def test_b_base_mismatch_no_pair(self):
         a = make_ld(10, 12, imm=0)
-        b = make_ld(11, 13, imm=512)
-        assert can_pair(a, b) is not None
-
-    def test_a_overwrites_base_no_pair(self):
-        a = make_ld(12, 12, imm=0)     # A's dest == shared base x12
-        b = make_ld(11, 12, imm=512)
+        b = make_ld(11, 13, imm=512)   # B base is not A's result
         assert can_pair(a, b) is not None
 
     def test_b_offset_over_10bit_no_pair(self):
         a = make_ld(10, 12, imm=0)
-        b = make_ld(11, 12, imm=8192)
+        b = make_ld(11, 10, imm=8192)
         assert can_pair(a, b) is not None
