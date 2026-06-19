@@ -192,6 +192,8 @@ def _categorise(reason):
     if reason in ("a-prereq", "b-prereq"):
         return "prerequisite"
     r = reason.lower()
+    if "not in x0" in r or ("x" in r and "not in" in r and "reg" in r):
+        return "register out of range"
     if "offset" in r or "imm" in r or "range" in r or "scaled" in r:
         return "immediate/offset out of range"
     if "consume" in r or "does not" in r or "feed" in r or "chain" in r:
