@@ -134,6 +134,20 @@ def compute_local_liveness(block, global_result: LivenessResult) -> None:
     """
     key = id(block)
 
+    # Forward pass: taint registers freshly written by auipc, so a load that
+    # reads such a register as its base is flagged as an auipc+load address
+    # materialisation (its offset is a %pcrel_lo relocation, not a real
+    # displacement).  The taint is killed by any other write to the register.
+    auipc_regs: set = set()
+    for insn in block.instructions:
+        insn.base_from_auipc = (insn.rs1 is not None and insn.rs1 in auipc_regs)
+        d = insn.rd
+        if d is not None and d != 0:
+            if insn.mnemonic == "auipc":
+                auipc_regs.add(d)
+            else:
+                auipc_regs.discard(d)
+
     # Seed from global live_out
     live = global_result.live_out.get(key, frozenset())
 

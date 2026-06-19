@@ -242,6 +242,8 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
     if a.rs1 is None or a.rd is None:
         return "deref-chain-load-pair: A missing base/dest register"
+    if a.base_from_auipc:
+        return "deref-chain-load-pair: A is an auipc+load GOT access (reloc offset)"
     shift = a.access_shift or 0
     if not a.uimm_fits(10, shift):
         max_off = ((1 << 10) - 1) << shift
@@ -259,6 +261,8 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
     if a.rs1 is None or a.rd is None:
         return "base-chain-load-pair: A missing base/dest register"
+    if a.base_from_auipc:
+        return "base-chain-load-pair: A is an auipc+load GOT access (reloc offset)"
     if a.imm not in (0, None):
         return "base-chain-load-pair: A offset must be zero"
     if b.rs1 != a.rd:

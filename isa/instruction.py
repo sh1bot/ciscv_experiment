@@ -37,6 +37,12 @@ class Instruction:
     a_slot_ok: bool = True
     b_slot_ok: bool = True
 
+    # Set by liveness pass: True when this instruction's base register (rs1) was
+    # produced by an auipc with no intervening redefinition — i.e. this is the
+    # load half of an auipc+load symbol/GOT address materialisation, whose
+    # offset is a %pcrel_lo relocation rather than a real displacement.
+    base_from_auipc: bool = False
+
     # Populated by pairing pass:
     solo_reasons: set = field(default_factory=set)
 

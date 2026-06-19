@@ -892,6 +892,14 @@ class TestDerefChainLoadPair:
         b = make_ld(11, 10, imm=0)
         assert can_pair(a, b) is not None
 
+    def test_a_auipc_got_load_no_pair(self):
+        # A is the load half of an auipc+load GOT access; its offset is a
+        # %pcrel_lo relocation, not a real displacement.
+        a = make_ld(10, 12, imm=512)
+        a.base_from_auipc = True
+        b = make_ld(11, 10, imm=0)
+        assert can_pair(a, b) is not None
+
 
 class TestBaseChainLoadPair:
     """A = load rtmp, 0(rb); B = load rd, imm10(rtmp); rtmp dead after B."""
@@ -914,4 +922,11 @@ class TestBaseChainLoadPair:
     def test_b_offset_over_10bit_no_pair(self):
         a = make_ld(10, 12, imm=0)
         b = make_ld(11, 10, imm=8192)
+        assert can_pair(a, b) is not None
+
+    def test_a_auipc_got_load_no_pair(self):
+        # A is the load half of an auipc+load GOT access — excluded.
+        a = make_ld(10, 12, imm=0)
+        a.base_from_auipc = True
+        b = make_ld(11, 10, imm=512)
         assert can_pair(a, b) is not None
