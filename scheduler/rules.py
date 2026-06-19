@@ -471,6 +471,45 @@ def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# bit-branch-pair
+# ---------------------------------------------------------------------------
+# A isolates a single bit (mask or shift); B branches on whether it is zero.
+# A's result register is dead after B — it carries only the bit to the branch.
+#
+# A slot: andi rd, rs, pow2_imm   (any rd, including rd==rs RSD form)
+#      or slli/srli/srai rd, rs, N
+# B slot: beqz rd  or  bnez rd  (rs1 == A's rd; rd dead after B)
+#
+# The RSD case (rd==rs in A) is intentionally included — if the source is
+# also dead it is valid, and the encoding can decide whether to compress it.
+
+_BIT_BRANCH_A_MN = frozenset({"andi", "slli", "srli", "srai"})
+_BIT_BRANCH_B_MN = frozenset({"beqz", "bnez", "beq", "bne"})
+
+
+def _is_pow2_imm(v) -> bool:
+    return v is not None and v > 0 and (v & (v - 1)) == 0
+
+
+def _bit_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A isolates a bit; B branches on it; A's result is dead after B."""
+    if a.rd is None:
+        return "bit-branch-pair: A has no destination"
+    if a.mnemonic == "andi":
+        if not _is_pow2_imm(a.imm):
+            return f"bit-branch-pair: andi immediate {a.imm} is not a power of two"
+    # slli/srli/srai: any shift amount is fine — the compiler chose it to isolate a bit
+    # beq/bne with zero are aliases for beqz/bnez; require rs2==0
+    if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
+        return "bit-branch-pair: beq/bne B slot requires rs2==zero"
+    if b.rs1 != a.rd:
+        return f"bit-branch-pair: B tests x{b.rs1} but A's result is x{a.rd}"
+    if b.rd != a.rd and a.rd in b.live_out:
+        return f"bit-branch-pair: A's result (x{a.rd}) escapes after B"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # pre-inc-pair
 # ---------------------------------------------------------------------------
 # A is in RSD form: rd == rs1 (or commutative: rd == rs2).  A writes its
@@ -590,6 +629,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_DUAL_MN,
         b_mnemonic_set=_DUAL_MN,
         check=_dual_op_pair,
+    ),
+    PairingRule(
+        name="bit-branch-pair",
+        a_mnemonic_set=_BIT_BRANCH_A_MN,
+        b_mnemonic_set=_BIT_BRANCH_B_MN,
+        check=_bit_branch_pair,
     ),
     PairingRule(
         name="pre-inc-pair",
