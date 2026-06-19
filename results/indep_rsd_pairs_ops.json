@@ -1,0 +1,1 @@
+["add", "addi_rsd", "addiw", "addw", "and", "andi", "czero.eqz", "czero.nez", "max", "maxu", "min", "mul", "mv", "or", "ori", "sext.w", "sh1add", "sh2add", "sh2add.uw", "sh3add", "sh3add.uw", "slli", "slliw", "slti", "sltiu", "sltu", "srai", "sraiw", "srli", "srliw", "sub", "subw", "xor", "xori", "zext.w"]
