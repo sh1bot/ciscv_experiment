@@ -471,6 +471,37 @@ def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# li-branch-pair
+# ---------------------------------------------------------------------------
+# A loads a small constant into a temporary; B is any conditional comparison
+# branch that uses that temporary as one of its two operands (either slot),
+# after which the temporary is dead.
+#
+# A slot: li rtmp, imm8  (addi rtmp, x0, imm  — 8-bit signed immediate)
+# B slot: beq/bne/blt/bge/bltu/bgeu  rs, rtmp, off
+#      or beq/bne/blt/bge/bltu/bgeu  rtmp, rs, off
+#
+# rtmp is dead after B — it carried only the comparison constant.
+# rs (the non-constant operand) may be any register and survives.
+
+_LI_BRANCH_A_MN = frozenset({"addi"})
+_LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
+
+
+def _li_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A loads an 8-bit constant; B compares it against a register and branches."""
+    if not a.is_li:
+        return "li-branch-pair: A not li form (must be addi rd, x0, imm)"
+    if not a.imm_fits(8):
+        return f"li-branch-pair: immediate {a.imm} out of 8-bit signed range [-128..127]"
+    if b.rs1 != a.rd and b.rs2 != a.rd:
+        return f"li-branch-pair: B does not use A's result (x{a.rd})"
+    if a.rd in b.live_out:
+        return f"li-branch-pair: A's result (x{a.rd}) escapes after B"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # bit-branch-pair
 # ---------------------------------------------------------------------------
 # A isolates a single bit (mask or shift); B branches on whether it is zero.
@@ -651,6 +682,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_DUAL_MN,
         b_mnemonic_set=_DUAL_MN,
         check=_dual_op_pair,
+    ),
+    PairingRule(
+        name="li-branch-pair",
+        a_mnemonic_set=_LI_BRANCH_A_MN,
+        b_mnemonic_set=_LI_BRANCH_B_MN,
+        a_prerequisites=["is_li"],
+        check=_li_branch_pair,
     ),
     PairingRule(
         name="bit-branch-pair",
