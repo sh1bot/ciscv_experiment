@@ -75,8 +75,11 @@ def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction,
         return f"{rule_name}: rs2 (x{insn.rs2}) not in x0..x15"
     if insn.mnemonic in _RSD_IMM_MN:
         imm = insn.imm
-        if imm is None or imm == 0 or not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
-            return f"{rule_name}: immediate out of range (got {imm}, need nonzero {_RSD_IMM_LO}..{_RSD_IMM_HI})"
+        # imm==0 on addi encodes as add rd, rs1, x0 — allow it through.
+        if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
+            return f"{rule_name}: immediate out of range (got {imm}, need {_RSD_IMM_LO}..{_RSD_IMM_HI})"
+        if imm is None:
+            return f"{rule_name}: missing immediate"
     return None
 
 
