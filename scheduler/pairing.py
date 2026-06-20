@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Optional
 
 from isa.instruction import Instruction
-from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS
+from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN
 
 # Re-export PairingRule so callers that imported it from here still work.
 from scheduler.rules import PairingRule  # noqa: F401
@@ -192,4 +192,60 @@ def greedy_pair(instructions: list[Instruction]) -> list:
     if free is not None:
         result.append(('solo', free))
 
-    return result
+    return _backward_pair(result)
+
+
+def _backward_pair(packets: list) -> list:
+    """Second pass: scan backwards over solos looking for branch B-slot pairs.
+
+    For each solo branch, scan back through preceding solos for a valid A-slot
+    partner.  Only claim the pair if no intervening instruction reads the
+    candidate's output or writes any of its inputs (i.e. moving the candidate
+    later is safe).
+    """
+    # Work on a mutable copy; track which entries are consumed.
+    result = list(packets)
+    n = len(result)
+    consumed = [False] * n
+
+    for j in range(n - 1, -1, -1):
+        if consumed[j] or result[j][0] != 'solo':
+            continue
+        branch = result[j][1]
+        if branch.mnemonic not in ALL_BRANCH_MN or not branch.b_slot_ok:
+            continue
+
+        for k in range(j - 1, -1, -1):
+            if consumed[k] or result[k][0] != 'solo':
+                continue
+            cand = result[k][1]
+            if not find_b_partners(cand, [branch]):
+                continue
+
+            # Safety check: nothing between k and j reads cand's output
+            # or writes any register cand reads.
+            cand_rd   = cand.rd
+            cand_uses = cand.uses_regs
+            conflict = False
+            for m in range(k + 1, j):
+                if consumed[m]:
+                    continue
+                p = result[m]
+                insns = [p[1]] if p[0] == 'solo' else [p[1], p[2]]
+                for insn in insns:
+                    if cand_rd is not None and cand_rd in insn.uses_regs:
+                        conflict = True
+                        break
+                    if insn.rd is not None and insn.rd in cand_uses:
+                        conflict = True
+                        break
+                if conflict:
+                    break
+
+            if not conflict:
+                rule_name = find_b_partners(cand, [branch])[0][1].name
+                result[k] = ('pair', cand, branch, rule_name)
+                consumed[j] = True
+                break
+
+    return [p for i, p in enumerate(result) if not consumed[i]]
