@@ -583,6 +583,38 @@ def _li_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# addi-branch-pair
+# ---------------------------------------------------------------------------
+# Loop-counter / pointer-stride pattern: addi/addiw updates a register in
+# place (RSD form), then a comparison branch uses that register as one of its
+# two operands, after which the register is dead.
+#
+# A slot: addi/addiw  rd, rd, imm8   (RSD form, rd in x0..x15, imm fits 8-bit)
+# B slot: beq/bne/blt/bge/bltu/bgeu  rd, rs, label
+#      or beq/bne/blt/bge/bltu/bgeu  rs, rd, label
+#
+# rd is dead after B.
+
+_ADDI_BRANCH_A_MN = frozenset({"addi", "addiw"})
+_ADDI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
+
+
+def _addi_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """addi/addiw RSD + comparison branch consuming the result."""
+    if not a.is_rsd:
+        return "addi-branch-pair: A not RSD form"
+    if a.rd not in _RSD_ALU_REGS:
+        return f"addi-branch-pair: rd (x{a.rd}) not in x0..x15"
+    if not a.imm_fits(8):
+        return f"addi-branch-pair: immediate {a.imm} out of 8-bit range [-128..127]"
+    if b.rs1 != a.rd and b.rs2 != a.rd:
+        return f"addi-branch-pair: B does not use A's result (x{a.rd})"
+    if a.rd in b.live_out:
+        return f"addi-branch-pair: A's result (x{a.rd}) escapes after B"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # bit-branch-pair
 # ---------------------------------------------------------------------------
 # A isolates a single bit (mask or shift); B branches on whether it is zero.
@@ -789,6 +821,13 @@ RULES: list[PairingRule] = [
         b_mnemonic_set=_LI_BRANCH_B_MN,
         a_prerequisites=["is_li"],
         check=_li_branch_pair,
+    ),
+    PairingRule(
+        name="addi-branch-pair",
+        a_mnemonic_set=_ADDI_BRANCH_A_MN,
+        b_mnemonic_set=_ADDI_BRANCH_B_MN,
+        a_prerequisites=["is_rsd"],
+        check=_addi_branch_pair,
     ),
     PairingRule(
         name="bit-branch-pair",
