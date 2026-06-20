@@ -609,8 +609,6 @@ def _addi_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
         return f"addi-branch-pair: immediate {a.imm} out of 8-bit range [-128..127]"
     if b.rs1 != a.rd and b.rs2 != a.rd:
         return f"addi-branch-pair: B does not use A's result (x{a.rd})"
-    if a.rd in b.live_out:
-        return f"addi-branch-pair: A's result (x{a.rd}) escapes after B"
     return None
 
 
