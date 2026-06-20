@@ -47,15 +47,19 @@ class PairingRule:
 # ---------------------------------------------------------------------------
 
 _RSD_ALU_MN = frozenset({
-    "addi", "andi",                          # immediate forms (nzimm, -64..64)
+    "addi", "addiw", "andi",                 # immediate forms
     "add",  "addw",
     "sub",  "subw",
     "and",  "andn",
     "or",   "xor",
+    "slli", "srli", "srai",                  # shift-immediate forms
+    "mul",  "mulhu",                          # multiply
 })
 _RSD_ALU_REGS = frozenset(range(16))         # x0..x15 (4-bit register field)
-_RSD_IMM_MN   = frozenset({"addi", "andi"})  # ops that carry an immediate
-_RSD_IMM_LO, _RSD_IMM_HI = -64, 64          # signed, nonzero
+_RSD_IMM_MN   = frozenset({"addi", "addiw", "andi"})  # signed nzimm -64..64
+_RSD_SHIFT_MN = frozenset({"slli", "srli", "srai"})   # shift amount 1..32
+_RSD_IMM_LO, _RSD_IMM_HI = -64, 64
+_RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
 
 
 # ---------------------------------------------------------------------------
@@ -76,11 +80,17 @@ def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction,
         return f"{rule_name}: rs2 (x{insn.rs2}) not in x0..x15"
     if insn.mnemonic in _RSD_IMM_MN:
         imm = insn.imm
-        # imm==0 on addi encodes as add rd, rs1, x0 — allow it through.
+        # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
         if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
             return f"{rule_name}: immediate out of range (got {imm}, need {_RSD_IMM_LO}..{_RSD_IMM_HI})"
         if imm is None:
             return f"{rule_name}: missing immediate"
+    elif insn.mnemonic in _RSD_SHIFT_MN:
+        imm = insn.imm
+        if imm is None:
+            return f"{rule_name}: missing shift amount"
+        if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
+            return f"{rule_name}: shift amount out of range (got {imm}, need {_RSD_SHIFT_LO}..{_RSD_SHIFT_HI})"
     return None
 
 
