@@ -146,8 +146,6 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
         b_candidates = [insns[j] for j in ready_set if insns[j].b_slot_ok and j != i]
         if find_b_partners(insn, b_candidates):
             return False
-        # Only stall for branch successors — stalling for other consumers
-        # (loads, stores) is counterproductive.
         for j in graph.edges[i]:
             if (j not in ready_set and not emitted[j]
                     and insns[j].mnemonic in ALL_BRANCH_MN
