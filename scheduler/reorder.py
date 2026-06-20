@@ -24,7 +24,8 @@ class ScheduleMode(enum.Enum):
     BNB     = "bnb"
 
 
-WINDOW_SIZE  = 16
+WINDOW_SIZE   = 16
+WINDOW_OVERLAP = 0       # instructions carried from end of one window into the next
 NODE_BUDGET  = 50_000
 STAGNATION   = 5_000
 
@@ -328,30 +329,53 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
 
 
 def _bnb_schedule(insns: list, graph: DepGraph) -> list:
-    """BnB scheduling, splitting into windows if block is large."""
+    """BnB scheduling, splitting into overlapping windows if block is large.
+
+    WINDOW_OVERLAP instructions from the tail of each committed window are
+    carried into the head of the next window so BnB can see cross-boundary
+    pairing conflicts.  Only the non-overlap portion of each window's result
+    is committed; the overlap instructions are re-scheduled in context.
+    """
     if len(insns) <= WINDOW_SIZE:
         return _bnb_single_window(insns, graph)
 
-    # Split into windows
+    overlap = min(WINDOW_OVERLAP, WINDOW_SIZE // 2)
     result = []
-    for start in range(0, len(insns), WINDOW_SIZE):
+    start = 0
+    carried: list = []   # instructions re-entering from the previous window tail
+
+    while start < len(insns):
         end = min(start + WINDOW_SIZE, len(insns))
-        window = insns[start:end]
+        window = carried + insns[start:end]
 
-        # Build subgraph for window
-        # Simple approach: only include edges within the window
+        # Build subgraph covering the window (indices into the *original* insns list
+        # for non-carried instructions; carried instructions anchor the leading edge).
+        orig_offset = start - len(carried)
         window_edges = [set() for _ in range(len(window))]
-        index_map = {id(insn): i for i, insn in enumerate(window)}
-        for i, insn in enumerate(window):
-            orig_idx = insns.index(insn)
-            for j in graph.edges[orig_idx]:
-                if j < end:
-                    local_j = j - start
-                    if 0 <= local_j < len(window):
-                        window_edges[i].add(local_j)
+        orig_index = {id(insn): i for i, insn in enumerate(insns)}
+        for wi, insn in enumerate(window):
+            oi = orig_index.get(id(insn))
+            if oi is None:
+                continue
+            for dep_oi in graph.edges[oi]:
+                dep_insn = insns[dep_oi]
+                dep_wi = next((k for k, w in enumerate(window) if id(w) == id(dep_insn)), None)
+                if dep_wi is not None:
+                    window_edges[wi].add(dep_wi)
 
-        dummy_block = None  # unused placeholder (window scheduled directly)
         sub_graph = DepGraph(instructions=window, edges=window_edges)
-        result.extend(_bnb_single_window(window, sub_graph))
+        ordered = _bnb_single_window(window, sub_graph)
+
+        # Commit everything except the last `overlap` instructions (which become
+        # the carried prefix for the next window), unless this is the final window.
+        if end >= len(insns) or overlap == 0:
+            result.extend(ordered)
+            break
+        else:
+            commit = len(ordered) - overlap
+            result.extend(ordered[:commit])
+            carried = ordered[commit:]
+
+        start = end
 
     return result

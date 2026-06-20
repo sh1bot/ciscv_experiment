@@ -18,6 +18,9 @@ from typing import Optional
 from isa.instruction import Instruction
 from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS
 
+# Set to False to disable the one-step priority lookahead in greedy_pair.
+PAIR_LOOKAHEAD = True
+
 # Re-export PairingRule so callers that imported it from here still work.
 from scheduler.rules import PairingRule  # noqa: F401
 
@@ -168,7 +171,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                     _b, rule = matches[0]
                     # Lookahead: if our match is low-priority, check whether
                     # curr + next would form a high-priority pair instead.
-                    if rule.priority == 0 and i + 1 < n:
+                    if PAIR_LOOKAHEAD and rule.priority == 0 and i + 1 < n:
                         nxt = insns[i + 1]
                         nxt_matches = find_b_partners(curr, [nxt])
                         if nxt_matches and nxt_matches[0][1].priority > 0:

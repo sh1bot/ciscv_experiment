@@ -108,6 +108,10 @@ def main():
                         help="Forward-scan only, no reordering")
     parser.add_argument("--thorough", action="store_true",
                         help="BnB reordering within windows")
+    parser.add_argument("--overlap", type=int, default=None, metavar="N",
+                        help="BnB window overlap (instructions carried between windows, default 0)")
+    parser.add_argument("--no-pair-lookahead", action="store_true",
+                        help="Disable priority lookahead in greedy pairing pass")
     parser.add_argument("--same-base-reorder", action="store_true",
                         help="Relax memory ordering between independent same-base loads/stores")
     parser.add_argument("--annotate-liveness", action="store_true",
@@ -123,6 +127,13 @@ def main():
         mode = ScheduleMode.FORWARD
     else:
         mode = ScheduleMode.LIST
+
+    import scheduler.reorder as _reorder
+    import scheduler.pairing as _pairing
+    if args.overlap is not None:
+        _reorder.WINDOW_OVERLAP = args.overlap
+    if args.no_pair_lookahead:
+        _pairing.PAIR_LOOKAHEAD = False
 
     with open(args.input) as f:
         source = f.read()
