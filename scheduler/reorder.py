@@ -15,6 +15,7 @@ from analysis.cfg import BasicBlock
 from analysis.depgraph import DepGraph, build_dep_graph
 from analysis.liveness import compute_local_liveness
 from scheduler.pairing import can_pair, greedy_pair, find_b_partners
+from scheduler.rules import ALL_BRANCH_MN
 from isa.instruction import Instruction
 
 
@@ -28,7 +29,7 @@ WINDOW_SIZE   = 16
 WINDOW_OVERLAP = 0       # instructions carried from end of one window into the next
 NODE_BUDGET  = 50_000
 STAGNATION   = 5_000
-STALL_FOR_PAIR = False   # defer instructions whose pairable dep successor isn't ready yet
+STALL_FOR_PAIR = True    # defer instructions whose pairable branch successor isn't ready yet
 
 
 def schedule(block: BasicBlock, graph: Optional[DepGraph], mode: ScheduleMode) -> list:
@@ -145,11 +146,14 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
         b_candidates = [insns[j] for j in ready_set if insns[j].b_slot_ok and j != i]
         if find_b_partners(insn, b_candidates):
             return False
-        # Check direct dep-graph successors only.
+        # Only stall for branch successors — stalling for other consumers
+        # (loads, stores) is counterproductive.
         for j in graph.edges[i]:
-            if j not in ready_set and not emitted[j] and insns[j].b_slot_ok:
-                if find_b_partners(insn, [insns[j]]):
-                    return True
+            if (j not in ready_set and not emitted[j]
+                    and insns[j].mnemonic in ALL_BRANCH_MN
+                    and insns[j].b_slot_ok
+                    and find_b_partners(insn, [insns[j]])):
+                return True
         return False
 
     def _pick_best_from_ready() -> int:

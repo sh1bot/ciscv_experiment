@@ -169,6 +169,7 @@ _SP_LOAD_MN  = frozenset({"lw", "lwu", "ld"})
 _SP_STORE_MN = frozenset({"sw", "sd"})
 _ALL_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 _ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})
+ALL_BRANCH_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu", "beqz", "bnez"})
 
 
 def _sp_mem_diagnose(rule_name: str, insn: Instruction) -> Optional[str]:

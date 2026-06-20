@@ -110,8 +110,8 @@ def main():
                         help="BnB reordering within windows")
     parser.add_argument("--overlap", type=int, default=None, metavar="N",
                         help="BnB window overlap (instructions carried between windows, default 0)")
-    parser.add_argument("--stall-for-pair", action="store_true",
-                        help="Defer instructions whose pairable dep successor isn't ready yet")
+    parser.add_argument("--no-stall-for-pair", action="store_true",
+                        help="Disable branch-stall heuristic in list scheduler")
     parser.add_argument("--same-base-reorder", action="store_true",
                         help="Relax memory ordering between independent same-base loads/stores")
     parser.add_argument("--annotate-liveness", action="store_true",
@@ -131,8 +131,8 @@ def main():
     import scheduler.reorder as _reorder
     if args.overlap is not None:
         _reorder.WINDOW_OVERLAP = args.overlap
-    if args.stall_for_pair:
-        _reorder.STALL_FOR_PAIR = True
+    if args.no_stall_for_pair:
+        _reorder.STALL_FOR_PAIR = False
 
     with open(args.input) as f:
         source = f.read()
