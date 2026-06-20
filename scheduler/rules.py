@@ -392,6 +392,54 @@ def _mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# arith-mem-pair
+# ---------------------------------------------------------------------------
+# Independent RSD arithmetic op (A) paired with a small-offset memory op (B).
+# No producer-consumer relationship required — they share no operands.
+# The dep graph prevents scheduling A before B when a true dependency exists.
+#
+# A slot: add/sub/and/or/addi  rd, rd, rs2_or_imm
+#         rd and rs1 in x0..x15; addi imm in -64..63
+# B slot: any load or store with non-negative offset aligned to access width
+#         and fitting a 2-bit scaled field (0, 1×w, 2×w, 3×w)
+
+_ARITH_MEM_A_MN = frozenset({"add", "sub", "and", "or", "addi"})
+_ARITH_MEM_B_MN = _MEM_PAIR_MN
+
+
+def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
+    """B-slot: non-negative offset, aligned, fits 2-bit scaled field (0..3×width)."""
+    mem = insn.mem if hasattr(insn, 'mem') else None
+    # use imm as offset for loads/stores
+    off = insn.imm
+    if off is None or off < 0:
+        return False
+    width = insn.access_width
+    if not width:
+        return False
+    return off % width == 0 and off <= 3 * width
+
+
+def _arith_mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """RSD arith (x0..x15, small imm) paired with small-offset mem op."""
+    if not a.is_rsd:
+        return "arith-mem-pair: A not RSD form"
+    if a.rd not in _RSD_ALU_REGS:
+        return f"arith-mem-pair: A rd (x{a.rd}) not in x0..x15"
+    if a.rs1 is not None and a.rs1 not in _RSD_ALU_REGS:
+        return f"arith-mem-pair: A rs1 (x{a.rs1}) not in x0..x15"
+    if a.mnemonic == "addi":
+        if not a.imm_fits(7):
+            return f"arith-mem-pair: addi immediate {a.imm} out of -64..63"
+    if not _arith_mem_small_offset_ok(b):
+        return f"arith-mem-pair: B offset not in 2-bit scaled range (0..3×width)"
+    # A must not feed B (dep graph handles true deps, but catch it here too)
+    if a.rd is not None and a.rd in b.uses_regs:
+        return f"arith-mem-pair: A result (x{a.rd}) feeds B"
+    return None
+
+
 _DUAL_TUPLES: dict = {
     # arith2 — sum/difference, min/max, mul hi/lo, div/rem (+ unsigned, word)
     ("add", "sub"):       "arith2",
@@ -807,6 +855,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_MEM_PAIR_MN,
         b_mnemonic_set=_MEM_PAIR_MN,
         check=_mem_pair,
+    ),
+    PairingRule(
+        name="arith-mem-pair",
+        a_mnemonic_set=_ARITH_MEM_A_MN,
+        b_mnemonic_set=_ARITH_MEM_B_MN,
+        a_prerequisites=["is_rsd"],
+        check=_arith_mem_pair,
     ),
     PairingRule(
         name="dual-op-pair",
