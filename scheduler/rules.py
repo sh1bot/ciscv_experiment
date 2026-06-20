@@ -102,15 +102,17 @@ def _rsd_alu_diagnose(insn: Instruction) -> Optional[str]:
     reason = _alu_diagnose_regs_imm("rsd-alu-pair", insn)
     if reason:
         return reason
+    if insn.is_li:
+        return None   # li form (addi rd, x0, imm) is always acceptable
     if not insn.is_rsd:
-        return "rsd-alu-pair: not RSD form"
+        return "rsd-alu-pair: not RSD or li form"
     if insn.rd != insn.rs1 and not insn.is_commutative:
         return "rsd-alu-pair: rd==rs2 but not commutative"
     return None
 
 
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """Both instructions RSD form, x0..x15, immediates nonzero -64..64."""
+    """Both instructions RSD or li form, x0..x15, immediates in range."""
     for insn in (a, b):
         r = _rsd_alu_diagnose(insn)
         if r:
@@ -795,8 +797,6 @@ RULES: list[PairingRule] = [
         name="rsd-alu-pair",
         a_mnemonic_set=_RSD_ALU_MN,
         b_mnemonic_set=_RSD_ALU_MN,
-        a_prerequisites=["is_rsd"],
-        b_prerequisites=["is_rsd"],
         check=_rsd_alu_pair,
         diagnose_a=_rsd_alu_diagnose,
         diagnose_b=_rsd_alu_diagnose,
