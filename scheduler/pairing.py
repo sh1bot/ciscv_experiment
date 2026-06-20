@@ -132,11 +132,19 @@ def greedy_pair(instructions: list[Instruction]) -> list:
 
     Returns a list of items, each either:
       ('solo', insn) or ('pair', insn_a, insn_b, rule_name)
+
+    One-step lookahead: if (free, curr) would pair via a low-priority rule
+    but (curr, next) would pair via a high-priority rule, decline the
+    low-priority match so curr stays free to claim the high-priority pair.
     """
     result = []
     free = None
+    insns = list(instructions)
+    n = len(insns)
+    i = 0
 
-    for curr in instructions:
+    while i < n:
+        curr = insns[i]
         if free is not None:
             if not free.a_slot_ok:
                 for prop in A_SLOT_DISQUALIFIERS:
@@ -145,6 +153,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                         break
                 result.append(('solo', free))
                 free = curr
+                i += 1
             elif not curr.b_slot_ok:
                 for prop in B_SLOT_DISQUALIFIERS:
                     if getattr(curr, prop):
@@ -152,12 +161,25 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                         break
                 result.append(('solo', free))
                 free = curr
+                i += 1
             else:
                 matches = find_b_partners(free, [curr])
                 if matches:
                     _b, rule = matches[0]
+                    # Lookahead: if our match is low-priority, check whether
+                    # curr + next would form a high-priority pair instead.
+                    if rule.priority == 0 and i + 1 < n:
+                        nxt = insns[i + 1]
+                        nxt_matches = find_b_partners(curr, [nxt])
+                        if nxt_matches and nxt_matches[0][1].priority > 0:
+                            # Defer: emit free as solo, let curr pair with next.
+                            result.append(('solo', free))
+                            free = curr
+                            i += 1
+                            continue
                     result.append(('pair', free, curr, rule.name))
                     free = None
+                    i += 1
                 else:
                     # Annotate curr only when free had eligible rules.
                     # For each such rule report why curr failed it: failed
@@ -177,8 +199,10 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                                 curr.solo_reasons.add(reason)
                     result.append(('solo', free))
                     free = curr
+                    i += 1
         else:
             free = curr
+            i += 1
 
     if free is not None:
         result.append(('solo', free))

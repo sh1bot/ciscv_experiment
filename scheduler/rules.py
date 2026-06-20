@@ -40,6 +40,11 @@ class PairingRule:
     diagnose_a: Optional[Callable] = None
     diagnose_b: Optional[Callable] = None
 
+    # High-priority rules are preferred over low-priority ones in lookahead:
+    # a low-priority match (free, curr) is declined if (curr, next) would form
+    # a high-priority pair.
+    priority: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -351,6 +356,35 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # write one of the shared source registers (a WAR that resolves correctly
 # because B executes second); the reverse order may not.
 
+_MEM_PAIR_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld",
+                          "sb", "sh", "sw", "sd"})
+
+
+def _mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
+    if a.mnemonic != b.mnemonic:
+        return f"mem-pair: mnemonic mismatch ({a.mnemonic} vs {b.mnemonic})"
+    if a.rs1 is None or b.rs1 is None or a.rs1 != b.rs1:
+        return f"mem-pair: base registers differ"
+    if a.imm is None or b.imm is None:
+        return "mem-pair: missing memory offset"
+    width = a.access_width or (1 << (a.access_shift or 0))
+    if abs(a.imm - b.imm) != width:
+        return f"mem-pair: offsets must differ by exactly {width}"
+    shift = a.access_shift or 0
+    imm_bits = 8 if a.is_local else 5
+    for insn in (a, b):
+        if not insn.uimm_fits(imm_bits, shift):
+            max_off = ((1 << imm_bits) - 1) << shift
+            return f"mem-pair: offset {insn.imm} exceeds {imm_bits}-bit scaled range (max {max_off})"
+    if a.writes_memory:
+        return None  # stores: no further constraint
+    # loads: destinations must differ
+    if a.rd is not None and a.rd == b.rd:
+        return "mem-pair: same destination register"
+    return None
+
+
 _DUAL_TUPLES: dict = {
     # arith2 — sum/difference, min/max, mul hi/lo, div/rem (+ unsigned, word)
     ("add", "sub"):       "arith2",
@@ -378,13 +412,7 @@ _DUAL_TUPLES: dict = {
     # store + shNadd — zero store offset
     ("sd",  "sh3add"):    "store_shadd",
     ("sw",  "sh2add"):    "store_shadd",
-    # consecutive same-width loads — same base, offsets differ by exactly data width
-    ("ld",  "ld"):        "mem_pair",
-    ("lw",  "lw"):        "mem_pair",
-    ("lwu", "lwu"):       "mem_pair",
-    # consecutive same-width stores — same base, offsets differ by exactly data width
-    ("sd",  "sd"):        "mem_pair",
-    ("sw",  "sw"):        "mem_pair",
+    # (adjacent load/store pairs are handled by the dedicated mem-pair rule)
     # independent single-output pairs — no shared operands required
     # ("addi", "addi") is overloaded: it covers three pseudo-ops (li, mv,
     # addi4spn) giving 6 order-insensitive combinations: li+li, mv+mv,
@@ -736,6 +764,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_CHAIN_LOAD_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
         check=_base_chain_load_pair,
+    ),
+    PairingRule(
+        name="mem-pair",
+        a_mnemonic_set=_MEM_PAIR_MN,
+        b_mnemonic_set=_MEM_PAIR_MN,
+        check=_mem_pair,
+        priority=1,
     ),
     PairingRule(
         name="dual-op-pair",
