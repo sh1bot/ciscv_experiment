@@ -40,10 +40,6 @@ class PairingRule:
     diagnose_a: Optional[Callable] = None
     diagnose_b: Optional[Callable] = None
 
-    # High-priority rules are preferred over low-priority ones in lookahead:
-    # a low-priority match (free, curr) is declined if (curr, next) would form
-    # a high-priority pair.
-    priority: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -770,7 +766,6 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_MEM_PAIR_MN,
         b_mnemonic_set=_MEM_PAIR_MN,
         check=_mem_pair,
-        priority=1,
     ),
     PairingRule(
         name="dual-op-pair",
