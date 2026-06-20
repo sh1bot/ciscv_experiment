@@ -28,6 +28,7 @@ WINDOW_SIZE   = 16
 WINDOW_OVERLAP = 0       # instructions carried from end of one window into the next
 NODE_BUDGET  = 50_000
 STAGNATION   = 5_000
+STALL_FOR_PAIR = False   # defer instructions whose pairable dep successor isn't ready yet
 
 
 def schedule(block: BasicBlock, graph: Optional[DepGraph], mode: ScheduleMode) -> list:
@@ -107,8 +108,9 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
     result: list = []
     free: Optional[Instruction] = None   # held but not yet appended to result
 
-    # ready: sorted list of ready instruction indices
+    # ready: sorted list of ready instruction indices; ready_set mirrors it
     ready: list = []
+    ready_set: set = set()
 
     def _unblock(idx: int):
         """Decrement successors' in-degrees; add newly-ready to ready."""
@@ -116,21 +118,50 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
             in_degree[j] -= 1
             if in_degree[j] == 0 and not emitted[j]:
                 ready.append(j)
+                ready_set.add(j)
 
     def _emit_idx(idx: int) -> Instruction:
         """Mark instruction as emitted, unblock successors."""
         emitted[idx] = True
+        ready_set.discard(idx)
         _unblock(idx)
         return insns[idx]
 
     def _ready_insns():
         return [insns[i] for i in ready]
 
+    def _has_unready_pair_successor(i: int) -> bool:
+        """True if i has an unready pairable dep-graph successor and no ready partner.
+
+        Only fires when the instruction is currently stranded (nothing in the
+        ready queue pairs with it) but has a pairable successor still blocked.
+        Restricts the successor search to instructions that directly depend on
+        i (one hop), avoiding false positives from distant transitive deps.
+        """
+        insn = insns[i]
+        if not insn.a_slot_ok:
+            return False
+        # If there's already a ready b-slot partner, no need to stall.
+        b_candidates = [insns[j] for j in ready_set if insns[j].b_slot_ok and j != i]
+        if find_b_partners(insn, b_candidates):
+            return False
+        # Check direct dep-graph successors only.
+        for j in graph.edges[i]:
+            if j not in ready_set and not emitted[j] and insns[j].b_slot_ok:
+                if find_b_partners(insn, [insns[j]]):
+                    return True
+        return False
+
     def _pick_best_from_ready() -> int:
-        """Pick from ready: fewest pairing partners, then longest crit path."""
+        """Pick from ready: fewest pairing partners, then longest crit path.
+
+        With STALL_FOR_PAIR: deprioritise instructions whose only pairable
+        partner is a dep-graph successor not yet in the ready queue.
+        """
         ready_list = _ready_insns()
         def key(i):
-            return (_count_pairings_in_ready(insns[i], ready_list), -crit[i])
+            stall = STALL_FOR_PAIR and _has_unready_pair_successor(i)
+            return (stall, _count_pairings_in_ready(insns[i], ready_list), -crit[i])
         ready.sort(key=key)
         return ready.pop(0)
 
@@ -167,6 +198,7 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
     for i in range(n):
         if in_degree[i] == 0:
             ready.append(i)
+            ready_set.add(i)
 
     free_idx: Optional[int] = None
 
@@ -183,6 +215,7 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
             if partner_idx is not None:
                 # Tier-1: free=A, partner=B
                 ready.remove(partner_idx)
+                ready_set.discard(partner_idx)
                 result.append(free)
                 result.append(_emit_idx(partner_idx))
                 free = None
@@ -192,6 +225,7 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
                 if partner_idx is not None:
                     # Tier-2: partner=A, free=B
                     ready.remove(partner_idx)
+                    ready_set.discard(partner_idx)
                     result.append(_emit_idx(partner_idx))
                     result.append(free)
                     free = None
