@@ -95,6 +95,59 @@ class TestCompressedExpansion:
             assert not dec(mn, *ops).is_unknown, mn
 
 
+class TestZcbExpansion:
+    """Zcb compressed ops decode to their base forms (capturing the implicit
+    read of rd for the unary ops) and are recognised as RVC-eligible."""
+
+    def test_c_lbu(self):
+        i = dec("c.lbu", "a0", "3(a1)")
+        assert i.mnemonic == "lbu" and i.rd == 10 and i.rs1 == 11 and i.imm == 3
+        assert not i.is_unknown and i.rvc_eligible
+
+    def test_c_sb(self):
+        i = dec("c.sb", "a0", "2(a1)")
+        assert i.mnemonic == "sb" and i.rs2 == 10 and i.rs1 == 11 and i.imm == 2
+        assert not i.is_unknown and i.rvc_eligible
+
+    def test_c_lh(self):
+        i = dec("c.lh", "a0", "2(a1)")
+        assert i.mnemonic == "lh" and i.rd == 10 and i.rs1 == 11 and i.imm == 2
+        assert i.rvc_eligible
+
+    def test_c_mul(self):
+        # c.mul a0, a1  ->  mul a0, a0, a1  (rd doubles as source)
+        i = dec("c.mul", "a0", "a1")
+        assert i.mnemonic == "mul" and i.rd == 10 and i.rs1 == 10 and i.rs2 == 11
+        assert i.is_rsd and not i.is_unknown and i.rvc_eligible
+
+    def test_c_zext_w_captures_read(self):
+        # c.zext.w a0  ->  add.uw a0, a0, zero — must read a0 (rd == rs1)
+        i = dec("c.zext.w", "a0")
+        assert i.mnemonic == "add.uw" and i.rd == 10 and i.rs1 == 10 and i.rs2 == 0
+        assert 10 in i.uses_regs          # the implicit read is captured
+        assert not i.is_unknown and i.rvc_eligible
+
+    def test_c_zext_b(self):
+        i = dec("c.zext.b", "a0")
+        assert i.mnemonic == "andi" and i.rd == 10 and i.rs1 == 10 and i.imm == 255
+        assert i.rvc_eligible
+
+    def test_c_not(self):
+        i = dec("c.not", "a0")
+        assert i.mnemonic == "xori" and i.rd == 10 and i.rs1 == 10 and i.imm == -1
+        assert i.rvc_eligible
+
+    def test_c_sext_b(self):
+        i = dec("c.sext.b", "a0")
+        assert i.mnemonic == "sext.b" and i.rd == 10 and i.rs1 == 10
+        assert i.is_rsd and not i.is_unknown and i.rvc_eligible
+
+    def test_zcb_out_of_range_reg_not_eligible(self):
+        # a6 == x16 is outside the x8..15 compressed window.
+        i = dec("c.mul", "a6", "a7")
+        assert i.mnemonic == "mul" and i.rd == 16 and not i.rvc_eligible
+
+
 class TestUnresolvedImmediate:
     """An immediate that is a relocation/assembler directive parses to
     imm=None + imm_expr=<text>, and must NOT be confused with a concrete zero

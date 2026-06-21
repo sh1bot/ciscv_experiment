@@ -376,6 +376,33 @@ class Instruction:
         if m == "sd" and rs1 == 2 and self.uimm_fits(6, 3):
             return True
 
+        # --- Zcb extension (rd'/rs1'/rs2' in x8..15) ---
+        # c.lbu rd', uimm(rs1') / c.sb rs2', uimm(rs1') — 2-bit byte offset (0..3)
+        if m == "lbu" and self.rd_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(2):
+            return True
+        if m == "sb" and self.rs2_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(2):
+            return True
+        # c.lh/c.lhu rd', uimm(rs1') / c.sh rs2', uimm(rs1') — 1-bit halfword offset (0 or 2)
+        if m in ("lh", "lhu") and self.rd_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(1, 1):
+            return True
+        if m == "sh" and self.rs2_in_rvc_range and self.rs1_in_rvc_range and self.uimm_fits(1, 1):
+            return True
+        # c.mul rd', rs2' — mul rd, rd, rs2
+        if m == "mul" and rd == rs1 and self.rd_in_rvc_range and self.rs2_in_rvc_range:
+            return True
+        # c.zext.b rd' — andi rd, rd, 255
+        if m == "andi" and rd == rs1 and self.rd_in_rvc_range and imm == 255:
+            return True
+        # c.not rd' — xori rd, rd, -1
+        if m == "xori" and rd == rs1 and self.rd_in_rvc_range and imm == -1:
+            return True
+        # c.zext.w rd' — RV64: add.uw rd, rd, x0
+        if m == "add.uw" and rd == rs1 and self.rd_in_rvc_range and rs2 == 0:
+            return True
+        # c.sext.b / c.sext.h / c.zext.h rd' — unary, rd == rs1
+        if m in ("sext.b", "sext.h", "zext.h") and rd == rs1 and self.rd_in_rvc_range:
+            return True
+
         return False
 
     # -----------------------------------------------------------------------

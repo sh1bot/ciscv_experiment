@@ -167,6 +167,19 @@ _C_SP_MEM = {
     "swsp": "sw", "sdsp": "sd", "fswsp": "fsw", "fsdsp": "fsd",
 }
 
+# Zcb extension unary ops: c.op rd'  ->  base rd', rd'(, extra).  rd' is both
+# read and written, so re-inflate to a two-operand RSD form to capture the read.
+# (Zcb loads/stores c.lbu/c.lhu/c.lh/c.sb/c.sh fall through to their base load/
+# store mnemonics verbatim; c.mul is handled by _C_RSD above.)
+_ZCB_UNARY = {
+    "zext.b": ("andi",   ["255"]),   # c.zext.b rd -> andi   rd, rd, 255
+    "not":    ("xori",   ["-1"]),    # c.not    rd -> xori   rd, rd, -1
+    "sext.b": ("sext.b", []),        # c.sext.b rd -> sext.b rd, rd
+    "sext.h": ("sext.h", []),        # c.sext.h rd -> sext.h rd, rd
+    "zext.h": ("zext.h", []),        # c.zext.h rd -> zext.h rd, rd
+    "zext.w": ("add.uw", ["zero"]),  # c.zext.w rd -> add.uw rd, rd, zero (RV64)
+}
+
 
 def _expand_compressed(m: str, ops: list) -> tuple[Optional[str], list]:
     """Expand an explicit RVC mnemonic (c.*) to its canonical base form.
@@ -183,6 +196,9 @@ def _expand_compressed(m: str, ops: list) -> tuple[Optional[str], list]:
     if base in _C_RSD and len(ops) >= 2:
         # c.op rd, x  ->  op rd, rd, x
         return base, [ops[0], ops[0], ops[1]]
+    if base in _ZCB_UNARY and len(ops) >= 1:
+        new_mn, extra = _ZCB_UNARY[base]
+        return new_mn, [ops[0], ops[0]] + extra
     if base == "addi4spn":
         # c.addi4spn rd, sp, imm  ->  addi rd, sp, imm  (operands already explicit)
         return "addi", ops
@@ -196,7 +212,7 @@ def _expand_compressed(m: str, ops: list) -> tuple[Optional[str], list]:
         # c.jalr rs  ->  jalr ra, rs, 0  (1-operand jalr decodes rd=x0, wrong here)
         return "jalr", ["ra", ops[0], "0"]
     # Everything else keeps its operands verbatim: c.mv/c.li/c.lui, c.lw/c.sw/
-    # c.ld/c.sd, c.j, c.jr, c.beqz/c.bnez, c.nop, c.ebreak, ...
+    # c.ld/c.sd, c.j, c.jr, c.beqz/c.bnez, c.nop, c.ebreak, c.lbu/c.sb/...,
     return base, ops
 
 
