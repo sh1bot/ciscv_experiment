@@ -487,7 +487,8 @@ caught by the dependency graph; this rule additionally refuses any pair where
 * **B mnemonics:** `_MEM_PAIR_MN` (any load/store).
 * **`check` (`_arith_mem_pair`):**
   * `a` is RSD; `a.rd` and `a.rs1` in `x0`–`x15`;
-  * if `a` is `addi`, its immediate fits **7-bit signed** (`-64..63`);
+  * if `a` is `addi`, its immediate is in **`[-64, 64]` inclusive, excluding 0**
+    (a zero immediate should be encoded as a move from `x0` instead);
   * `b`'s offset is nonnegative, aligned, and fits a **2-bit scaled** field
     (`0, 1×w, 2×w, 3×w`);
   * `a` must not feed `b` (`a.rd ∉ b.uses_regs`).

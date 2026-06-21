@@ -1,7 +1,10 @@
 """
 Tests for scheduler/pairing.py — pairing rules and can_pair().
 
-Only rsd-alu-pair exists. All other combinations should be rejected.
+Covers the full rule set defined in scheduler/rules.py (rsd-alu-pair,
+chain/load/store-chain, the *-branch rules, mem-pair, arith-mem-pair,
+dual-op-pair, pre-inc-pair, epilogue-pair, ...).  See scheduler/RULES.md
+for the authoritative description of each rule.
 """
 
 import pytest
@@ -52,6 +55,36 @@ def make_beq(rs1, rs2, target="L1"):
 
 def make_call():
     return make_insn("call", branch_target="foo")
+
+
+class TestArithMemImmediate:
+    """arith-mem-pair A-slot addi immediate must be in [-64, 64], excluding 0."""
+
+    def _pair(self, imm):
+        a = make_addi(10, 10, imm)   # addi a0, a0, imm — RSD, x10 in window
+        b = make_lw(11, 12, 0)       # lw a1, 0(a2) — independent, zero offset
+        return can_pair(a, b)
+
+    def test_upper_bound_64_pairs(self):
+        assert self._pair(64) is None
+
+    def test_lower_bound_neg64_pairs(self):
+        assert self._pair(-64) is None
+
+    def test_zero_rejected(self):
+        assert self._pair(0) is not None
+
+    def test_above_range_rejected(self):
+        assert self._pair(65) is not None
+
+    def test_below_range_rejected(self):
+        assert self._pair(-65) is not None
+
+    def test_unresolved_immediate_rejected(self):
+        a = make_addi(10, 10, None)
+        a.imm_expr = "%lo(sym)"
+        b = make_lw(11, 12, 0)
+        assert can_pair(a, b) is not None
 
 
 def make_tail():

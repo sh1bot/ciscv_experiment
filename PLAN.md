@@ -191,6 +191,14 @@ class Instruction:
     live_in:   frozenset[int] = field(default_factory=frozenset)   # indices 0–63
     live_out:  frozenset[int] = field(default_factory=frozenset)
 
+    # Set by the liveness pass: True when this instruction's base register (rs1)
+    # was produced by an auipc with no intervening redefinition — i.e. it is the
+    # load/addi half of an auipc+ PCREL symbol/GOT address materialisation, whose
+    # "offset" is a %pcrel_lo relocation rather than a real displacement.  Rules
+    # that read an offset (the *-branch and chain-load rules) reject such
+    # instructions, since the offset cannot be treated as a packable immediate.
+    base_from_auipc: bool = False
+
     # Populated by the pairing pass (initially empty):
     solo_reasons: set[str] = field(default_factory=set)  # rejection strings from can_pair()
 ```
@@ -881,11 +889,21 @@ non-`None` string constitutes a rejection of that specific encoding.
 
 ### Example rule — RSD ALU pair
 
-The rule currently in `scheduler/rules.py` is a deliberately conservative
-starting point, chosen to establish the mechanics of the rule framework rather
-than to represent the final encoding design.  It serves as a concrete example
-for testing the tooling; the supported mnemonic set and the `rsd` form
-requirement are expected to be revised as the encoding space is explored.
+> **The full, current rule set is documented in
+> [`scheduler/RULES.md`](scheduler/RULES.md), which is authoritative.**  As of
+> writing `scheduler/rules.py` defines sixteen rules (`rsd-alu-pair`,
+> `chain-alu-pair`, the load/store-chain rules, the `*-branch` rules, `mem-pair`,
+> `arith-mem-pair`, `dual-op-pair`, `pre-inc-pair`, `epilogue-pair`, ...), plus
+> the per-slot `diagnose_a`/`diagnose_b` self-diagnosis callbacks.  This section
+> keeps a single, deliberately simplified example purely to illustrate the rule
+> *mechanism*; do not treat its mnemonic set or framing as current.  Refer to
+> RULES.md for what each rule actually accepts and rejects.
+
+The example below is a deliberately conservative starting point, chosen to
+establish the mechanics of the rule framework rather than to represent the
+encoding design.  The real `rsd-alu-pair` accepts a wider mnemonic set and an
+`li` form, and is expressed with mnemonic sets plus a `diagnose` callback rather
+than the inline mnemonic filter shown here — see RULES.md §3.1.
 
 As a worked example, consider pairing two instructions where both have the form
 `{add, sub, and, or, xor, addw, subw} rsd, rs2` — i.e. both are two-register
@@ -1110,22 +1128,33 @@ O(n log n) in queue operations.
 ### Mode 3 — Branch-and-bound (exhaustive)
 
 The BnB finds the topological sort of the block's dependency graph that
-maximises pair count under the greedy-advance model.  Used to establish an upper
-bound on what any reordering strategy can achieve with the current rule set.
+maximises pair count under the greedy-advance model.  It establishes a
+**per-window upper bound** under that pairing model (greedy-advance plus the
+backward-rescue pass of §10) — *not* a true global optimum: long blocks are
+split into windows (below), and the bound is relative to the pairing model in
+use, not to all conceivable reorderings.
 
 ```python
-WINDOW_SIZE   = 16      # blocks longer than this are split into windows
-NODE_BUDGET   = 50_000  # total search nodes before giving up
-STAGNATION    = 5_000   # nodes without improvement before giving up
+WINDOW_SIZE    = 16      # blocks longer than this are split into windows
+WINDOW_OVERLAP = 0       # instructions carried from the tail of one window into
+                         # the next; configurable via --overlap (default 0)
+NODE_BUDGET    = 50_000  # total search nodes before giving up
+STAGNATION     = 5_000   # nodes without improvement before giving up
 ```
 
-Blocks longer than `WINDOW_SIZE` are split into consecutive fixed-size windows,
-each scheduled independently.  Cross-window dependency edges (edges from an
-instruction in window N pointing to one in window N+1) are **not** added to the
-window's sub-graph because they are trivially satisfied: window N is fully emitted
-before window N+1 begins, so any instruction in window N always precedes any
-instruction in window N+1 in the output regardless of intra-window reordering.
-Only intra-window edges are needed in the sub-graph.
+Blocks longer than `WINDOW_SIZE` are split into consecutive windows.  With the
+default `WINDOW_OVERLAP = 0` the windows are disjoint and scheduled
+independently: cross-window dependency edges (from an instruction in window N to
+one in window N+1) are **not** added to the sub-graph because they are trivially
+satisfied — window N is fully emitted before window N+1 begins, so any
+instruction in window N always precedes any instruction in window N+1 regardless
+of intra-window reordering.  Only intra-window edges are needed.
+
+`--overlap N` (sets `WINDOW_OVERLAP`, capped at `WINDOW_SIZE // 2`) instead
+carries the last N instructions of each committed window into the next window and
+re-schedules them there with cross-window context, so a pair that straddles a
+window boundary can still be found.  This trades search cost for boundary
+pairing quality.
 
 **Upper bound:**
 ```python
@@ -1199,8 +1228,8 @@ are reproduced verbatim in the output.  No source line is dropped.
 The comment format is:
 
 ```asm
-    add  a0, a1, a2     # [C]  {packet 7a, rsd-alu-pair}
-    slli t0, t0, 3      # [C]  {packet 7b, rsd-alu-pair}
+    add  a0, a1, a2     # {packet 7a, rsd-alu-pair}
+    slli t0, t0, 3      # {packet 7b, rsd-alu-pair}
     lw   s0, 0(sp)      # [C]  {solo: RAW hazard on t1, not RSD}
     mul  a1, a2, a3     # {solo}
     foo  a0, a1         # [?]  {solo}
@@ -1208,7 +1237,12 @@ The comment format is:
 
 Fields in the comment:
 
-- `[C]` — RVC-eligible (present only when true).  `[?]` for unknown instructions.
+- `[C]` / `[?]` — **emitted only on solo instructions.**  `[C]` flags a solo
+  instruction that *is* RVC-eligible — a signal that we missed packing something
+  that could otherwise have been compressed; `[?]` flags a solo unknown opcode.
+  Paired instructions never carry these markers (a paired instruction was not
+  missed, so the signal would be noise).  The RVC-eligibility *rate* in the
+  statistics is still computed over all instructions, paired and solo.
 - `{packet Na, rule_name}` / `{packet Nb, rule_name}` — paired; `a` is the
   first instruction of the packet, `b` the second.  Packet numbers are
   sequential per output file, starting from 1.  `rule_name` is the name of the
@@ -1242,8 +1276,11 @@ Options:
   --output FILE            Output file (default: stdout)
   --fast                   Forward-scan only, no reordering (fastest; good for
                            iterating on rules)
-  --thorough               BnB reordering within windows (slowest; establishes
-                           upper bound on pairs)
+  --thorough               BnB reordering within windows (slowest; per-window
+                           upper bound under the greedy-advance pairing model)
+  --overlap N              BnB only: instructions carried from the tail of one
+                           window into the next so boundary-straddling pairs can
+                           be found (default 0; capped at WINDOW_SIZE // 2)
   --same-base-reorder      Relax memory ordering between provably-independent
                            same-base loads/stores (opt-in; no effect with --fast)
   --annotate-liveness      Include live-in register sets in comments
@@ -1284,9 +1321,11 @@ fed into the greedy-advance pairing pass differs.
 | (default) | List scheduling + lookahead | Yes | O(n log n) | Normal use |
 | `--thorough` | Branch-and-bound | Yes | Exponential (budgeted) | Measuring rule quality |
 
-`--thorough` pair counts are an upper bound on what any reordering strategy can
-achieve with the current rule set, making it useful for evaluating whether list
-scheduling is leaving significant pairs on the table.
+`--thorough` pair counts are a **per-window upper bound** under the
+greedy-advance (plus backward-rescue) pairing model — not a true global optimum,
+since long blocks are split into windows (§11) and the bound is relative to the
+pairing model rather than to all conceivable reorderings.  It remains useful for
+evaluating whether list scheduling is leaving significant pairs on the table.
 
 ---
 

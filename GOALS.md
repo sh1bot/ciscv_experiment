@@ -60,6 +60,16 @@ comparing rule sets.
 
 ## 2. Reordering: maximising pairing within dataflow constraints
 
+**Packet execution model.**  Within a packet the two instructions execute
+sequentially: the A-slot instruction completes before the B-slot instruction
+begins.  The B-slot may freely read registers the A-slot wrote; a pair behaves
+exactly like the same two instructions unpaired, differing only in code density.
+Consequently, register data-dependencies *within* a pair are never a pairing
+constraint — they are already honoured by sequential execution and by the
+dependency graph, which orders B after A.  Pairing rules therefore express only
+hardware *structural* constraints (which instruction-type and operand-form
+combinations a packet can physically encode), not register compatibility.
+
 To maximise paired packets the scheduler may reorder instructions within a basic
 block, subject to one hard constraint: **the reordered sequence must preserve
 the original dataflow**.  No instruction may be moved to a position where it
@@ -93,8 +103,11 @@ intended use case of fast iteration.
 When an unknown opcode appears the tool annotates it with `[?]` and excludes it
 from pairing.  A best-effort guess at its behaviour is made from its operands:
 instructions with a recognisable memory-addressing operand are treated as memory
-accesses; registers appearing in operand positions are treated as uses.  This
-lets the scheduler move other instructions around an unknown one without being
+accesses; the **first operand is treated as an output** — a write of that
+register, when it names a recognised register — and any **other recognised
+registers** in the operand list are treated as **inputs** (reads).  This follows
+the common RISC-V convention that the destination is the first operand, and lets
+the scheduler move other instructions around an unknown one without being
 completely blind to its effects.  The heuristic is an interim measure — the
 correct response to an unknown opcode is to add it to the decoder.
 
@@ -114,9 +127,12 @@ output is identical for equivalent inputs.
 
 ## 6. Measurement baseline
 
-Pairing rate measurements use the conservative memory ordering default, in which
-every load/store pair is ordered unless explicitly relaxed.  This is the
-reference point against which rule changes are evaluated.
+Pairing rate measurements use the tool's **default invocation** as the baseline:
+**list scheduling** (neither `--fast` nor `--thorough`) with the **conservative
+memory ordering default** (`--same-base-reorder` off), in which every load/store
+pair is ordered unless explicitly relaxed.  This is the reference point against
+which rule changes are evaluated.  (`--fast` reports a lower rate because it does
+no reordering; `--thorough` reports a per-window upper bound — see PLAN §11/§13.)
 
 The RVC-eligibility rate reported alongside the pairing rate serves as a
 ceiling reference: it shows the fraction of instructions that *could* be

@@ -402,7 +402,7 @@ def _mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # The dep graph prevents scheduling A before B when a true dependency exists.
 #
 # A slot: add/sub/and/or/addi  rd, rd, rs2_or_imm
-#         rd and rs1 in x0..x15; addi imm in -64..63
+#         rd and rs1 in x0..x15; addi imm in -64..64 inclusive, excluding 0
 # B slot: any load or store with non-negative offset aligned to access width
 #         and fitting a 2-bit scaled field (0, 1×w, 2×w, 3×w)
 
@@ -432,8 +432,11 @@ def _arith_mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
     if a.rs1 is not None and a.rs1 not in _RSD_ALU_REGS:
         return f"arith-mem-pair: A rs1 (x{a.rs1}) not in x0..x15"
     if a.mnemonic == "addi":
-        if not a.imm_fits(7):
-            return f"arith-mem-pair: addi immediate {a.imm} out of -64..63"
+        # Immediate field is [-64, 64] inclusive, excluding 0 (encode a zero
+        # immediate as a move from x0 instead).
+        if a.imm is None or a.imm == 0 or not (-64 <= a.imm <= 64):
+            return (f"arith-mem-pair: addi immediate {a.imm} not in "
+                    f"-64..64 nonzero (use x0 for zero)")
     if not _arith_mem_small_offset_ok(b):
         return f"arith-mem-pair: B offset not in 2-bit scaled range (0..3×width)"
     # A must not feed B (dep graph handles true deps, but catch it here too)
