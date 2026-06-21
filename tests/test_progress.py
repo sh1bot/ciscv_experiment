@@ -47,3 +47,31 @@ class TestRenderProgress:
         rv_main._render_progress(0, 0, start=time.monotonic())
         err = capsys.readouterr().err
         assert "100.0%" in err
+
+
+class TestProcessChunkProgress:
+    """_process_chunk reports its weight in per-block increments through a queue
+    so the parent bar advances within a chunk, not only when the chunk ends."""
+
+    def test_reports_per_block_weight(self):
+        import queue
+        chunk = (
+            "\t.text\n"
+            "\t.type f, @function\n"
+            "f:\n\taddi a0, a0, 1\n\tret\n"
+            "\t.type g, @function\n"
+            "g:\n\taddi a1, a1, 2\n\tret\n"
+        )
+        q = queue.Queue()
+        rv_main._process_chunk(chunk, False, rv_main.ScheduleMode.LIST, q, len(chunk))
+        increments = []
+        while not q.empty():
+            increments.append(q.get())
+        assert len(increments) == 2                       # one per non-empty block
+        assert abs(sum(increments) - len(chunk)) < 1e-6   # increments sum to weight
+
+    def test_no_queue_is_noop(self):
+        # Backwards-compatible: omitting the queue must still work.
+        chunk = "\t.type f, @function\nf:\n\taddi a0, a0, 1\n\tret\n"
+        out = rv_main._process_chunk(chunk, False, rv_main.ScheduleMode.LIST)
+        assert out and out[0][0] == "f"

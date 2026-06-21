@@ -1311,12 +1311,18 @@ annotation.
 When the annotated output is going to a file rather than the interactive
 terminal — either `--output FILE` is given or stdout is redirected
 (`not sys.stdout.isatty()`) — the driver draws a single-line progress bar with
-elapsed time and ETA on **stderr**, updated as each chunk's future completes in
-the `as_completed` loop.  Progress is weighted by chunk size (not chunk count),
-since chunks vary widely, so the bar and ETA track real work.  The bar is drawn
-only when stderr is itself a TTY, so a redirected stderr log is never polluted
-with carriage-return noise.  Because progress is reported at chunk granularity,
-a file consisting of one very large function shows no intermediate movement.
+elapsed time and ETA on **stderr**.  The bar is drawn only when stderr is itself
+a TTY, so a redirected stderr log is never polluted with carriage-return noise.
+
+Progress is weighted by chunk size (not chunk count), since chunks vary widely,
+so the bar and ETA track real work.  To keep the bar moving *within* a chunk
+rather than jumping only when a whole function finishes, each worker reports its
+chunk's weight back to the parent in **per-basic-block increments** through a
+`multiprocessing.Manager` queue; the parent drains that queue on a short polling
+timeout (`wait(..., timeout=0.1)`) while collecting futures, so the bar advances
+continuously even while a long chunk is mid-flight.  (A single basic block is
+the atomic unit — a function that is one enormous straight-line block shows no
+sub-block movement.)
 
 This design provides near-linear scaling for BnB mode (3× on 4 cores on a
 large file) and modest gains for list-scheduling mode, where per-function work

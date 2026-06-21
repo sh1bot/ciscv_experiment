@@ -10,7 +10,7 @@ import argparse
 import re
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 
 from analysis.parser import parse_file
 from analysis.annotator import annotate_output
@@ -91,14 +91,25 @@ def _render_progress(done: float, total: float, start: float, width: int = 30) -
     sys.stderr.flush()
 
 
-def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode) -> list[tuple]:
-    """Parse and schedule one source chunk; return its fn_packets list."""
+def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode,
+                   progress=None, chunk_weight: int = 0) -> list[tuple]:
+    """Parse and schedule one source chunk; return its fn_packets list.
+
+    If `progress` is a queue, the chunk's `chunk_weight` is reported back to the
+    parent in per-basic-block increments as scheduling proceeds, so the parent's
+    progress bar advances within a chunk rather than jumping when the whole
+    chunk (function) finishes."""
     from analysis.liveness import compute_global_liveness, compute_local_liveness
     from analysis.depgraph import build_dep_graph
     from scheduler.reorder import schedule
     from scheduler.pairing import greedy_pair, stamp_slot_eligibility
 
     _blocks, functions = parse_file(chunk)
+
+    # Spread the chunk's weight evenly over its schedulable (non-empty) blocks so
+    # the per-block increments sum back to chunk_weight.
+    n_blocks = sum(1 for fn in functions for b in fn.blocks if b.instructions)
+    per_block = (chunk_weight / n_blocks) if n_blocks else chunk_weight
 
     fn_packets = []
     for fn in functions:
@@ -122,6 +133,8 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode) -> l
             if block.prefix_lines:
                 fn_block_packets.append(('block_prefix', block.prefix_lines))
             fn_block_packets.extend(greedy_pair(ordered))
+            if progress is not None:
+                progress.put(per_block)
 
         fn_packets.append((fn_name, fn_block_packets))
 
@@ -184,24 +197,55 @@ def main():
     total_weight = sum(len(c) for c in chunks) or 1
     done_weight = 0
     start = time.monotonic()
+
+    # When showing progress, workers report per-block weight through a shared
+    # queue so the bar advances continuously rather than only at chunk
+    # completion.  The manager (and queue) are created only when needed.
+    progress_q = None
+    manager = None
     if show_progress:
+        import multiprocessing
+        manager = multiprocessing.Manager()
+        progress_q = manager.Queue()
         _render_progress(0, total_weight, start)
+
+    def _drain_progress():
+        nonlocal done_weight
+        if progress_q is None:
+            return
+        import queue as _queue
+        while True:
+            try:
+                done_weight += progress_q.get_nowait()
+            except _queue.Empty:
+                break
+        _render_progress(done_weight, total_weight, start)
 
     results: dict[int, list] = {}
     with ProcessPoolExecutor() as executor:
         futures = {
-            executor.submit(_process_chunk, chunk, args.same_base_reorder, mode): orig_idx
+            executor.submit(_process_chunk, chunk, args.same_base_reorder, mode,
+                            progress_q, len(chunk)): orig_idx
             for orig_idx, chunk in indexed
         }
-        for future in as_completed(futures):
-            orig_idx = futures[future]
-            results[orig_idx] = future.result()
-            done_weight += len(chunks[orig_idx])
+        pending = set(futures)
+        while pending:
+            # Poll for completed futures with a short timeout so the progress
+            # queue can be drained between completions (the bar keeps moving
+            # even while a long-running chunk is mid-flight).
+            done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+            for future in done:
+                results[futures[future]] = future.result()
             if show_progress:
-                _render_progress(done_weight, total_weight, start)
+                _drain_progress()
+
     if show_progress:
+        _drain_progress()
+        _render_progress(total_weight, total_weight, start)  # force a clean 100%
         sys.stderr.write("\n")
         sys.stderr.flush()
+    if manager is not None:
+        manager.shutdown()
 
     fn_packets = []
     for i in range(len(chunks)):
