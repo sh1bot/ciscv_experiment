@@ -130,9 +130,12 @@ class TestRsdAluPair:
         assert can_pair(a, b) is not None
 
     def test_unsupported_mnemonic_does_not_pair(self):
-        """slli is not in the rsd-alu supported set — even rsd-form should not pair."""
-        a = make_insn("slli", rd=10, rs1=10, imm=1)   # is_rsd: rd==rs1
-        b = make_insn("slli", rd=12, rs1=12, imm=2)
+        """A mnemonic in no rule's supported set must not pair, even in rsd-form.
+
+        sll/srl/sra (register-register shifts) are unsupported; only the
+        shift-immediate forms slli/srli/srai are in rsd-alu-pair's set."""
+        a = make_insn("sll", rd=10, rs1=10, rs2=11)   # is_rsd: rd==rs1
+        b = make_insn("sll", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_pair_returns_none_for_valid(self):
@@ -627,10 +630,14 @@ class TestPreIncPair:
         assert can_pair(a, b) is not None
 
     def test_addi_ld_b_reads_wrong_reg_no_pair(self):
-        """B rs1 does not match A's rd."""
+        """B's rs1 does not match A's rd, so they cannot form a *pre-inc* pair.
+
+        (They may still pair as an independent arith-mem pair — that is correct
+        and not what this test is about, so assert against the rule directly.)"""
         a = make_insn("addi", rd=12, rs1=12, imm=8)
-        b = make_insn("ld", rd=10, rs1=14, imm=0)     # loads from a3, not a1
-        assert can_pair(a, b) is not None
+        b = make_insn("ld", rd=10, rs1=14, imm=0)     # loads from a4, not a2
+        pre_inc = next(r for r in RULES if r.name == "pre-inc-pair")
+        assert pre_inc.check(a, b) is not None
 
     def test_addi_ld_nonzero_offset_no_pair(self):
         """B memory offset must be zero."""
@@ -763,8 +770,8 @@ class TestSoloReasons:
         a = make_add(10, 11, 12)   # not rsd-form
         b = make_add(13, 14, 15)
         stamp_solo_reasons([a, b])
-        assert any("not RSD form" in r for r in a.solo_reasons)
-        assert any("not RSD form" in r for r in b.solo_reasons)
+        assert any("rsd-alu-pair" in r and "not RSD" in r for r in a.solo_reasons)
+        assert any("rsd-alu-pair" in r and "not RSD" in r for r in b.solo_reasons)
 
     def test_greedy_annotates_b_with_pair_specific_reason(self):
         """When A is eligible but pair fails, B gets the pair-specific reason."""
