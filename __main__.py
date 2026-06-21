@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from analysis.parser import parse_file
@@ -59,6 +60,35 @@ def _split_source(source: str) -> list[str]:
         prev = cut
     chunks.append("".join(lines[prev:]))
     return chunks
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Render a short human duration: '12.3s', '1m23s', '1h02m'."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    if seconds < 3600:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s"
+    h, rem = divmod(int(seconds), 3600)
+    return f"{h}h{rem // 60:02d}m"
+
+
+def _render_progress(done: float, total: float, start: float, width: int = 30) -> None:
+    """Draw a one-line progress bar with ETA on stderr, overwritten in place.
+
+    `done`/`total` are work weights (chunk sizes), not counts, so the bar tracks
+    actual progress even though chunks vary widely in size.  The ETA is a linear
+    extrapolation from the fraction completed so far."""
+    frac = min(max((done / total) if total else 1.0, 0.0), 1.0)
+    elapsed = time.monotonic() - start
+    eta = (elapsed * (1.0 - frac) / frac) if frac > 0 else 0.0
+    filled = int(width * frac)
+    bar = "#" * filled + "-" * (width - filled)
+    sys.stderr.write(
+        f"\r[{bar}] {frac * 100:5.1f}%  elapsed {_fmt_duration(elapsed)}"
+        f"  ETA {_fmt_duration(eta)}   "
+    )
+    sys.stderr.flush()
 
 
 def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode) -> list[tuple]:
@@ -137,10 +167,25 @@ def main():
     with open(args.input) as f:
         source = f.read()
 
+    # Show a progress bar on stderr when the annotated output is going to a file
+    # rather than the interactive terminal (so the user has nothing to watch
+    # scroll by).  Only animate when stderr itself is a TTY, to avoid writing
+    # carriage-return noise into a redirected stderr log.
+    output_is_file = args.output is not None or not sys.stdout.isatty()
+    show_progress = output_is_file and sys.stderr.isatty()
+
     chunks = _split_source(source)
 
     # Sort chunks largest-first so the heaviest work starts immediately.
     indexed = sorted(enumerate(chunks), key=lambda t: -len(t[1]))
+
+    # Progress is weighted by chunk size, not chunk count, since chunks vary
+    # widely; this keeps the bar and ETA representative of real work done.
+    total_weight = sum(len(c) for c in chunks) or 1
+    done_weight = 0
+    start = time.monotonic()
+    if show_progress:
+        _render_progress(0, total_weight, start)
 
     results: dict[int, list] = {}
     with ProcessPoolExecutor() as executor:
@@ -151,6 +196,12 @@ def main():
         for future in as_completed(futures):
             orig_idx = futures[future]
             results[orig_idx] = future.result()
+            done_weight += len(chunks[orig_idx])
+            if show_progress:
+                _render_progress(done_weight, total_weight, start)
+    if show_progress:
+        sys.stderr.write("\n")
+        sys.stderr.flush()
 
     fn_packets = []
     for i in range(len(chunks)):

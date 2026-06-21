@@ -1306,6 +1306,18 @@ Chunks are sorted by descending size before dispatch so the heaviest functions
 start first.  Results are reassembled in original source order before
 annotation.
 
+### Progress reporting
+
+When the annotated output is going to a file rather than the interactive
+terminal — either `--output FILE` is given or stdout is redirected
+(`not sys.stdout.isatty()`) — the driver draws a single-line progress bar with
+elapsed time and ETA on **stderr**, updated as each chunk's future completes in
+the `as_completed` loop.  Progress is weighted by chunk size (not chunk count),
+since chunks vary widely, so the bar and ETA track real work.  The bar is drawn
+only when stderr is itself a TTY, so a redirected stderr log is never polluted
+with carriage-return noise.  Because progress is reported at chunk granularity,
+a file consisting of one very large function shows no intermediate movement.
+
 This design provides near-linear scaling for BnB mode (3× on 4 cores on a
 large file) and modest gains for list-scheduling mode, where per-function work
 is typically too small to overcome inter-process overhead.
