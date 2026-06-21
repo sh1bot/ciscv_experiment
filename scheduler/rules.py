@@ -311,7 +311,7 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
         return f"deref-chain-load-pair: A offset {a.imm} exceeds 10-bit scaled range (max {max_off})"
     if b.rs1 != a.rd:
         return f"deref-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})"
-    if b.imm not in (0, None):
+    if b.imm != 0:
         return "deref-chain-load-pair: B offset must be zero"
     if b.rd != a.rd and a.rd in b.live_out:
         return f"deref-chain-load-pair: pointer (x{a.rd}) escapes after B"
@@ -324,7 +324,7 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
         return "base-chain-load-pair: A missing base/dest register"
     if a.base_from_auipc:
         return "base-chain-load-pair: A is an auipc+load GOT access (reloc offset)"
-    if a.imm not in (0, None):
+    if a.imm != 0:
         return "base-chain-load-pair: A offset must be zero"
     if b.rs1 != a.rd:
         return f"base-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})"
@@ -502,7 +502,7 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
     if kind == "load_addi":
         if first.rs1 != second.rs1:
             return "dual-op-pair: base register differs from addi source"
-        if first.imm not in (0, None):
+        if first.imm != 0:
             return "dual-op-pair: load offset must be zero"
         if not _width_stride_ok(first, second):
             return (f"dual-op-pair: addi immediate not a nonzero "
@@ -511,7 +511,7 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
     if kind == "store_addi":
         if first.rs1 != second.rs1:
             return "dual-op-pair: base register differs from addi source"
-        if first.imm not in (0, None):
+        if first.imm != 0:
             return "dual-op-pair: store offset must be zero"
         if not _width_stride_ok(first, second):
             return (f"dual-op-pair: addi immediate not a nonzero "
@@ -520,7 +520,7 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
     if kind == "load_shadd":
         if first.rs1 != second.rs1:
             return "dual-op-pair: load base differs from shadd source"
-        if first.imm not in (0, None):
+        if first.imm != 0:
             return "dual-op-pair: load offset must be zero"
         return None
     if kind == "store_shadd":
@@ -528,7 +528,7 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
             return "dual-op-pair: missing register operand"
         if {first.rs1, first.rs2} != {second.rs1, second.rs2}:
             return "dual-op-pair: store regs differ from shadd sources"
-        if first.imm not in (0, None):
+        if first.imm != 0:
             return "dual-op-pair: store offset must be zero"
         return None
     if kind == "mem_pair":
@@ -758,7 +758,7 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> Optional[str]:
         return "pre-inc-pair: A has no destination"
     if b.rs1 != a.rd:
         return f"pre-inc-pair: B rs1 (x{b.rs1}) does not match A result (x{a.rd})"
-    if b.has_mem_operand and b.imm not in (0, None):
+    if b.has_mem_operand and b.imm != 0:
         return "pre-inc-pair: B memory offset must be zero"
     if b.rd is not None and b.rd == a.rd:
         return "pre-inc-pair: A and B write same register"

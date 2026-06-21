@@ -25,6 +25,13 @@ class Instruction:
     rs2:  Optional[int] = None
     rs3:  Optional[int] = None   # FMA etc.
     imm:  Optional[int] = None
+    # Raw immediate text for an operand that is present but cannot be resolved to
+    # a concrete integer at parse time — e.g. a relocation like "%lo(sym)" or
+    # "%pcrel_lo(.L1)".  When this is set, `imm` is None.  This distinguishes an
+    # *unresolved* immediate (imm None, imm_expr set) from an instruction that
+    # has *no* immediate operand at all (both None).  Encoding checks must treat
+    # an unresolved immediate as never-fitting, never zero — see imm_unresolved.
+    imm_expr: Optional[str] = None
     branch_target: Optional[str] = None
     is_unknown:    bool = False
     _has_mem_operand: bool = False  # set by parser for unknown insns with (base-reg) operand
@@ -185,13 +192,23 @@ class Instruction:
 
     @property
     def is_li(self) -> bool:
-        """addi rd, x0, imm — load immediate (rs1 == x0)."""
-        return self.mnemonic == "addi" and self.rs1 == 0
+        """addi rd, x0, imm — load immediate (rs1 == x0) with a concrete value.
+
+        Requires a resolved immediate: an addi with an unresolved relocation
+        immediate (e.g. addi rd, x0, %lo(sym)) is NOT a usable load-immediate
+        for any encoding decision, so it must not be classified as one."""
+        return (self.mnemonic == "addi" and self.rs1 == 0
+                and self.imm is not None)
 
     @property
     def is_mv(self) -> bool:
-        """addi rd, rs1, 0 — register copy (imm == 0)."""
-        return self.mnemonic == "addi" and self.imm in (0, None)
+        """addi rd, rs1, 0 — register copy (concrete zero immediate).
+
+        Only a real zero counts.  An unresolved immediate (imm is None,
+        imm_expr set) must NOT be treated as a move: dropping the relocation
+        would mis-encode the instruction.  `mv` and explicit `addi rd, rs1, 0`
+        both parse to imm == 0, so no legitimate move is lost here."""
+        return self.mnemonic == "addi" and self.imm == 0
 
     @property
     def is_addi4spn(self) -> bool:
@@ -337,7 +354,7 @@ class Instruction:
             return True
         if m == "mv" and rd is not None and rd != 0 and rs1 is not None and rs1 != 0:
             return True
-        if (m == "addi" and imm in (0, None) and rd is not None and rd != 0
+        if (m == "addi" and imm == 0 and rd is not None and rd != 0
                 and rs1 is not None and rs1 != 0):
             return True
         # c.nop — addi x0, x0, 0
@@ -364,6 +381,13 @@ class Instruction:
     # -----------------------------------------------------------------------
     # Immediate helpers
     # -----------------------------------------------------------------------
+
+    @property
+    def imm_unresolved(self) -> bool:
+        """True when an immediate operand is present but could not be resolved to
+        a concrete integer (e.g. a %lo/%pcrel_lo relocation).  Distinct from
+        having no immediate at all (imm is None and imm_expr is None)."""
+        return self.imm is None and self.imm_expr is not None
 
     def imm_multiple(self, shift: int) -> bool:
         """True if self.imm is a non-None multiple of (1 << shift)."""

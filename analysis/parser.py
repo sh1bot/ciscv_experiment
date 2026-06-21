@@ -79,24 +79,45 @@ def _parse_imm(tok: str) -> Optional[int]:
         return None
 
 
-def _parse_mem_operand(tok: str) -> tuple[Optional[int], Optional[int]]:
-    """Parse 'imm(rs1)' → (imm, rs1_index) or (None, None)."""
-    m = re.match(r'^(-?\d+|0x[\da-fA-F]+)\((\w+)\)$', tok.strip())
+def _set_imm(insn: 'Instruction', tok: str) -> None:
+    """Assign an immediate token to insn: a concrete int into `imm`, or the raw
+    text into `imm_expr` when it is present but unresolved (e.g. '%lo(sym)')."""
+    v = _parse_imm(tok)
+    if v is not None:
+        insn.imm = v
+    elif tok.strip().rstrip(","):
+        insn.imm_expr = tok.strip().rstrip(",")
+
+
+def _parse_mem_operand(tok: str) -> tuple[Optional[int], Optional[int], Optional[str]]:
+    """Parse 'offset(rs1)' → (imm, rs1_index, imm_expr).
+
+    `imm` is the integer offset when it parses; otherwise `imm` is None and
+    `imm_expr` carries the raw, unresolved offset text (e.g. '%pcrel_lo(.L1)').
+    `rs1_index` is the base register, or None if the token is not a memory
+    operand at all.  Recovering the base register even when the offset is a
+    relocation lets the dependency/liveness passes still see the base."""
+    tok = tok.strip()
+    m = re.match(r'^(.+)\((\w+)\)$', tok)
     if m:
-        try:
-            imm = int(m.group(1), 0)
-        except ValueError:
-            imm = None
         reg_name = m.group(2).lower()
         rs1 = REG_ALIASES.get(reg_name)
-        return imm, rs1
-    # Also handle 0(reg) style
-    m2 = re.match(r'^\((\w+)\)$', tok.strip())
+        if rs1 is None:
+            return None, None, None  # not a recognised (reg) operand
+        off_txt = m.group(1).strip()
+        imm = _parse_imm(off_txt)
+        if imm is None:
+            return None, rs1, off_txt
+        return imm, rs1, None
+    # Also handle bare (reg) style — implicit zero offset
+    m2 = re.match(r'^\((\w+)\)$', tok)
     if m2:
         reg_name = m2.group(1).lower()
         rs1 = REG_ALIASES.get(reg_name)
-        return 0, rs1
-    return None, None
+        if rs1 is None:
+            return None, None, None
+        return 0, rs1, None
+    return None, None, None
 
 
 def _generic_decode(insn: 'Instruction', ops: list) -> None:
@@ -118,16 +139,23 @@ def _generic_decode(insn: 'Instruction', ops: list) -> None:
                 insn.rs3 = r
             slot += 1
             continue
-        off, r = _parse_mem_operand(op)
+        off, r, expr = _parse_mem_operand(op)
         if r is not None:
             insn.imm = off
+            insn.imm_expr = expr
             insn.rs1 = r
             insn._has_mem_operand = True
             slot = 2  # next reg after a mem operand goes to rs2
             continue
         imm = _parse_imm(op)
-        if imm is not None and insn.imm is None:
-            insn.imm = imm
+        if imm is not None:
+            if insn.imm is None and insn.imm_expr is None:
+                insn.imm = imm
+        elif op.strip().rstrip(","):
+            # A token that is neither register, memory operand, nor literal is an
+            # unresolved immediate (e.g. %lo(sym), %hi(sym)).  Record the first.
+            if insn.imm is None and insn.imm_expr is None:
+                insn.imm_expr = op.strip().rstrip(",")
 
 
 _C_RSD = frozenset({
@@ -210,7 +238,7 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
             insn.mnemonic = "addi"
             insn.rd  = REG_ALIASES.get(ops[0].lower())
             insn.rs1 = 0
-            insn.imm = _parse_imm(ops[1])
+            _set_imm(insn, ops[1])
             return insn
 
         if m == "neg" and len(ops) >= 2:
@@ -309,10 +337,11 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                 imm_rs1 = _parse_mem_operand(ops[1] + "(" + ops[2] + ")")
                 if imm_rs1[1] is not None:
                     insn.imm = imm_rs1[0]
+                    insn.imm_expr = imm_rs1[2]
                     insn.rs1 = imm_rs1[1]
                 else:
                     insn.rs1 = REG_ALIASES.get(ops[1].lower())
-                    insn.imm = _parse_imm(ops[2])
+                    _set_imm(insn, ops[2])
             elif len(ops) == 2:
                 # jalr rd, rs1 or jalr rs1, imm
                 rd_maybe = REG_ALIASES.get(ops[0].lower())
@@ -325,9 +354,10 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                         insn.rd = 0
                         insn.rs1 = imm_r[1]
                         insn.imm = imm_r[0]
+                        insn.imm_expr = imm_r[2]
                     else:
                         insn.rd = rd_maybe; insn.rs1 = rs1_maybe
-                        insn.imm = _parse_imm(ops[1])
+                        _set_imm(insn, ops[1])
             elif len(ops) == 1:
                 # jalr rs1  or  jalr imm(rs1)
                 insn.rd = 0
@@ -335,6 +365,7 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                 if imm_r[1] is not None:
                     insn.rs1 = imm_r[1]
                     insn.imm = imm_r[0]
+                    insn.imm_expr = imm_r[2]
                 else:
                     insn.rs1 = REG_ALIASES.get(ops[0].lower())
                     insn.imm = 0
@@ -344,8 +375,9 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
         if m in _MEMORY_READS:
             if len(ops) >= 2:
                 insn.rd = _parse_reg(ops[0])
-                imm, rs1 = _parse_mem_operand(ops[1])
+                imm, rs1, expr = _parse_mem_operand(ops[1])
                 insn.imm = imm
+                insn.imm_expr = expr
                 insn.rs1 = rs1
             return insn
 
@@ -353,8 +385,9 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
         if m in _MEMORY_WRITES:
             if len(ops) >= 2:
                 insn.rs2 = _parse_reg(ops[0])
-                imm, rs1 = _parse_mem_operand(ops[1])
+                imm, rs1, expr = _parse_mem_operand(ops[1])
                 insn.imm = imm
+                insn.imm_expr = expr
                 insn.rs1 = rs1
             return insn
 

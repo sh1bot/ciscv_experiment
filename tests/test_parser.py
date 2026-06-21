@@ -93,3 +93,55 @@ class TestCompressedExpansion:
                         ("c.swsp", ["ra", "12(sp)"]), ("c.jr", ["ra"]),
                         ("c.beqz", ["a2", ".L"]), ("c.addi4spn", ["s0", "sp", "16"])]:
             assert not dec(mn, *ops).is_unknown, mn
+
+
+class TestUnresolvedImmediate:
+    """An immediate that is a relocation/assembler directive parses to
+    imm=None + imm_expr=<text>, and must NOT be confused with a concrete zero
+    (a register move) or with an instruction that has no immediate at all."""
+
+    def test_addi_reloc_immediate_is_unresolved_not_zero(self):
+        # addi a0, a0, %lo(sym) — low-half of an absolute address materialisation
+        i = dec("addi", "a0", "a0", "%lo(sym)")
+        assert i.mnemonic == "addi" and i.rd == 10 and i.rs1 == 10
+        assert i.imm is None
+        assert i.imm_expr == "%lo(sym)"
+        assert i.imm_unresolved
+        assert not i.is_mv          # must NOT be treated as a register copy
+
+    def test_real_mv_is_concrete_zero(self):
+        i = dec("mv", "a0", "a1")
+        assert i.imm == 0 and i.imm_expr is None
+        assert not i.imm_unresolved
+        assert i.is_mv
+
+    def test_explicit_addi_zero_is_mv(self):
+        i = dec("addi", "a0", "a1", "0")
+        assert i.imm == 0 and i.is_mv and not i.imm_unresolved
+
+    def test_li_reloc_is_not_li(self):
+        # li a0, %lo(sym) — pathological, but must not classify as load-immediate
+        i = dec("li", "a0", "%lo(sym)")
+        assert i.rs1 == 0 and i.imm is None and i.imm_expr == "%lo(sym)"
+        assert not i.is_li
+
+    def test_li_concrete_is_li(self):
+        i = dec("li", "a0", "5")
+        assert i.imm == 5 and i.is_li
+
+    def test_load_reloc_offset_recovers_base_register(self):
+        # lw a0, %pcrel_lo(.L1)(a1) — base register must still be recovered
+        i = dec("lw", "a0", "%pcrel_lo(.L1)(a1)")
+        assert i.mnemonic == "lw" and i.rd == 10 and i.rs1 == 11
+        assert i.imm is None and i.imm_expr == "%pcrel_lo(.L1)"
+        assert i.imm_unresolved
+
+    def test_plain_rtype_has_no_immediate(self):
+        # add has no immediate operand at all: both imm and imm_expr are None
+        i = dec("add", "a0", "a1", "a2")
+        assert i.imm is None and i.imm_expr is None
+        assert not i.imm_unresolved
+
+    def test_numeric_load_offset_still_parses(self):
+        i = dec("lw", "a0", "8(a1)")
+        assert i.imm == 8 and i.imm_expr is None and i.rs1 == 11

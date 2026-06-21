@@ -111,8 +111,11 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                     lines.append(pl)
                 rvc = _rvc_marker(insn)
                 prefix = f"{rvc}  " if rvc else ""
-                if insn.solo_reasons:
-                    reasons_str = ", ".join(sorted(insn.solo_reasons))
+                reasons = set(insn.solo_reasons)
+                if insn.imm_unresolved:
+                    reasons.add(f"unresolved immediate: {insn.imm_expr}")
+                if reasons:
+                    reasons_str = ", ".join(sorted(reasons))
                     comment = f"# {prefix}{{solo: {reasons_str}}}"
                 else:
                     comment = f"# {prefix}{{solo}}"
