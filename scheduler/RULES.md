@@ -165,6 +165,11 @@ Two independent in-place ALU operations packed together.
   * otherwise it must be RSD form. If `rd == rs2` (not `rs1`) the op must be
     **commutative**, because the narrowed encoding writes back to the first
     source slot.
+  * and the two slots must write **distinct destinations** (`a.rd != b.rd`).
+    This rule packs two independent, both-live results; a shared destination
+    means either B consumes A (a chain — handled, more capably, by
+    `chain-alu-pair`, whose shared register need not be in `x0`–`x15`) or A's
+    write is dead. Either way it belongs to a different rule, not here.
 
 **Matches**
 
@@ -185,6 +190,8 @@ sub  a0, a1, a0     ; rd==rs2 and `sub` is NOT commutative → rejected
 addi a0, a0, 100    ; immediate 100 > 64 → out of range
 add  a6, a6, a7     ; a6=x16, a7=x17 → outside x0..x15
 add  a0, a1, a2     ; rd != rs1 and != rs2, not li → not RSD form
+li   a0, 5          ; paired with another `… a0, …` → same destination, rejected
+                    ;   (a real chain belongs to chain-alu-pair)
 ```
 
 ---

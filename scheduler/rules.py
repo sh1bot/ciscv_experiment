@@ -112,11 +112,21 @@ def _rsd_alu_diagnose(insn: Instruction) -> Optional[str]:
 
 
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """Both instructions RSD or li form, x0..x15, immediates in range."""
+    """Both instructions RSD or li form, x0..x15, immediates in range, and the
+    two slots write distinct destination registers.
+
+    Distinct destinations: rsd-alu-pair exists to pack two independent, both-live
+    ALU results.  If a.rd == b.rd then either B consumes A (a producer/consumer
+    chain — handled, more capably, by chain-alu-pair, whose shared register need
+    not be in x0..x15) or B does not (making A's write dead).  Either way this
+    rule should not claim the pair; require distinct destinations.
+    """
     for insn in (a, b):
         r = _rsd_alu_diagnose(insn)
         if r:
             return r
+    if a.rd is not None and a.rd == b.rd:
+        return "rsd-alu-pair: same destination register"
     return None
 
 
