@@ -402,11 +402,15 @@ def _bnb_schedule(insns: list, graph: DepGraph) -> list:
         sub_graph = DepGraph(instructions=window, edges=window_edges)
         ordered = _bnb_single_window(window, sub_graph)
 
-        # Commit everything except the last `overlap` instructions (which become
-        # the carried prefix for the next window), unless this is the final window.
-        if end >= len(insns) or overlap == 0:
+        # The final window is committed whole.  Otherwise, with overlap==0 commit
+        # the whole window and carry nothing; with overlap>0 hold back the last
+        # `overlap` instructions to be re-scheduled (in context) in the next window.
+        if end >= len(insns):
             result.extend(ordered)
             break
+        if overlap == 0:
+            result.extend(ordered)
+            carried = []
         else:
             commit = len(ordered) - overlap
             result.extend(ordered[:commit])

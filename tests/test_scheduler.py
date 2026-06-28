@@ -190,6 +190,19 @@ class TestBNBMode:
         result = schedule(block, graph, ScheduleMode.BNB)
         assert count_pairs(result) == 2
 
+    def test_bnb_preserves_all_instructions_across_windows(self):
+        """Blocks longer than WINDOW_SIZE are scheduled in windows; none may be
+        dropped.  Regression: with the default overlap==0 the window loop used to
+        break after the first window, discarding every later instruction."""
+        from scheduler.reorder import WINDOW_SIZE
+        n = WINDOW_SIZE * 2 + 5            # spans three windows
+        insns = [make_addi(8 + (i % 8), 8 + (i % 8), 1) for i in range(n)]
+        block = make_block(insns)
+        graph = build_dep_graph(block)
+        result = schedule(block, graph, ScheduleMode.BNB)
+        assert len(result) == n
+        assert set(id(i) for i in result) == set(id(i) for i in insns)
+
 
 # ---------------------------------------------------------------------------
 # Dep graph correctness
