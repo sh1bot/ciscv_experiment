@@ -805,6 +805,65 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# arith-jump-pair / mvload-jump-pair
+# ---------------------------------------------------------------------------
+# Pack a productive instruction into the same packet as a trailing unconditional
+# control transfer (the packet's B slot always executes last).  Ported from the
+# legacy scheduler's arith_jump / mv_load_jump rules — its single largest
+# advantage on real code, and offset-independent (unlike its memory rules).
+#
+#   arith-jump-pair:   A = RSD ALU op (or li), x0..x15, imm in range
+#   mvload-jump-pair:  A = mv / li, or a load with a small (0..3×width) offset
+#   B (both):          ret / jr / indirect jalr (imm 0) / direct j / jal x0
+#
+# Calls (which save a link register) are excluded from the B slot.  Direct jumps
+# carry a target offset that is not range-checked here — the same optimism the
+# *-branch rules apply (see CLAUDE.md); returns and register-indirect jumps need
+# no offset field and are always encodable.
+
+_SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
+_MVLOAD_JUMP_A_MN = frozenset({"addi"}) | _ALL_LOAD_MN
+
+
+def _is_small_jump(insn: Instruction) -> bool:
+    """B-slot control transfer: return, register-indirect jump (jr / jalr with
+    zero offset), or direct jump (j / jal x0).  Calls are excluded."""
+    if insn.is_call:
+        return False
+    m = insn.mnemonic
+    if m == "ret":
+        return True
+    if m == "jalr":
+        return insn.imm in (0, None)
+    if m in ("j", "jal"):
+        return insn.rd in (0, None)
+    return False
+
+
+def _arith_jump_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """RSD ALU op (or li) followed by a small unconditional control transfer."""
+    if not _is_small_jump(b):
+        return f"arith-jump-pair: B ({b.mnemonic}) is not a small unconditional jump"
+    r = _rsd_alu_diagnose(a)
+    if r:
+        return "arith-jump-pair" + r[len("rsd-alu-pair"):]
+    return None
+
+
+def _mvload_jump_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """mv / li, or a small-offset load, followed by a small control transfer."""
+    if not _is_small_jump(b):
+        return f"mvload-jump-pair: B ({b.mnemonic}) is not a small unconditional jump"
+    if a.is_mv or a.is_li:
+        return None
+    if a.reads_memory:
+        if not _arith_mem_small_offset_ok(a):
+            return "mvload-jump-pair: load offset not in 2-bit scaled range (0..3×width)"
+        return None
+    return "mvload-jump-pair: A is not mv/li or a small-offset load"
+
+
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
@@ -915,10 +974,25 @@ RULES: list[PairingRule] = [
         b_mnemonic_set=_EPILOGUE_A_MN | _EPILOGUE_B_MN,
         check=_epilogue_pair,
     ),
+    PairingRule(
+        name="arith-jump-pair",
+        a_mnemonic_set=_RSD_ALU_MN,
+        b_mnemonic_set=_SMALL_JUMP_MN,
+        check=_arith_jump_pair,
+    ),
+    PairingRule(
+        name="mvload-jump-pair",
+        a_mnemonic_set=_MVLOAD_JUMP_A_MN,
+        b_mnemonic_set=_SMALL_JUMP_MN,
+        check=_mvload_jump_pair,
+    ),
 ]
 
 A_SLOT_DISQUALIFIERS: list[str] = [
     "is_unknown",
+    # A control transfer can only be the B (last) slot — the hardware runs A
+    # before B, so a transfer in A would never reach B.
+    "is_control_transfer",
 ]
 
 B_SLOT_DISQUALIFIERS: list[str] = [

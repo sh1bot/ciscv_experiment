@@ -86,15 +86,19 @@ If no rule accepts, the instruction goes **solo** (it occupies a packet alone).
 Before any rule runs, two intrinsic filters apply:
 
 ```python
-A_SLOT_DISQUALIFIERS = ["is_unknown"]
+A_SLOT_DISQUALIFIERS = ["is_unknown", "is_control_transfer"]
 B_SLOT_DISQUALIFIERS = ["is_unknown"]
 ```
 
 An instruction with an **unknown opcode** (`is_unknown`) can never occupy either
 slot, so it is always solo. (`is_unknown` is set by the decoder when it cannot
-recognise the mnemonic.) These lists are intentionally short — the design keeps
-*structural* "this instruction is fundamentally unpackable" reasons here, and
-*relational* "this pair doesn't fit" reasons inside the rules.
+recognise the mnemonic.) A **control transfer** (`is_control_transfer` — any
+branch, jump, call, tail, or return) can never occupy the **A** slot: the
+hardware executes A before B, so a transfer in A would never reach B. Control
+transfers are still valid in the B (last) slot — that is exactly where the
+`*-branch` and `*-jump` rules place them. These lists are intentionally short —
+the design keeps *structural* "this instruction can't go in this slot" reasons
+here, and *relational* "this pair doesn't fit" reasons inside the rules.
 
 ### 1.5 The backward branch-rescue pass
 
@@ -767,6 +771,85 @@ ret
 
 ```asm
 addi a0, a0, 16     ; not adjusting sp → "A not addi sp, sp"
+ret                 ;   (but this DOES pair via arith-jump-pair, §3.17)
+```
+
+---
+
+### 3.17 `arith-jump-pair`
+
+Pack a productive RSD ALU op into the same packet as a trailing unconditional
+control transfer — the packet's B slot always executes last, so an ALU result
+computed in A is available before control leaves. Ported from the legacy
+scheduler's `arith_jump`; it is offset-independent and its single biggest win on
+real code (function epilogues, tail jumps).
+
+* **A-slot mnemonics:** `_RSD_ALU_MN` (as `rsd-alu-pair`).
+* **B-slot mnemonics:** `_SMALL_JUMP_MN` = `{ret, jalr, j, jal}`.
+* **`check` (`_arith_jump_pair`):**
+  * `b` is a *small jump* (`_is_small_jump`): `ret`, a register-indirect jump
+    (`jr` / `jalr` with zero offset), or a direct jump (`j` / `jal x0`).
+    **Calls are excluded** (they save a link register).
+  * `a` passes the `rsd-alu` per-slot check (RSD or `li` form, regs `x0`–`x15`,
+    immediate in range).
+* No register relationship between `a` and `b` is required — the dependency
+  graph already orders them; this rule only co-locates.
+
+> Direct jumps (`j`/`jal`) carry a target offset that is **not** range-checked
+> here — the same optimism the `*-branch` rules apply (see `CLAUDE.md`). Returns
+> and register-indirect jumps need no offset field and are always encodable.
+
+**Matches**
+
+```asm
+addi a2, a2, 55     ; RSD ALU, in window
+j    .Lexit         ; direct jump → paired
+```
+```asm
+add  a0, a0, a1     ; compute return value
+ret                 ; return → paired
+```
+
+**Does not match**
+
+```asm
+add  a6, a6, a7     ; a6=x16 outside x0..x15 → A rejected
+ret
+```
+```asm
+mv   a0, a1
+jalr ra, a5, 0      ; a call (saves ra) → not a small jump
+```
+
+---
+
+### 3.18 `mvload-jump-pair`
+
+Same B slot as `arith-jump-pair`, but the A slot is a register move / load
+immediate, or a small-offset load. Ported from the legacy `mv_load_jump`.
+
+* **A-slot mnemonics:** `_MVLOAD_JUMP_A_MN` = `{addi}` ∪ all loads.
+* **B-slot mnemonics:** `_SMALL_JUMP_MN` (as above).
+* **`check` (`_mvload_jump_pair`):**
+  * `b` is a small jump;
+  * `a` is `mv`/`li` (an `addi` form), **or** a load whose offset fits the
+    2-bit scaled field `0..3×width` (aligned, non-negative).
+
+**Matches**
+
+```asm
+mv   a0, a1         ; register move
+ret                 ; → paired
+```
+```asm
+lw   a0, 8(a1)      ; offset 8 = 2×4, in range
+jr   a5            ; → paired
+```
+
+**Does not match**
+
+```asm
+lw   a0, 64(a1)     ; 64 > 3×4 → offset out of range
 ret
 ```
 
@@ -792,6 +875,8 @@ ret
 | `bit-branch-pair` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
 | `pre-inc-pair` | RSD addi/sh2add/add | ld/sd/lw/sw/slt | A→B, alive | B mem offset 0 |
 | `epilogue-pair` | addi sp / ret-jalr | (either order) | — | sp adj uimm7×16; ret rd x0/x1 |
+| `arith-jump-pair` | RSD ALU | ret/jr/j/jalr | independent | A regs x0–x15; calls excluded |
+| `mvload-jump-pair` | mv/li or small-offset load | ret/jr/j/jalr | independent | load offset 0..3×w; calls excluded |
 
 *"Dead" / "alive" describes whether A's result must be unused after the B-slot
 instruction.*

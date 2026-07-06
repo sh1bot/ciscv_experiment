@@ -11,6 +11,7 @@ import pytest
 from isa.instruction import Instruction
 from scheduler.pairing import (
     can_pair, greedy_pair, stamp_slot_eligibility, stamp_solo_reasons, RULES,
+    find_b_partners,
 )
 
 
@@ -55,6 +56,55 @@ def make_beq(rs1, rs2, target="L1"):
 
 def make_call():
     return make_insn("call", branch_target="foo")
+
+
+class TestJumpSlotPairs:
+    """arith-jump-pair / mvload-jump-pair: pack a productive instruction with a
+    trailing unconditional control transfer (ret / jr / j / indirect jalr)."""
+
+    def _ret(self):   return make_insn("jalr", rd=0, rs1=1, imm=0)   # ret
+    def _jr(self):    return make_insn("jalr", rd=0, rs1=15, imm=0)  # jr a5
+    def _j(self):     return make_insn("j", branch_target="L")       # direct jump
+    def _call(self):  return make_insn("jalr", rd=1, rs1=15, imm=0)  # jalr ra,a5,0
+
+    def _rules(self, a, b):
+        return [r.name for _, r in find_b_partners(a, [b])]
+
+    def test_rsd_alu_then_ret(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=8)     # addi a0,a0,8 (RSD)
+        assert "arith-jump-pair" in self._rules(a, self._ret())
+
+    def test_rsd_alu_then_jump(self):
+        a = make_add(10, 10, 11)                        # add a0,a0,a1 (RSD)
+        assert "arith-jump-pair" in self._rules(a, self._j())
+
+    def test_mv_then_ret(self):
+        a = make_insn("addi", rd=10, rs1=11, imm=0)     # mv a0,a1
+        assert "mvload-jump-pair" in self._rules(a, self._ret())
+
+    def test_small_load_then_jr(self):
+        a = make_insn("lw", rd=10, rs1=11, imm=8)       # lw a0,8(a1): 8==2*width
+        assert "mvload-jump-pair" in self._rules(a, self._jr())
+
+    def test_large_offset_load_not_paired(self):
+        a = make_insn("lw", rd=10, rs1=11, imm=64)      # 64 > 3*4
+        assert "mvload-jump-pair" not in self._rules(a, self._ret())
+
+    def test_call_not_a_jump_slot(self):
+        a = make_add(10, 10, 11)
+        assert self._rules(a, self._call()) == []       # calls excluded
+
+    def test_out_of_window_reg_not_paired(self):
+        a = make_add(16, 16, 17)                        # a6=x16 outside x0..15
+        assert "arith-jump-pair" not in self._rules(a, self._ret())
+
+    def test_control_transfer_disqualified_from_a_slot(self):
+        # A jump/return can never be the A (first) slot.
+        stamp_slot_eligibility  # imported at module top
+        j = make_insn("j", branch_target="L")
+        ret = self._ret()
+        assert j.a_slot_ok is False and ret.a_slot_ok is False
+        assert j.b_slot_ok is True and ret.b_slot_ok is True
 
 
 class TestArithMemImmediate:
@@ -523,16 +573,21 @@ class TestIndepPair:
         assert can_pair(a, b) is None
 
     def test_epilogue_non_sp_addi_no_pair(self):
-        """addi to a non-sp register doesn't qualify."""
+        """addi to a non-sp register doesn't qualify as an *epilogue*.
+
+        (It legitimately pairs via arith-jump-pair — compute then return — so
+        assert against the epilogue rule directly, not can_pair overall.)"""
         a = make_insn("addi", rd=10, rs1=10, imm=48)
         b = make_insn("ret",  rd=0, rs1=1, imm=0)
-        assert can_pair(a, b) is not None
+        epi = next(r for r in RULES if r.name == "epilogue-pair")
+        assert epi.check(a, b) is not None
 
     def test_epilogue_negative_sp_no_pair(self):
-        """Negative sp adjustment (prologue) doesn't qualify."""
+        """Negative sp adjustment (prologue) doesn't qualify as an *epilogue*."""
         a = make_insn("addi", rd=2, rs1=2, imm=-48)
         b = make_insn("ret",  rd=0, rs1=1, imm=0)
-        assert can_pair(a, b) is not None
+        epi = next(r for r in RULES if r.name == "epilogue-pair")
+        assert epi.check(a, b) is not None
 
     def test_epilogue_sp_adjust_out_of_range_no_pair(self):
         """sp adjustment beyond 7-bit uimm×16 (>2032) doesn't pair."""

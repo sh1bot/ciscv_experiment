@@ -138,6 +138,15 @@ class Instruction:
                 self.is_csr or self.is_fence or self.is_atomic)
 
     @property
+    def is_control_transfer(self) -> bool:
+        """Any instruction that transfers control: branch, jump, call, tail, or
+        return (including the bare `j` mnemonic, which is_jump does not cover).
+        Such instructions can only occupy the packet's B (last) slot — the
+        hardware executes A before B, so a transfer in A would never reach B."""
+        return (self.is_branch or self.is_jump or self.is_return
+                or self.is_call or self.is_tail or self.mnemonic == "j")
+
+    @property
     def writes_memory(self) -> bool:
         return self.mnemonic in {
             "sb", "sh", "sw", "sd",

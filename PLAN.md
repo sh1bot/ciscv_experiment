@@ -841,7 +841,8 @@ Current contents:
 
 ```python
 A_SLOT_DISQUALIFIERS = [
-    "is_unknown",   # side effects unknown — always disqualified from both slots
+    "is_unknown",           # side effects unknown — disqualified from both slots
+    "is_control_transfer",  # A executes before B; a transfer in A never reaches B
 ]
 
 B_SLOT_DISQUALIFIERS = [
