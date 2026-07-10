@@ -503,9 +503,9 @@ def _is_li_mv_addi4spn(insn: Instruction) -> bool:
     """True for the three addi pseudo-ops that qualify for indep_pair."""
     return insn.is_li or insn.is_mv or insn.is_addi4spn
 
-
-def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optional[str]:
+def _dual_shared_ok(first: Instruction, second: Instruction) -> Optional[str]:
     """Operand-sharing and immediate checks by canonical role (order-independent)."""
+    kind = _DUAL_TUPLES[(first.mnemonic, second.mnemonic)]
     if kind == "arith2":
         if None in (first.rs1, first.rs2, second.rs1, second.rs2):
             return "dual-op-pair: missing register operand"
@@ -583,15 +583,13 @@ def _dual_shared_ok(kind: str, first: Instruction, second: Instruction) -> Optio
 def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Two ops from a canonical tuple sharing inputs and producing distinct outputs."""
     if (a.mnemonic, b.mnemonic) in _DUAL_TUPLES:
-        kind = _DUAL_TUPLES[(a.mnemonic, b.mnemonic)]
         first, second, reversed_order = a, b, False
     elif (b.mnemonic, a.mnemonic) in _DUAL_TUPLES:
-        kind = _DUAL_TUPLES[(b.mnemonic, a.mnemonic)]
         first, second, reversed_order = b, a, True
     else:
         return f"dual-op-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple"
 
-    reason = _dual_shared_ok(kind, first, second)
+    reason = _dual_shared_ok(first, second)
     if reason:
         return reason
 
@@ -782,17 +780,27 @@ _EPILOGUE_A_MN = frozenset({"addi"})
 _EPILOGUE_B_MN = frozenset({"jalr", "ret"})
 
 
+def _prologue_pair(a: Instruction, b: Instruction) -> Optional[str]:
+    """A reserves stack frame, B stores return address at top of frame
+    A: addi sp, sp, -N  - 7-bit uimm*16, nonzero
+    B: sw ra, N-4(sp)  - store return address
+    """
+    if not a.nimm_fits(7, 4, nonzero=True):
+        return "addi out of range"
+    if a.rd != 2 or a.rs1 != 2:
+        return "A not addi sp, sp"
+    if b.rs1 != 1:
+        return "B not sw/sd ra"
+    if b.imm + b.access_width + a.imm != 0:
+        return "B doesn't store at top of frame"
+
+
 def _epilogue_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A restores sp; B is an unconditional return or jump.
 
     A: addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
     B: ret or jalr rd∈{0,1} with 12-bit signed offset
     """
-    # Canonicalise: addi must be A regardless of call order
-    if a.mnemonic in _EPILOGUE_B_MN:
-        a, b = b, a
-    if a.mnemonic not in _EPILOGUE_A_MN or b.mnemonic not in _EPILOGUE_B_MN:
-        return f"epilogue-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple"
     if a.rd != 2 or a.rs1 != 2:
         return "epilogue-pair: A not addi sp, sp"
     if not a.uimm_fits(7, 4, nonzero=True):
@@ -862,7 +870,6 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> Optional[str]:
             return "mvload-jump-pair: load offset not in 2-bit scaled range (0..3×width)"
         return None
     return "mvload-jump-pair: A is not mv/li or a small-offset load"
-
 
 RULES: list[PairingRule] = [
     PairingRule(
@@ -969,9 +976,15 @@ RULES: list[PairingRule] = [
         check=_pre_inc_pair,
     ),
     PairingRule(
+        name="prologue-pair",
+        a_mnemonic_set=frozenset({"addi"}),
+        b_mnemonic_set=frozenset({"sw", "sd"}),
+        check=_prologue_pair,
+    ),
+    PairingRule(
         name="epilogue-pair",
-        a_mnemonic_set=_EPILOGUE_A_MN | _EPILOGUE_B_MN,
-        b_mnemonic_set=_EPILOGUE_A_MN | _EPILOGUE_B_MN,
+        a_mnemonic_set=_EPILOGUE_A_MN,
+        b_mnemonic_set=_EPILOGUE_B_MN,
         check=_epilogue_pair,
     ),
     PairingRule(
