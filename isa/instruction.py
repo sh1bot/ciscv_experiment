@@ -471,3 +471,22 @@ class Instruction:
         if nonzero and v == 0:
             return False
         return True
+
+    def nimm_fits(self, n: int, shift: int = 0, nonzero: bool | str = False) -> bool:
+        """negative range + alignment check.
+
+        nonzero=False   — [-(2**n - 1) << shift, 0]
+        nonzero=True    — [-(2**n-1)<<shift, -1<<shift]  (nzuimm)
+        nonzero='remap' — [-2**n<<shift, -1<<shift]      (zero bit-pattern encodes max+1)
+        """
+        if self.imm is None or not self.imm_multiple(shift):
+            return False
+        v = -self.imm >> shift
+        cap = 1 << n
+        if nonzero == 'remap':
+            return 0 < v <= cap
+        if not (0 <= v < cap):
+            return False
+        if nonzero and v == 0:
+            return False
+        return True
