@@ -567,11 +567,13 @@ class TestIndepPair:
         b = make_insn("jalr", rd=1, rs1=15, imm=0)
         assert can_pair(a, b) is None
 
-    def test_epilogue_reversed_order_pairs(self):
-        """ret before addi sp,sp also pairs (order-insensitive)."""
+    def test_epilogue_reversed_order_no_pair(self):
+        """ret before addi sp,sp must NOT pair: the packet runs A then B, so a
+        control transfer in the A slot would execute first and the addi (B slot)
+        would never run."""
         a = make_insn("ret",  rd=0, rs1=1, imm=0)
         b = make_insn("addi", rd=2, rs1=2, imm=48)
-        assert can_pair(a, b) is None
+        assert can_pair(a, b) is not None
 
     def test_epilogue_non_sp_addi_no_pair(self):
         """addi to a non-sp register doesn't qualify as an *epilogue*.

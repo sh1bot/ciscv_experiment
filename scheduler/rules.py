@@ -937,7 +937,6 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
 
 _EPILOGUE_A_MN = frozenset({"addi"})
 _EPILOGUE_B_MN = frozenset({"jalr", "ret"})
-_EPILOGUE_MN = _EPILOGUE_A_MN | _EPILOGUE_B_MN
 
 
 def _prologue_pair(a: Instruction, b: Instruction) -> None:
@@ -958,27 +957,23 @@ def _prologue_pair(a: Instruction, b: Instruction) -> None:
 
 
 def _epilogue_pair(a: Instruction, b: Instruction) -> None:
-    """Restore the stack pointer and return/tail-jump in one packet.
+    """A restores sp; B is an unconditional return or jump.
 
-    The two instructions may appear in either order; canonicalise so the sp
-    restore (addi) is `adj` and the control transfer (ret/jalr) is `xfer`.
+    Order-sensitive: the packet runs A then B, and B is a control transfer, so
+    the addi must be A (executes first) and the ret/jalr must be B (executes
+    last).  The reverse would run the transfer first and skip the addi, so it is
+    not a valid packet -- is_control_transfer also keeps ret/jalr out of A.
 
-    adj:  addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
-    xfer: ret or jalr rd∈{0,1} with 12-bit signed offset
+    A: addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
+    B: ret or jalr rd∈{0,1} with 12-bit signed offset
     """
-    if a.mnemonic == "addi" and b.mnemonic in _EPILOGUE_B_MN:
-        adj, xfer = a, b
-    elif b.mnemonic == "addi" and a.mnemonic in _EPILOGUE_B_MN:
-        adj, xfer = b, a
-    else:
-        raise NotPair("not addi-sp + ret/jalr")
-    if adj.rd != 2 or adj.rs1 != 2:
+    if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
-    if not adj.uimm_fits(7, 4, nonzero=True):
+    if not a.uimm_fits(7, 4, nonzero=True):
         raise NotPair("A-out-of-range-immediate")
-    if xfer.rd not in (0, 1):
+    if b.rd not in (0, 1):
         raise NotPair("B rd must be x0 or x1")
-    if not xfer.imm_fits(12):
+    if not b.imm_fits(12):
         raise NotPair("B-out-of-range-immediate")
 
 
@@ -1145,8 +1140,8 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="epilogue-pair",
-        a_mnemonic_set=_EPILOGUE_MN,
-        b_mnemonic_set=_EPILOGUE_MN,
+        a_mnemonic_set=_EPILOGUE_A_MN,
+        b_mnemonic_set=_EPILOGUE_B_MN,
         check=_epilogue_pair,
     ),
     PairingRule(

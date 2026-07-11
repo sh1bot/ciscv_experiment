@@ -738,13 +738,15 @@ ld   a2, 0(a0)
 ### 3.16 `epilogue-pair`
 
 Function epilogue: restore the stack pointer and return/tail-jump in one packet.
-The two instructions may appear in either order; the rule canonicalises so the
-`addi` is treated as `a`.
+Order-sensitive: the packet runs A before B and B is a control transfer, so the
+`addi` must be A (executes first) and the `jalr`/`ret` must be B (executes
+last). The reverse would run the transfer first and skip the `addi`;
+`is_control_transfer` also keeps `jalr`/`ret` out of the A slot.
 
-* **A/B mnemonics:** `_EPILOGUE_A_MN | _EPILOGUE_B_MN` = `{addi, jalr, ret}`
-  in *both* slots (order-insensitive).
+* **A mnemonics:** `_EPILOGUE_A_MN` = `{addi}`.
+* **B mnemonics:** `_EPILOGUE_B_MN` = `{jalr, ret}`.
 * **`check` (`_epilogue_pair`):**
-  * exactly one `addi` and one `jalr`/`ret`;
+  * A is the `addi`, B is the `jalr`/`ret`;
   * the `addi` must be `addi sp, sp, +N` with `N` a nonzero **7-bit `uimm×16`**
     (positive multiple of 16, max `127×16 = 2032`);
   * the `jalr`/`ret` must write `x0` or `x1` (a return or a tail call) with a
@@ -874,7 +876,7 @@ ret
 | `addi-branch-pair` | addi/addiw RSD | cmp-branch | A→B, alive | rd x0–x15; imm8 signed |
 | `bit-branch-pair` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
 | `pre-inc-pair` | RSD addi/sh2add/add | ld/sd/lw/sw/slt | A→B, alive | B mem offset 0 |
-| `epilogue-pair` | addi sp / ret-jalr | (either order) | — | sp adj uimm7×16; ret rd x0/x1 |
+| `epilogue-pair` | addi sp / ret-jalr | A→B (addi then transfer) | — | sp adj uimm7×16; ret rd x0/x1 |
 | `arith-jump-pair` | RSD ALU | ret/jr/j/jalr | independent | A regs x0–x15; calls excluded |
 | `mvload-jump-pair` | mv/li or small-offset load | ret/jr/j/jalr | independent | load offset 0..3×w; calls excluded |
 
