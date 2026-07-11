@@ -937,6 +937,7 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
 
 _EPILOGUE_A_MN = frozenset({"addi"})
 _EPILOGUE_B_MN = frozenset({"jalr", "ret"})
+_EPILOGUE_MN = _EPILOGUE_A_MN | _EPILOGUE_B_MN
 
 
 def _prologue_pair(a: Instruction, b: Instruction) -> None:
@@ -957,20 +958,28 @@ def _prologue_pair(a: Instruction, b: Instruction) -> None:
 
 
 def _epilogue_pair(a: Instruction, b: Instruction) -> None:
-    """A restores sp; B is an unconditional return or jump.
+    """Restore the stack pointer and return/tail-jump in one packet.
 
-    A: addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
-    B: ret or jalr rd∈{0,1} with 12-bit signed offset
+    The two instructions may appear in either order; canonicalise so the sp
+    restore (addi) is `adj` and the control transfer (ret/jalr) is `xfer`.
+
+    adj:  addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
+    xfer: ret or jalr rd∈{0,1} with 12-bit signed offset
     """
-    if a.rd != 2 or a.rs1 != 2:
+    if a.mnemonic == "addi" and b.mnemonic in _EPILOGUE_B_MN:
+        adj, xfer = a, b
+    elif b.mnemonic == "addi" and a.mnemonic in _EPILOGUE_B_MN:
+        adj, xfer = b, a
+    else:
+        raise NotPair("not addi-sp + ret/jalr")
+    if adj.rd != 2 or adj.rs1 != 2:
         raise NotPair("A-not-addi-sp")
-    if not a.uimm_fits(7, 4, nonzero=True):
+    if not adj.uimm_fits(7, 4, nonzero=True):
         raise NotPair("A-out-of-range-immediate")
-    if b.rd not in (0, 1):
+    if xfer.rd not in (0, 1):
         raise NotPair("B rd must be x0 or x1")
-    if not b.imm_fits(12):
+    if not xfer.imm_fits(12):
         raise NotPair("B-out-of-range-immediate")
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1136,8 +1145,8 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="epilogue-pair",
-        a_mnemonic_set=_EPILOGUE_A_MN,
-        b_mnemonic_set=_EPILOGUE_B_MN,
+        a_mnemonic_set=_EPILOGUE_MN,
+        b_mnemonic_set=_EPILOGUE_MN,
         check=_epilogue_pair,
     ),
     PairingRule(
