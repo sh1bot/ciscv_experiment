@@ -22,6 +22,20 @@ from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, A
 from scheduler.rules import PairingRule  # noqa: F401
 
 
+def _record_solo_reason(insn: Instruction, reason: str, source: str) -> None:
+    """Record why an instruction went solo as reason -> sources.
+
+    Rule checkers conventionally prefix relational failures with
+    ``"<rule-name>: "``.  Strip that prefix so equivalent failures from
+    multiple rules coalesce under one key while the rule names remain in the
+    value set.
+    """
+    prefix = f"{source}: "
+    if reason.startswith(prefix):
+        reason = reason[len(prefix):]
+    insn.solo_reasons[reason].add(source)
+
+
 def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
     """Precompute a_slot_ok / b_slot_ok on each instruction.
 
@@ -46,20 +60,20 @@ def stamp_solo_reasons(instructions: list[Instruction]) -> None:
             a_ok = rule.a_mnemonic_set is None or insn.mnemonic in rule.a_mnemonic_set
             b_ok = rule.b_mnemonic_set is None or insn.mnemonic in rule.b_mnemonic_set
             if not a_ok and not b_ok:
-                insn.solo_reasons.add(f"{rule.name}: unsupported mnemonic ({insn.mnemonic})")
+                _record_solo_reason(insn, f"unsupported mnemonic ({insn.mnemonic})", rule.name)
                 continue
             if not a_ok:
-                insn.solo_reasons.add(f"{rule.name}: unsupported A-slot mnemonic ({insn.mnemonic})")
+                _record_solo_reason(insn, f"unsupported A-slot mnemonic ({insn.mnemonic})", rule.name)
             elif rule.diagnose_a is not None:
                 reason = rule.diagnose_a(insn)
                 if reason is not None:
-                    insn.solo_reasons.add(reason)
+                    _record_solo_reason(insn, reason, rule.name)
             if not b_ok:
-                insn.solo_reasons.add(f"{rule.name}: unsupported B-slot mnemonic ({insn.mnemonic})")
+                _record_solo_reason(insn, f"unsupported B-slot mnemonic ({insn.mnemonic})", rule.name)
             elif rule.diagnose_b is not None and rule.diagnose_b is not rule.diagnose_a:
                 reason = rule.diagnose_b(insn)
                 if reason is not None:
-                    insn.solo_reasons.add(reason)
+                    _record_solo_reason(insn, reason, rule.name)
 
 
 def _a_eligible_rules(a: Instruction) -> list:
@@ -145,7 +159,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
             if not free.a_slot_ok:
                 for prop in A_SLOT_DISQUALIFIERS:
                     if getattr(free, prop):
-                        free.solo_reasons.add(f"A-slot disqualified: {prop}")
+                        _record_solo_reason(free, prop, "A-slot disqualified")
                         break
                 result.append(('solo', free))
                 free = curr
@@ -153,7 +167,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
             elif not curr.b_slot_ok:
                 for prop in B_SLOT_DISQUALIFIERS:
                     if getattr(curr, prop):
-                        curr.solo_reasons.add(f"B-slot disqualified: {prop}")
+                        _record_solo_reason(curr, prop, "B-slot disqualified")
                         break
                 result.append(('solo', free))
                 free = curr
@@ -173,15 +187,16 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                     if eligible:
                         for rule in eligible:
                             if rule.b_mnemonic_set is not None and curr.mnemonic not in rule.b_mnemonic_set:
-                                curr.solo_reasons.add(f"{rule.name}: mnemonic not supported")
+                                _record_solo_reason(curr, "mnemonic not supported", rule.name)
                                 continue
                             failed = [p for p in rule.b_prerequisites if not getattr(curr, p)]
                             if failed:
-                                curr.solo_reasons.update(f"{rule.name}: {p}" for p in failed)
+                                for p in failed:
+                                    _record_solo_reason(curr, p, rule.name)
                                 continue
                             reason = rule.check(free, curr)
                             if reason is not None:
-                                curr.solo_reasons.add(reason)
+                                _record_solo_reason(curr, reason, rule.name)
                     result.append(('solo', free))
                     free = curr
                     i += 1

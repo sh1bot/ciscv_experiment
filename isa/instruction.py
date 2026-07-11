@@ -3,6 +3,7 @@ isa/instruction.py — Instruction base class and computed properties.
 """
 
 from __future__ import annotations
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -50,8 +51,8 @@ class Instruction:
     # offset is a %pcrel_lo relocation rather than a real displacement.
     base_from_auipc: bool = False
 
-    # Populated by pairing pass:
-    solo_reasons: set = field(default_factory=set)
+    # Populated by pairing pass: reason -> set of rule/disqualifier names.
+    solo_reasons: defaultdict = field(default_factory=lambda: defaultdict(set))
 
     # -----------------------------------------------------------------------
     # Register use/def sets — all register files, excluding only x0 (index 0).

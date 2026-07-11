@@ -738,7 +738,7 @@ class TestSlotDisqualifiers:
         add = make_add_rsd(13, 14)
         packets = greedy_pair([unk, add])
         assert all(p[0] == 'solo' for p in packets)
-        assert any("A-slot disqualified: is_unknown" in r for r in unk.solo_reasons)
+        assert unk.solo_reasons["is_unknown"] == {"A-slot disqualified"}
 
     def test_unknown_in_b_slot_not_paired(self):
         """An unknown B-slot candidate must not be paired; its solo reason names the disqualifier."""
@@ -748,7 +748,7 @@ class TestSlotDisqualifiers:
         stamp_slot_eligibility([unk])
         packets = greedy_pair([add, unk])
         assert all(p[0] == 'solo' for p in packets)
-        assert any("B-slot disqualified: is_unknown" in r for r in unk.solo_reasons)
+        assert unk.solo_reasons["is_unknown"] == {"B-slot disqualified"}
 
     def test_unknown_reason_not_on_eligible_partner(self):
         """Disqualifier reason belongs only to the disqualified instruction, not its attempted partner."""
@@ -757,7 +757,11 @@ class TestSlotDisqualifiers:
         stamp_slot_eligibility([unk])
         add = make_add_rsd(13, 14)
         greedy_pair([unk, add])
-        assert not any("disqualified" in r for r in add.solo_reasons)
+        assert all(
+            "disqualified" not in source
+            for sources in add.solo_reasons.values()
+            for source in sources
+        )
 
     def test_two_unknown_each_gets_own_reason(self):
         """Each unknown instruction gets its own disqualifier reason in its own slot."""
@@ -770,8 +774,8 @@ class TestSlotDisqualifiers:
         stamp_slot_eligibility([unk2])
         packets = greedy_pair([unk1, add, unk2])
         assert all(p[0] == 'solo' for p in packets)
-        assert any("A-slot disqualified: is_unknown" in r for r in unk1.solo_reasons)
-        assert any("B-slot disqualified: is_unknown" in r for r in unk2.solo_reasons)
+        assert unk1.solo_reasons["is_unknown"] == {"A-slot disqualified"}
+        assert unk2.solo_reasons["is_unknown"] == {"B-slot disqualified"}
 
 
 class TestNoApplicableRule:
@@ -825,8 +829,8 @@ class TestSoloReasons:
         a = make_add(10, 11, 12)   # not rsd-form
         b = make_add(13, 14, 15)
         stamp_solo_reasons([a, b])
-        assert any("rsd-alu-pair" in r and "not RSD" in r for r in a.solo_reasons)
-        assert any("rsd-alu-pair" in r and "not RSD" in r for r in b.solo_reasons)
+        assert "rsd-alu-pair" in a.solo_reasons["not RSD or li form"]
+        assert "rsd-alu-pair" in b.solo_reasons["not RSD or li form"]
 
     def test_greedy_annotates_b_with_pair_specific_reason(self):
         """When A is eligible but pair fails, B gets the pair-specific reason."""
@@ -840,7 +844,7 @@ class TestSoloReasons:
         """When A is ineligible for all rules, B gets no pair-attempt reasons."""
         a = make_insn("auipc", rd=1, imm=0)   # unsupported mnemonic
         b = make_add_rsd(10, 11)
-        b.solo_reasons = set()
+        b.solo_reasons.clear()
         greedy_pair([a, b])
         assert len(b.solo_reasons) == 0
 
