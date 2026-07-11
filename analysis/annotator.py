@@ -3,6 +3,7 @@ analysis/annotator.py — Format annotated assembly output.
 """
 
 from __future__ import annotations
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -86,7 +87,7 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
 
                 for pl in a.prefix_lines:
                     lines.append(pl)
-                comment_a = f"# {{packet {packet_num}a, {rule_name}}}"
+                comment_a = f"# {{{rule_name}-A}}"
                 if annotate_liveness:
                     comment_a += f"  live_in={_fmt_live(a.live_in)}"
                 lines.append(f"{a.raw.rstrip()}  {comment_a}")
@@ -94,7 +95,7 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
 
                 for pl in b.prefix_lines:
                     lines.append(pl)
-                comment_b = f"# {{packet {packet_num}b, {rule_name}}}"
+                comment_b = f"# {{{rule_name}-B}}"
                 if annotate_liveness:
                     comment_b += f"  live_in={_fmt_live(b.live_in)}"
                 lines.append(f"{b.raw.rstrip()}  {comment_b}")
@@ -111,11 +112,13 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                     lines.append(pl)
                 rvc = _rvc_marker(insn)
                 prefix = f"{rvc}  " if rvc else ""
-                reasons = set(insn.solo_reasons)
+                reasons = deepcopy(insn.solo_reasons)
                 if insn.imm_unresolved:
-                    reasons.add(f"unresolved immediate: {insn.imm_expr}")
+                    reasons["unresolved immediate"].add("decoder")
                 if reasons:
-                    reasons_str = ", ".join(sorted(reasons))
+                    reasons_str=", ".join(
+                        (f"{r}[{'/'.join(s)}]" for r, s in reasons.items())
+                    )
                     comment = f"# {prefix}{{solo: {reasons_str}}}"
                 else:
                     comment = f"# {prefix}{{solo}}"

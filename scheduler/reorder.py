@@ -251,12 +251,17 @@ def _list_schedule(insns: list, graph: DepGraph) -> list:
 def _pair_count(ordering: list) -> int:
     """Count pairs in the greedy-advance model for a given ordering."""
     # Snapshot solo_reasons to avoid polluting instructions during BnB exploration
-    snapshots = {id(insn): set(insn.solo_reasons) for insn in ordering}
+    snapshots = {
+        id(insn): {reason: set(sources) for reason, sources in insn.solo_reasons.items()}
+        for insn in ordering
+    }
     packets = greedy_pair(ordering)
     count = sum(1 for p in packets if p[0] == 'pair')
     # Restore solo_reasons from snapshot
     for insn in ordering:
-        insn.solo_reasons = snapshots[id(insn)]
+        insn.solo_reasons.clear()
+        for reason, sources in snapshots[id(insn)].items():
+            insn.solo_reasons[reason].update(sources)
     return count
 
 
