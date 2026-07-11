@@ -525,23 +525,24 @@ lw   a2, 0(a0)      ; B reads a0 = A's result → "A result feeds B"
 
 ---
 
-### 3.11 `dual-op-pair`
+### 3.11 dual-op family (`dual-*-pair`)
 
-The most general rule: two ops drawn from the **same canonical opcode tuple**
-that share their inputs (or operands by role) and write distinct outputs. One
-packet, two results. The legal tuples and their "match kinds" live in
-`_DUAL_TUPLES`:
+Two ops drawn from the **same canonical opcode tuple** that share their inputs
+(or operands by role) and write distinct outputs. One packet, two results. The
+legal tuples live in `_DUAL_TUPLES`; each family is its own PairingRule (so its
+statistics stand alone) but all share one mechanism (`dual_family`):
 
-| Kind | Tuples | Sharing requirement |
+| Rule | Tuples | Sharing requirement |
 |---|---|---|
-| `arith2` | `add/sub`, `addw/subw`, `min/max`, `minu/maxu`, `mul/mulh`, `mul/mulhu`, `mul/mulhsu`, `div/rem`, `divu/remu`, `divw/remw`, `divuw/remuw` | both R-type; share `rs1` *and* `rs2` positionally |
-| `load_addi` | `ld/addi`, `lw/addi`, `lwu/addi` | load base == addi source; load offset 0; addi imm = nonzero width-scaled `uimm5` (the stride) |
-| `store_addi` | `sd/addi`, `sw/addi` | store base == addi source; store offset 0; addi imm = nonzero width-scaled `uimm5` |
-| `load_shadd` | `ld/sh3add`, `lw/sh2add`, `lwu/sh2add` | load base == shadd source; load offset 0 (register post-increment form) |
-| `store_shadd` | `sd/sh3add`, `sw/sh2add` | store `{base, value}` == shadd's two sources; store offset 0 |
-| `indep_pair` | `addi/addi` | both must be `li` / `mv` / `addi4spn`; `addi4spn` imm must fit `uimm5×4` in `[4,128]` |
+| `dual-arith2-pair` | `add/sub`, `addw/subw`, `min/max`, `minu/maxu`, `mul/mulh`, `mul/mulhu`, `mul/mulhsu`, `div/rem`, `divu/remu`, `divw/remw`, `divuw/remuw` | both R-type; share `rs1` *and* `rs2` positionally |
+| `dual-load-addi-pair` | `ld/addi`, `lw/addi`, `lwu/addi` | load base == addi source; load offset 0; addi imm = nonzero width-scaled `uimm5` (the stride) |
+| `dual-store-addi-pair` | `sd/addi`, `sw/addi` | store base == addi source; store offset 0; addi imm = nonzero width-scaled `uimm5` |
+| `dual-load-shadd-pair` | `ld/sh3add`, `lw/sh2add`, `lwu/sh2add` | load base == shadd source; load offset 0 (register post-increment form) |
+| `dual-store-shadd-pair` | `sd/sh3add`, `sw/sh2add` | store `{base, value}` == shadd's two sources; store offset 0 |
+| `dual-indep-pair` | `addi/addi` | both must be `li` / `mv` / `addi4spn`; `addi4spn` imm must fit `uimm5×4` in `[4,128]` |
 
-Common constraints applied to *every* kind (`_dual_op_pair`):
+Common constraints applied to *every* family (via `dual_family` /
+`_canonical_dual` / `_reject_dependence`):
 
 * the pair must form a recognised tuple in **either** order;
 * outputs must be distinct (`a.rd != b.rd` where both exist);
@@ -735,16 +736,55 @@ ld   a2, 0(a0)
 
 ---
 
-### 3.16 `epilogue-pair`
+### 3.16 `prologue-pair`
+
+Function prologue: reserve the stack frame and save the return address in one
+packet. Order-sensitive — A allocates the frame, then B stores `ra` into it, so
+the store's landing address is only valid after the `addi` has run.
+
+* **A mnemonics:** `{addi}`.
+* **B mnemonics:** `{sw, sd}`.
+* **`check` (`_prologue_pair`):**
+  * A is `addi sp, sp, -N` (`a.rd == a.rs1 == sp`) with `N` a nonzero
+    **7-bit `uimm×16`** (negative multiple of 16, `nimm_fits(7, 4)`);
+  * B stores `ra` (`b.rs2 == x1`) with `sp` as base (`b.rs1 == sp`);
+  * the store lands at the top of the freshly reserved frame:
+    `b.imm + b.access_width + a.imm == 0`.
+
+**Matches**
+
+```asm
+addi sp, sp, -16    ; reserve a 16-byte frame
+sd   ra, 8(sp)      ; ra at the top: 8 + 8 (sd width) − 16 = 0
+```
+
+**Does not match**
+
+```asm
+addi sp, sp, -16
+sd   ra, 0(sp)      ; delta 0 + 8 − 16 ≠ 0 → "B-bad-delta"
+                    ;   (but this DOES pair via pre-inc-pair, §3.15)
+```
+
+```asm
+addi sp, sp, -16
+sd   a0, 8(sp)      ; stores a0, not ra → "B-not-RA-src"
+```
+
+---
+
+### 3.17 `epilogue-pair`
 
 Function epilogue: restore the stack pointer and return/tail-jump in one packet.
-The two instructions may appear in either order; the rule canonicalises so the
-`addi` is treated as `a`.
+Order-sensitive: the packet runs A before B and B is a control transfer, so the
+`addi` must be A (executes first) and the `jalr`/`ret` must be B (executes
+last). The reverse would run the transfer first and skip the `addi`;
+`is_control_transfer` also keeps `jalr`/`ret` out of the A slot.
 
-* **A/B mnemonics:** `_EPILOGUE_A_MN | _EPILOGUE_B_MN` = `{addi, jalr, ret}`
-  in *both* slots (order-insensitive).
+* **A mnemonics:** `_EPILOGUE_A_MN` = `{addi}`.
+* **B mnemonics:** `_EPILOGUE_B_MN` = `{jalr, ret}`.
 * **`check` (`_epilogue_pair`):**
-  * exactly one `addi` and one `jalr`/`ret`;
+  * A is the `addi`, B is the `jalr`/`ret`;
   * the `addi` must be `addi sp, sp, +N` with `N` a nonzero **7-bit `uimm×16`**
     (positive multiple of 16, max `127×16 = 2032`);
   * the `jalr`/`ret` must write `x0` or `x1` (a return or a tail call) with a
@@ -771,12 +811,12 @@ ret
 
 ```asm
 addi a0, a0, 16     ; not adjusting sp → "A not addi sp, sp"
-ret                 ;   (but this DOES pair via arith-jump-pair, §3.17)
+ret                 ;   (but this DOES pair via arith-jump-pair, §3.18)
 ```
 
 ---
 
-### 3.17 `arith-jump-pair`
+### 3.18 `arith-jump-pair`
 
 Pack a productive RSD ALU op into the same packet as a trailing unconditional
 control transfer — the packet's B slot always executes last, so an ALU result
@@ -823,7 +863,7 @@ jalr ra, a5, 0      ; a call (saves ra) → not a small jump
 
 ---
 
-### 3.18 `mvload-jump-pair`
+### 3.19 `mvload-jump-pair`
 
 Same B slot as `arith-jump-pair`, but the A slot is a register move / load
 immediate, or a small-offset load. Ported from the legacy `mv_load_jump`.
@@ -869,12 +909,13 @@ ret
 | `base-chain-load-pair` | load | load | pointer chase, dead | A offset 0; B offset uimm10×w |
 | `mem-pair` | load/store | same | adjacent elements | offsets differ by width; uimm5/8×w |
 | `arith-mem-pair` | RSD arith | load/store | independent | A regs x0–x15; B offset 0..3×w |
-| `dual-op-pair` | tuple op | tuple op | shared inputs | per-kind (see table above) |
+| `dual-*-pair` | tuple op | tuple op | shared inputs | per-family (see §3.11) |
 | `li-branch-pair` | li | cmp-branch | A→B, dead | imm8 signed |
 | `addi-branch-pair` | addi/addiw RSD | cmp-branch | A→B, alive | rd x0–x15; imm8 signed |
 | `bit-branch-pair` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
 | `pre-inc-pair` | RSD addi/sh2add/add | ld/sd/lw/sw/slt | A→B, alive | B mem offset 0 |
-| `epilogue-pair` | addi sp / ret-jalr | (either order) | — | sp adj uimm7×16; ret rd x0/x1 |
+| `prologue-pair` | addi sp (−N) | sw/sd ra | A→B (alloc then save) | sp adj nimm7×16; ra at frame top |
+| `epilogue-pair` | addi sp / ret-jalr | A→B (addi then transfer) | — | sp adj uimm7×16; ret rd x0/x1 |
 | `arith-jump-pair` | RSD ALU | ret/jr/j/jalr | independent | A regs x0–x15; calls excluded |
 | `mvload-jump-pair` | mv/li or small-offset load | ret/jr/j/jalr | independent | load offset 0..3×w; calls excluded |
 

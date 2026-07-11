@@ -892,13 +892,14 @@ non-`None` string constitutes a rejection of that specific encoding.
 
 > **The full, current rule set is documented in
 > [`scheduler/RULES.md`](scheduler/RULES.md), which is authoritative.**  As of
-> writing `scheduler/rules.py` defines sixteen rules (`rsd-alu-pair`,
+> writing `scheduler/rules.py` defines two dozen rules (`rsd-alu-pair`,
 > `chain-alu-pair`, the load/store-chain rules, the `*-branch` rules, `mem-pair`,
-> `arith-mem-pair`, `dual-op-pair`, `pre-inc-pair`, `epilogue-pair`, ...), plus
-> the per-slot `diagnose_a`/`diagnose_b` self-diagnosis callbacks.  This section
-> keeps a single, deliberately simplified example purely to illustrate the rule
-> *mechanism*; do not treat its mnemonic set or framing as current.  Refer to
-> RULES.md for what each rule actually accepts and rejects.
+> `arith-mem-pair`, the `dual-*-pair` family, `pre-inc-pair`, `prologue-pair`,
+> `epilogue-pair`, ...).  A rule's `check(a, b)` raises `NotPair(reason)` to
+> reject a candidate and returns `None` to accept.  This section keeps a single,
+> deliberately simplified example purely to illustrate the rule *mechanism*; do
+> not treat its mnemonic set or framing as current.  Refer to RULES.md for what
+> each rule actually accepts and rejects.
 
 The example below is a deliberately conservative starting point, chosen to
 establish the mechanics of the rule framework rather than to represent the

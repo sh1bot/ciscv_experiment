@@ -3,7 +3,7 @@ Tests for scheduler/pairing.py — pairing rules and can_pair().
 
 Covers the full rule set defined in scheduler/rules.py (rsd-alu-pair,
 chain/load/store-chain, the *-branch rules, mem-pair, arith-mem-pair,
-dual-op-pair, pre-inc-pair, epilogue-pair, ...).  See scheduler/RULES.md
+dual-*-pair, pre-inc-pair, epilogue-pair, ...).  See scheduler/RULES.md
 for the authoritative description of each rule.
 """
 
@@ -204,7 +204,7 @@ class TestRsdAluPair:
 
 
 # ---------------------------------------------------------------------------
-# dual-op-pair: two ops from a canonical tuple sharing inputs, distinct outputs
+# dual-*-pair family: two ops from a canonical tuple sharing inputs, distinct outputs
 # ---------------------------------------------------------------------------
 
 class TestDualOpPair:
@@ -235,7 +235,7 @@ class TestDualOpPair:
     def test_a_clobbers_shared_source_no_pair(self):
         """A-slot op writing a shared source corrupts B's read.
 
-        min/max chosen so no chain/rsd rule applies — isolates dual-op-pair.
+        min/max chosen so no chain/rsd rule applies — isolates dual-arith2-pair.
         """
         a = make_insn("min", rd=12, rs1=12, rs2=13)   # rd == shared rs1
         b = make_insn("max", rd=11, rs1=12, rs2=13)
@@ -567,11 +567,13 @@ class TestIndepPair:
         b = make_insn("jalr", rd=1, rs1=15, imm=0)
         assert can_pair(a, b) is None
 
-    def test_epilogue_reversed_order_pairs(self):
-        """ret before addi sp,sp also pairs (order-insensitive)."""
+    def test_epilogue_reversed_order_no_pair(self):
+        """ret before addi sp,sp must NOT pair: the packet runs A then B, so a
+        control transfer in the A slot would execute first and the addi (B slot)
+        would never run."""
         a = make_insn("ret",  rd=0, rs1=1, imm=0)
         b = make_insn("addi", rd=2, rs1=2, imm=48)
-        assert can_pair(a, b) is None
+        assert can_pair(a, b) is not None
 
     def test_epilogue_non_sp_addi_no_pair(self):
         """addi to a non-sp register doesn't qualify as an *epilogue*.
@@ -711,11 +713,11 @@ class TestPreIncPair:
         assert can_pair(a, b) is not None
 
     def test_post_inc_pairs_as_dual_not_pre_inc(self):
-        """(ld, addi) is the canonical post-increment order and matches dual-op-pair/load_addi.
+        """(ld, addi) is the canonical post-increment order and matches dual-load-addi-pair.
         pre-inc-pair only matches (addi, ld), not the reverse."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("addi", rd=12, rs1=12, imm=8)
-        assert can_pair(a, b) is None  # accepted — but by dual-op-pair, not pre-inc-pair
+        assert can_pair(a, b) is None  # accepted — but by dual-load-addi-pair, not pre-inc-pair
 
     def test_unrecognised_tuple_no_pair(self):
         """addi+slt is not in the pre-inc tuple table."""
@@ -906,6 +908,29 @@ def make_sd(rs1, rs2, imm=0):
     return make_insn("sd", rs1=rs1, rs2=rs2, imm=imm)
 
 
+class TestChainAluPair:
+    """A computes a value B consumes; the chain register dies within the pair."""
+
+    def test_basic_chain_pairs(self):
+        # add x10, x8, x9; add x11, x10, x12 — B consumes x10, which then dies
+        a = make_insn("add", rd=10, rs1=8, rs2=9)
+        b = make_insn("add", rd=11, rs1=10, rs2=12)
+        assert can_pair(a, b) is None
+
+    def test_high_chain_register_pairs(self):
+        """The chain register dies within the pair and is not encoded, so it is
+        exempt from the x0..x15 range limit even when it is a high register."""
+        a = make_insn("add", rd=16, rs1=8, rs2=9)     # chain reg x16 (out of window)
+        b = make_insn("add", rd=10, rs1=16, rs2=11)   # consumes x16; x16 dead after
+        assert can_pair(a, b) is None
+
+    def test_high_encoded_register_still_rejects(self):
+        """A genuinely encoded operand (A's source) out of window still rejects."""
+        a = make_insn("add", rd=8, rs1=16, rs2=9)     # a.rs1 = x16 is encoded
+        b = make_insn("add", rd=10, rs1=8, rs2=11)
+        assert can_pair(a, b) is not None
+
+
 class TestLoadChainAluPair:
     """A = sp-relative load (8-bit scaled offset); B = ALU consuming the value."""
 
@@ -1025,6 +1050,171 @@ class TestBaseChainLoadPair:
         a.base_from_auipc = True
         b = make_ld(11, 10, imm=512)
         assert can_pair(a, b) is not None
+
+
+def _rule_reason(name, a, b):
+    """Run a single named rule's check() directly; return None if it accepts or
+    the NotPair reason string if it rejects."""
+    rule = next(r for r in RULES if r.name == name)
+    try:
+        rule.check(a, b)
+        return None
+    except NotPair as exc:
+        return exc.reason
+
+
+class TestLoadSpBranch:
+    """A = sp-relative load (uimm10 byte offset); B = beqz/bnez on the value.
+    The loaded value is kept alive (null-check idiom)."""
+
+    def test_basic_pairs(self):
+        a = make_insn("lw", rd=10, rs1=2, imm=8)          # lw a0, 8(sp)
+        b = make_insn("beqz", rs1=10, branch_target="L")  # beqz a0, L
+        assert can_pair(a, b) is None
+
+    def test_offset_over_10bit_no_pair(self):
+        a = make_insn("lw", rd=10, rs1=2, imm=1024)       # 1024 > uimm10 max 1023
+        b = make_insn("beqz", rs1=10, branch_target="L")
+        assert can_pair(a, b) is not None
+
+    def test_branch_does_not_consume_no_pair(self):
+        a = make_insn("lw", rd=10, rs1=2, imm=8)
+        b = make_insn("bnez", rs1=11, branch_target="L")  # tests a1, not a0
+        assert can_pair(a, b) is not None
+
+    def test_value_may_stay_alive(self):
+        # rd kept live after the branch still pairs (not a dead-value rule).
+        a = make_insn("lw", rd=10, rs1=2, imm=8)
+        b = make_insn("beqz", rs1=10, branch_target="L")
+        b.live_out = frozenset({10})
+        assert can_pair(a, b) is None
+
+
+class TestLoadBaseBranch:
+    """A = any-base load (uimm5 byte offset); B = beqz/bnez on the value."""
+
+    def test_basic_pairs(self):
+        a = make_insn("lw", rd=10, rs1=11, imm=8)         # lw a0, 8(a1)
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_offset_over_5bit_no_pair(self):
+        a = make_insn("lw", rd=10, rs1=11, imm=64)        # 64 > uimm5 max 31
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert can_pair(a, b) is not None
+
+    def test_auipc_base_no_pair(self):
+        a = make_insn("lw", rd=10, rs1=11, imm=8)
+        a.base_from_auipc = True                          # GOT-relative → excluded
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert _rule_reason("load-base-branch", a, b) is not None
+
+
+class TestLiBranchPair:
+    """A = li rtmp, imm8; B = comparison branch consuming rtmp; rtmp dies."""
+
+    def test_basic_pairs(self):
+        a = make_insn("addi", rd=10, rs1=0, imm=5)        # li a0, 5
+        b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_commutative_rs2_chain_pairs(self):
+        # branches are commutative for chaining: rtmp may be the second operand
+        a = make_insn("addi", rd=10, rs1=0, imm=5)
+        b = make_insn("blt", rs1=11, rs2=10, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_immediate_over_8bit_no_pair(self):
+        a = make_insn("addi", rd=10, rs1=0, imm=200)      # 200 > int8 max 127
+        b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
+        assert _rule_reason("li-branch-pair", a, b) is not None
+
+    def test_value_escapes_no_pair(self):
+        a = make_insn("addi", rd=10, rs1=0, imm=5)
+        b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
+        b.live_out = frozenset({10})                      # rtmp still live after B
+        assert _rule_reason("li-branch-pair", a, b) is not None
+
+
+class TestAddiBranchPair:
+    """A = RSD addi/addiw (in-place counter); B = comparison branch; rd may
+    stay alive (loop-counter idiom)."""
+
+    def test_basic_pairs(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=1)       # addi a0, a0, 1
+        b = make_insn("blt", rs1=10, rs2=11, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_counter_may_stay_alive(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=1)
+        b = make_insn("bne", rs1=10, rs2=11, branch_target="L")
+        b.live_out = frozenset({10})                      # counter survives the branch
+        assert can_pair(a, b) is None
+
+    def test_out_of_window_register_no_pair(self):
+        a = make_insn("addi", rd=16, rs1=16, imm=1)       # a6 = x16 outside x0..15
+        b = make_insn("blt", rs1=16, rs2=11, branch_target="L")
+        assert _rule_reason("addi-branch-pair", a, b) is not None
+
+    def test_immediate_over_8bit_no_pair(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=200)
+        b = make_insn("blt", rs1=10, rs2=11, branch_target="L")
+        assert _rule_reason("addi-branch-pair", a, b) is not None
+
+
+class TestBitBranchPair:
+    """A isolates/masks bits (andi pow2, or slli/srli); B branches on zero."""
+
+    def test_andi_pow2_pairs(self):
+        a = make_insn("andi", rd=10, rs1=10, imm=8)       # single-bit mask
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_slli_any_shift_pairs(self):
+        a = make_insn("slli", rd=10, rs1=10, imm=3)
+        b = make_insn("beqz", rs1=10, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_andi_non_pow2_no_pair(self):
+        a = make_insn("andi", rd=10, rs1=10, imm=6)       # 6 not pow2/shift-expressible
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert _rule_reason("bit-branch-pair", a, b) is not None
+
+    def test_beq_requires_zero_rs2_no_pair(self):
+        a = make_insn("andi", rd=10, rs1=10, imm=8)
+        b = make_insn("beq", rs1=10, rs2=11, branch_target="L")  # not a zero-test
+        assert _rule_reason("bit-branch-pair", a, b) is not None
+
+
+class TestProloguePair:
+    """A = addi sp,sp,-N (reserve frame); B = sw/sd ra at top of frame."""
+
+    def test_basic_pairs(self):
+        a = make_insn("addi", rd=2, rs1=2, imm=-16)       # addi sp, sp, -16
+        b = make_insn("sd", rs1=2, rs2=1, imm=8)          # sd ra, 8(sp): 8+8-16=0
+        assert can_pair(a, b) is None
+
+    def test_sw_width_delta_pairs(self):
+        a = make_insn("addi", rd=2, rs1=2, imm=-16)
+        b = make_insn("sw", rs1=2, rs2=1, imm=12)         # sw ra, 12(sp): 12+4-16=0
+        assert can_pair(a, b) is None
+
+    def test_wrong_delta_no_pair(self):
+        # sd ra, 0(sp) is a valid *pre-increment* store (pairs via pre-inc-pair),
+        # so assert against the prologue rule directly.
+        a = make_insn("addi", rd=2, rs1=2, imm=-16)
+        b = make_insn("sd", rs1=2, rs2=1, imm=0)          # 0+8-16 != 0
+        assert _rule_reason("prologue-pair", a, b) == "B-bad-delta"
+
+    def test_not_ra_source_no_pair(self):
+        a = make_insn("addi", rd=2, rs1=2, imm=-16)
+        b = make_insn("sd", rs1=2, rs2=10, imm=8)         # stores a0, not ra
+        assert can_pair(a, b) is not None
+
+    def test_positive_adjust_no_pair(self):
+        a = make_insn("addi", rd=2, rs1=2, imm=16)        # positive → not a prologue
+        b = make_insn("sd", rs1=2, rs2=1, imm=8)
+        assert _rule_reason("prologue-pair", a, b) is not None
 
 
 class TestRvcEligiblePseudoOps:

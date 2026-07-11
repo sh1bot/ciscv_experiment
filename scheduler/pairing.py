@@ -124,7 +124,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
             if not free.a_slot_ok:
                 for prop in A_SLOT_DISQUALIFIERS:
                     if getattr(free, prop):
-                        free.solo_reasons["A-slot DQ"].add(prop)
+                        free.solo_reasons[prop].add("A-slot disqualified")
                         break
                 result.append(('solo', free))
                 free = curr
@@ -132,7 +132,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
             elif not curr.b_slot_ok:
                 for prop in B_SLOT_DISQUALIFIERS:
                     if getattr(curr, prop):
-                        curr.solo_reasons["B-slot DQ"].add(prop)
+                        curr.solo_reasons[prop].add("B-slot disqualified")
                         break
                 result.append(('solo', free))
                 free = curr
