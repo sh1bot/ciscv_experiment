@@ -8,8 +8,42 @@ The mechanism (can_pair, greedy_pair, stamp_slot_eligibility) lives in pairing.p
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+import re
 
 from isa.instruction import Instruction
+
+
+# ---------------------------------------------------------------------------
+# Pairing failures
+# ---------------------------------------------------------------------------
+
+
+_RULE_PREFIX_RE = re.compile(r"^[a-z0-9-]+(?:-pair|-branch):\s*")
+
+
+class PairingFailure(Exception):
+    """Raised by a pairing rule when an encoding rejects a candidate pair."""
+
+    def __init__(self, reason: str):
+        self.reason = self._normalize(reason)
+        super().__init__(self.reason)
+
+    @staticmethod
+    def _normalize(reason: str) -> str:
+        reason = _RULE_PREFIX_RE.sub("", reason)
+        if reason.startswith("A's "):
+            reason = "A-" + reason[4:]
+        elif reason.startswith("B's "):
+            reason = "B-" + reason[4:]
+        elif reason.startswith("A "):
+            reason = "A-" + reason[2:]
+        elif reason.startswith("B "):
+            reason = "B-" + reason[2:]
+        return reason
+
+
+def _fail(reason: str) -> None:
+    raise PairingFailure(reason)
 
 
 # ---------------------------------------------------------------------------
@@ -20,7 +54,7 @@ from isa.instruction import Instruction
 class PairingRule:
     name: str
 
-    # check(a, b) -> None means encoding accepts; str -> encoding rejects (reason).
+    # check(a, b) returns None when encoding accepts; raises PairingFailure on reject.
     check: Callable
 
     # Per-slot mnemonic allowlists: checked before prerequisites and check(),
@@ -34,8 +68,8 @@ class PairingRule:
     # Properties that must be True on b for the rule to be applicable.
     b_prerequisites: list = field(default_factory=list)
 
-    # Per-slot self-diagnosis: diagnose_a(insn) / diagnose_b(insn) -> reason str
-    # or None if the instruction passes all per-slot constraints for that slot.
+    # Per-slot self-diagnosis: diagnose_a(insn) / diagnose_b(insn) returns None
+    # when the instruction passes, or raises PairingFailure on reject.
     # Called after mnemonic_set passes; need not re-check mnemonic membership.
     diagnose_a: Optional[Callable] = None
     diagnose_b: Optional[Callable] = None
@@ -67,7 +101,7 @@ _RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
 # ---------------------------------------------------------------------------
 
 def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction,
-                           exclude: Optional[int] = None) -> Optional[str]:
+                           exclude: Optional[int] = None) -> None:
     """Check register range and immediate constraints only; mnemonic already ok.
 
     exclude: a register number that is exempt from the range check (the chain
@@ -75,22 +109,22 @@ def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction,
     """
     for reg, fname in ((insn.rd, "rd"), (insn.rs1, "rs1")):
         if reg is not None and reg != exclude and reg not in _RSD_ALU_REGS:
-            return f"{rule_name}: {fname} (x{reg}) not in x0..x15"
+            _fail(f"{rule_name}: {fname} (x{reg}) not in x0..x15")
     if insn.rs2 is not None and insn.rs2 != exclude and insn.rs2 not in _RSD_ALU_REGS:
-        return f"{rule_name}: rs2 (x{insn.rs2}) not in x0..x15"
+        _fail(f"{rule_name}: rs2 (x{insn.rs2}) not in x0..x15")
     if insn.mnemonic in _RSD_IMM_MN:
         imm = insn.imm
         # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
         if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
-            return f"{rule_name}: immediate out of range (got {imm}, need {_RSD_IMM_LO}..{_RSD_IMM_HI})"
+            _fail(f"{rule_name}: immediate out of range (got {imm}, need {_RSD_IMM_LO}..{_RSD_IMM_HI})")
         if imm is None:
-            return f"{rule_name}: missing immediate"
+            _fail(f"{rule_name}: missing immediate")
     elif insn.mnemonic in _RSD_SHIFT_MN:
         imm = insn.imm
         if imm is None:
-            return f"{rule_name}: missing shift amount"
+            _fail(f"{rule_name}: missing shift amount")
         if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
-            return f"{rule_name}: shift amount out of range (got {imm}, need {_RSD_SHIFT_LO}..{_RSD_SHIFT_HI})"
+            _fail(f"{rule_name}: shift amount out of range (got {imm}, need {_RSD_SHIFT_LO}..{_RSD_SHIFT_HI})")
     return None
 
 
@@ -98,20 +132,18 @@ def _alu_diagnose_regs_imm(rule_name: str, insn: Instruction,
 # rsd-alu-pair
 # ---------------------------------------------------------------------------
 
-def _rsd_alu_diagnose(insn: Instruction) -> Optional[str]:
-    reason = _alu_diagnose_regs_imm("rsd-alu-pair", insn)
-    if reason:
-        return reason
+def _rsd_alu_diagnose(insn: Instruction) -> None:
+    _alu_diagnose_regs_imm("rsd-alu-pair", insn)
     if insn.is_li:
         return None   # li form (addi rd, x0, imm) is always acceptable
     if not insn.is_rsd:
-        return "rsd-alu-pair: not RSD or li form"
+        _fail("rsd-alu-pair: not RSD or li form")
     if insn.rd != insn.rs1 and not insn.is_commutative:
-        return "rsd-alu-pair: rd==rs2 but not commutative"
+        _fail("rsd-alu-pair: rd==rs2 but not commutative")
     return None
 
 
-def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     """Both instructions RSD or li form, x0..x15, immediates in range, and the
     two slots write distinct destination registers.
 
@@ -122,11 +154,9 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     rule should not claim the pair; require distinct destinations.
     """
     for insn in (a, b):
-        r = _rsd_alu_diagnose(insn)
-        if r:
-            return r
+        _rsd_alu_diagnose(insn)
     if a.rd is not None and a.rd == b.rd:
-        return "rsd-alu-pair: same destination register"
+        _fail("rsd-alu-pair: same destination register")
     return None
 
 
@@ -134,12 +164,12 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # chain-alu-pair
 # ---------------------------------------------------------------------------
 
-def _chain_alu_diagnose(insn: Instruction) -> Optional[str]:
+def _chain_alu_diagnose(insn: Instruction) -> None:
     """Per-slot self-diagnosis for chain-alu-pair (no RSD requirement)."""
     return _alu_diagnose_regs_imm("chain-alu-pair", insn)
 
 
-def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A computes a value that B immediately consumes; that value is dead after B.
 
     A has free choice of rd and rs1.  B must use A's rd as its rs1 input
@@ -147,19 +177,15 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     overwrites it (b.rd == a.rd) or it is not live in b.live_out.
     """
     # a.rd is the chain register — not encoded in the packet; exempt from range.
-    r = _alu_diagnose_regs_imm("chain-alu-pair", a, exclude=a.rd)
-    if r:
-        return r
-    r = _alu_diagnose_regs_imm("chain-alu-pair", b, exclude=a.rd)
-    if r:
-        return r
+    _alu_diagnose_regs_imm("chain-alu-pair", a, exclude=a.rd)
+    _alu_diagnose_regs_imm("chain-alu-pair", b, exclude=a.rd)
     if a.rd is None:
-        return "chain-alu-pair: A has no destination register"
+        _fail("chain-alu-pair: A has no destination register")
     uses_chain = (b.rs1 == a.rd) or (b.is_commutative and b.rs2 == a.rd)
     if not uses_chain:
-        return f"chain-alu-pair: B does not consume A's result (x{a.rd})"
+        _fail(f"chain-alu-pair: B does not consume A's result (x{a.rd})")
     if b.rd != a.rd and a.rd in b.live_out:
-        return f"chain-alu-pair: A's result (x{a.rd}) escapes after B"
+        _fail(f"chain-alu-pair: A's result (x{a.rd}) escapes after B")
     return None
 
 
@@ -184,67 +210,59 @@ _ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})
 ALL_BRANCH_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu", "beqz", "bnez"})
 
 
-def _sp_mem_diagnose(rule_name: str, insn: Instruction) -> Optional[str]:
+def _sp_mem_diagnose(rule_name: str, insn: Instruction) -> None:
     """sp-relative memory op with a nonnegative 8-bit scaled offset."""
     if insn.rs1 != 2:
-        return f"{rule_name}: memory base is not sp (x2)"
+        _fail(f"{rule_name}: memory base is not sp (x2)")
     shift = insn.access_shift or 0
     if not insn.uimm_fits(8, shift):
         max_off = ((1 << 8) - 1) << shift
-        return f"{rule_name}: offset {insn.imm} exceeds 8-bit scaled range (max {max_off})"
+        _fail(f"{rule_name}: offset {insn.imm} exceeds 8-bit scaled range (max {max_off})")
     return None
 
 
-def _load_chain_diagnose_a(insn: Instruction) -> Optional[str]:
+def _load_chain_diagnose_a(insn: Instruction) -> None:
     return _sp_mem_diagnose("load-chain-alu-pair", insn)
 
 
-def _load_chain_diagnose_b(insn: Instruction) -> Optional[str]:
+def _load_chain_diagnose_b(insn: Instruction) -> None:
     return _alu_diagnose_regs_imm("load-chain-alu-pair", insn)
 
 
-def _load_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
-    r = _load_chain_diagnose_a(a)
-    if r:
-        return r
+    _load_chain_diagnose_a(a)
     # a.rd is the loaded chain value — not encoded; exempt from range check.
-    r = _alu_diagnose_regs_imm("load-chain-alu-pair", b, exclude=a.rd)
-    if r:
-        return r
+    _alu_diagnose_regs_imm("load-chain-alu-pair", b, exclude=a.rd)
     if a.rd is None:
-        return "load-chain-alu-pair: load has no destination register"
+        _fail("load-chain-alu-pair: load has no destination register")
     uses_chain = (b.rs1 == a.rd) or (b.is_commutative and b.rs2 == a.rd)
     if not uses_chain:
-        return f"load-chain-alu-pair: B does not consume loaded value (x{a.rd})"
+        _fail(f"load-chain-alu-pair: B does not consume loaded value (x{a.rd})")
     if b.rd != a.rd and a.rd in b.live_out:
-        return f"load-chain-alu-pair: loaded value (x{a.rd}) escapes after B"
+        _fail(f"load-chain-alu-pair: loaded value (x{a.rd}) escapes after B")
     return None
 
 
-def _store_chain_diagnose_a(insn: Instruction) -> Optional[str]:
+def _store_chain_diagnose_a(insn: Instruction) -> None:
     return _alu_diagnose_regs_imm("store-chain-alu-pair", insn)
 
 
-def _store_chain_diagnose_b(insn: Instruction) -> Optional[str]:
+def _store_chain_diagnose_b(insn: Instruction) -> None:
     return _sp_mem_diagnose("store-chain-alu-pair", insn)
 
 
-def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _store_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
     # a.rd is the chain result — not encoded in the packet; exempt from range check.
-    r = _alu_diagnose_regs_imm("store-chain-alu-pair", a, exclude=a.rd)
-    if r:
-        return r
-    r = _store_chain_diagnose_b(b)
-    if r:
-        return r
+    _alu_diagnose_regs_imm("store-chain-alu-pair", a, exclude=a.rd)
+    _store_chain_diagnose_b(b)
     if a.rd is None:
-        return "store-chain-alu-pair: A has no destination register"
+        _fail("store-chain-alu-pair: A has no destination register")
     if b.rs2 != a.rd:
-        return f"store-chain-alu-pair: store value (x{b.rs2}) is not A's result (x{a.rd})"
+        _fail(f"store-chain-alu-pair: store value (x{b.rs2}) is not A's result (x{a.rd})")
     if a.rd in b.live_out:
-        return f"store-chain-alu-pair: stored value (x{a.rd}) escapes after B"
+        _fail(f"store-chain-alu-pair: stored value (x{a.rd}) escapes after B")
     return None
 
 
@@ -264,28 +282,28 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # are also matched as a subset.
 
 def _load_branch_check(a: Instruction, b: Instruction,
-                       rule: str, imm_bits: int) -> Optional[str]:
+                       rule: str, imm_bits: int) -> None:
     if a.rs1 is None:
-        return f"{rule}: load has no base register"
+        _fail(f"{rule}: load has no base register")
     if a.rd is None:
-        return f"{rule}: load has no destination"
+        _fail(f"{rule}: load has no destination")
     if a.base_from_auipc:
-        return f"{rule}: load base is auipc-derived (GOT access)"
+        _fail(f"{rule}: load base is auipc-derived (GOT access)")
     if not a.uimm_fits(imm_bits):
-        return f"{rule}: offset {a.imm} exceeds {imm_bits}-bit unsigned range"
+        _fail(f"{rule}: offset {a.imm} exceeds {imm_bits}-bit unsigned range")
     if b.rs1 != a.rd:
-        return f"{rule}: branch tests x{b.rs1} but load produces x{a.rd}"
+        _fail(f"{rule}: branch tests x{b.rs1} but load produces x{a.rd}")
     return None
 
 
-def _load_sp_branch(a: Instruction, b: Instruction) -> Optional[str]:
+def _load_sp_branch(a: Instruction, b: Instruction) -> None:
     """sp-relative load (uimm10 byte offset) -> beqz/bnez; rd kept alive."""
     if a.rs1 != 2:
-        return "load-sp-branch: base is not sp (x2)"
+        _fail("load-sp-branch: base is not sp (x2)")
     return _load_branch_check(a, b, "load-sp-branch", 10)
 
 
-def _load_base_branch(a: Instruction, b: Instruction) -> Optional[str]:
+def _load_base_branch(a: Instruction, b: Instruction) -> None:
     """Any-base load (uimm5 byte offset) -> beqz/bnez; rd kept alive."""
     return _load_branch_check(a, b, "load-base-branch", 5)
 
@@ -309,41 +327,41 @@ def _load_base_branch(a: Instruction, b: Instruction) -> Optional[str]:
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 
 
-def _deref_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
     if a.rs1 is None or a.rd is None:
-        return "deref-chain-load-pair: A missing base/dest register"
+        _fail("deref-chain-load-pair: A missing base/dest register")
     if a.base_from_auipc:
-        return "deref-chain-load-pair: A is an auipc+load GOT access (reloc offset)"
+        _fail("deref-chain-load-pair: A is an auipc+load GOT access (reloc offset)")
     shift = a.access_shift or 0
     if not a.uimm_fits(10, shift):
         max_off = ((1 << 10) - 1) << shift
-        return f"deref-chain-load-pair: A offset {a.imm} exceeds 10-bit scaled range (max {max_off})"
+        _fail(f"deref-chain-load-pair: A offset {a.imm} exceeds 10-bit scaled range (max {max_off})")
     if b.rs1 != a.rd:
-        return f"deref-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})"
+        _fail(f"deref-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})")
     if b.imm != 0:
-        return "deref-chain-load-pair: B offset must be zero"
+        _fail("deref-chain-load-pair: B offset must be zero")
     if b.rd != a.rd and a.rd in b.live_out:
-        return f"deref-chain-load-pair: pointer (x{a.rd}) escapes after B"
+        _fail(f"deref-chain-load-pair: pointer (x{a.rd}) escapes after B")
     return None
 
 
-def _base_chain_load_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
     if a.rs1 is None or a.rd is None:
-        return "base-chain-load-pair: A missing base/dest register"
+        _fail("base-chain-load-pair: A missing base/dest register")
     if a.base_from_auipc:
-        return "base-chain-load-pair: A is an auipc+load GOT access (reloc offset)"
+        _fail("base-chain-load-pair: A is an auipc+load GOT access (reloc offset)")
     if a.imm != 0:
-        return "base-chain-load-pair: A offset must be zero"
+        _fail("base-chain-load-pair: A offset must be zero")
     if b.rs1 != a.rd:
-        return f"base-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})"
+        _fail(f"base-chain-load-pair: B base (x{b.rs1}) is not A's result (x{a.rd})")
     shift = b.access_shift or 0
     if not b.uimm_fits(10, shift):
         max_off = ((1 << 10) - 1) << shift
-        return f"base-chain-load-pair: B offset {b.imm} exceeds 10-bit scaled range (max {max_off})"
+        _fail(f"base-chain-load-pair: B offset {b.imm} exceeds 10-bit scaled range (max {max_off})")
     if b.rd != a.rd and a.rd in b.live_out:
-        return f"base-chain-load-pair: pointer (x{a.rd}) escapes after B"
+        _fail(f"base-chain-load-pair: pointer (x{a.rd}) escapes after B")
     return None
 
 
@@ -379,28 +397,28 @@ _MEM_PAIR_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld",
                           "sb", "sh", "sw", "sd"})
 
 
-def _mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _mem_pair(a: Instruction, b: Instruction) -> None:
     """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
     if a.mnemonic != b.mnemonic:
-        return f"mem-pair: mnemonic mismatch ({a.mnemonic} vs {b.mnemonic})"
+        _fail(f"mem-pair: mnemonic mismatch ({a.mnemonic} vs {b.mnemonic})")
     if a.rs1 is None or b.rs1 is None or a.rs1 != b.rs1:
-        return f"mem-pair: base registers differ"
+        _fail(f"mem-pair: base registers differ")
     if a.imm is None or b.imm is None:
-        return "mem-pair: missing memory offset"
+        _fail("mem-pair: missing memory offset")
     width = a.access_width or (1 << (a.access_shift or 0))
     if abs(a.imm - b.imm) != width:
-        return f"mem-pair: offsets must differ by exactly {width}"
+        _fail(f"mem-pair: offsets must differ by exactly {width}")
     shift = a.access_shift or 0
     imm_bits = 8 if a.is_local else 5
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
-            return f"mem-pair: offset {insn.imm} exceeds {imm_bits}-bit scaled range (max {max_off})"
+            _fail(f"mem-pair: offset {insn.imm} exceeds {imm_bits}-bit scaled range (max {max_off})")
     if a.writes_memory:
         return None  # stores: no further constraint
     # loads: destinations must differ
     if a.rd is not None and a.rd == b.rd:
-        return "mem-pair: same destination register"
+        _fail("mem-pair: same destination register")
     return None
 
 
@@ -433,25 +451,25 @@ def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
     return off % width == 0 and off <= 3 * width
 
 
-def _arith_mem_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
     """RSD arith (x0..x15, small imm) paired with small-offset mem op."""
     if not a.is_rsd:
-        return "arith-mem-pair: A not RSD form"
+        _fail("arith-mem-pair: A not RSD form")
     if a.rd not in _RSD_ALU_REGS:
-        return f"arith-mem-pair: A rd (x{a.rd}) not in x0..x15"
+        _fail(f"arith-mem-pair: A rd (x{a.rd}) not in x0..x15")
     if a.rs1 is not None and a.rs1 not in _RSD_ALU_REGS:
-        return f"arith-mem-pair: A rs1 (x{a.rs1}) not in x0..x15"
+        _fail(f"arith-mem-pair: A rs1 (x{a.rs1}) not in x0..x15")
     if a.mnemonic == "addi":
         # Immediate field is [-64, 64] inclusive, excluding 0 (encode a zero
         # immediate as a move from x0 instead).
         if a.imm is None or a.imm == 0 or not (-64 <= a.imm <= 64):
-            return (f"arith-mem-pair: addi immediate {a.imm} not in "
-                    f"-64..64 nonzero (use x0 for zero)")
+            _fail(f"arith-mem-pair: addi immediate {a.imm} not in "
+                  f"-64..64 nonzero (use x0 for zero)")
     if not _arith_mem_small_offset_ok(b):
-        return f"arith-mem-pair: B offset not in 2-bit scaled range (0..3×width)"
+        _fail(f"arith-mem-pair: B offset not in 2-bit scaled range (0..3×width)")
     # A must not feed B (dep graph handles true deps, but catch it here too)
     if a.rd is not None and a.rd in b.uses_regs:
-        return f"arith-mem-pair: A result (x{a.rd}) feeds B"
+        _fail(f"arith-mem-pair: A result (x{a.rd}) feeds B")
     return None
 
 
@@ -503,57 +521,57 @@ def _is_li_mv_addi4spn(insn: Instruction) -> bool:
     """True for the three addi pseudo-ops that qualify for indep_pair."""
     return insn.is_li or insn.is_mv or insn.is_addi4spn
 
-def _dual_shared_ok(first: Instruction, second: Instruction) -> Optional[str]:
+def _dual_shared_ok(first: Instruction, second: Instruction) -> None:
     """Operand-sharing and immediate checks by canonical role (order-independent)."""
     kind = _DUAL_TUPLES[(first.mnemonic, second.mnemonic)]
     if kind == "arith2":
         if None in (first.rs1, first.rs2, second.rs1, second.rs2):
-            return "dual-op-pair: missing register operand"
+            _fail("dual-op-pair: missing register operand")
         if first.rs1 != second.rs1 or first.rs2 != second.rs2:
-            return "dual-op-pair: source operands differ"
+            _fail("dual-op-pair: source operands differ")
         return None
     if kind == "load_addi":
         if first.rs1 != second.rs1:
-            return "dual-op-pair: base register differs from addi source"
+            _fail("dual-op-pair: base register differs from addi source")
         if first.imm != 0:
-            return "dual-op-pair: load offset must be zero"
+            _fail("dual-op-pair: load offset must be zero")
         if not _width_stride_ok(first, second):
-            return (f"dual-op-pair: addi immediate not a nonzero "
-                    f"{first.access_width}-scaled uimm5")
+            _fail(f"dual-op-pair: addi immediate not a nonzero "
+                  f"{first.access_width}-scaled uimm5")
         return None
     if kind == "store_addi":
         if first.rs1 != second.rs1:
-            return "dual-op-pair: base register differs from addi source"
+            _fail("dual-op-pair: base register differs from addi source")
         if first.imm != 0:
-            return "dual-op-pair: store offset must be zero"
+            _fail("dual-op-pair: store offset must be zero")
         if not _width_stride_ok(first, second):
-            return (f"dual-op-pair: addi immediate not a nonzero "
-                    f"{first.access_width}-scaled uimm5")
+            _fail(f"dual-op-pair: addi immediate not a nonzero "
+                  f"{first.access_width}-scaled uimm5")
         return None
     if kind == "load_shadd":
         if first.rs1 != second.rs1:
-            return "dual-op-pair: load base differs from shadd source"
+            _fail("dual-op-pair: load base differs from shadd source")
         if first.imm != 0:
-            return "dual-op-pair: load offset must be zero"
+            _fail("dual-op-pair: load offset must be zero")
         return None
     if kind == "store_shadd":
         if None in (first.rs1, first.rs2, second.rs1, second.rs2):
-            return "dual-op-pair: missing register operand"
+            _fail("dual-op-pair: missing register operand")
         if {first.rs1, first.rs2} != {second.rs1, second.rs2}:
-            return "dual-op-pair: store regs differ from shadd sources"
+            _fail("dual-op-pair: store regs differ from shadd sources")
         if first.imm != 0:
-            return "dual-op-pair: store offset must be zero"
+            _fail("dual-op-pair: store offset must be zero")
         return None
     if kind == "mem_pair":
         if first.rs1 is None or second.rs1 is None:
-            return "dual-op-pair: missing base register"
+            _fail("dual-op-pair: missing base register")
         if first.rs1 != second.rs1:
-            return "dual-op-pair: base registers differ"
+            _fail("dual-op-pair: base registers differ")
         if first.imm is None or second.imm is None:
-            return "dual-op-pair: missing memory offset"
+            _fail("dual-op-pair: missing memory offset")
         width = first.access_width or (1 << (first.access_shift or 0))
         if abs(first.imm - second.imm) != width:
-            return f"dual-op-pair: offsets must differ by exactly {width}"
+            _fail(f"dual-op-pair: offsets must differ by exactly {width}")
         shift = first.access_shift or 0
         # sp-relative pairs get an 8-bit scaled offset (255 * data_width);
         # general-base pairs use a 5-bit scaled offset (31 * data_width).
@@ -561,53 +579,51 @@ def _dual_shared_ok(first: Instruction, second: Instruction) -> Optional[str]:
         max_off = ((1 << imm_bits) - 1) << shift
         for insn in (first, second):
             if not insn.uimm_fits(imm_bits, shift):
-                return f"dual-op-pair: offset {insn.imm} exceeds {imm_bits}-bit scaled range (max {max_off})"
+                _fail(f"dual-op-pair: offset {insn.imm} exceeds {imm_bits}-bit scaled range (max {max_off})")
         return None
     if kind == "indep_pair":
         # Restricted to: li (is_li), mv (is_mv), addi4spn (is_addi4spn).
         # addi4spn also requires the immediate fits the 5-bit encoding [4,128].
         for insn in (first, second):
             if not _is_li_mv_addi4spn(insn):
-                return (f"dual-op-pair: not a li/mv/addi4spn pattern "
-                        f"(x{insn.rd} = x{insn.rs1} + {insn.imm})")
+                _fail(f"dual-op-pair: not a li/mv/addi4spn pattern "
+                      f"(x{insn.rd} = x{insn.rs1} + {insn.imm})")
             if insn.is_addi4spn and not insn.uimm_fits(5, 2, nonzero='remap'):
-                return f"dual-op-pair: addi4spn immediate {insn.imm} out of range [4,128]"
+                _fail(f"dual-op-pair: addi4spn immediate {insn.imm} out of range [4,128]")
         # Check both directions of independence (reversed_order never set for
         # symmetric tuples, so the outer function only checks A→B).
         if second.rd is not None and second.rd in first.uses_regs:
-            return f"dual-op-pair: B result (x{second.rd}) feeds A"
+            _fail(f"dual-op-pair: B result (x{second.rd}) feeds A")
         return None
-    return "dual-op-pair: unknown match kind"
+    _fail("dual-op-pair: unknown match kind")
 
 
-def _dual_op_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _dual_op_pair(a: Instruction, b: Instruction) -> None:
     """Two ops from a canonical tuple sharing inputs and producing distinct outputs."""
     if (a.mnemonic, b.mnemonic) in _DUAL_TUPLES:
         first, second, reversed_order = a, b, False
     elif (b.mnemonic, a.mnemonic) in _DUAL_TUPLES:
         first, second, reversed_order = b, a, True
     else:
-        return f"dual-op-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple"
+        _fail(f"dual-op-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple")
 
-    reason = _dual_shared_ok(first, second)
-    if reason:
-        return reason
+    _dual_shared_ok(first, second)
 
     # Distinct outputs (where both instructions produce one).
     if a.rd is not None and a.rd == b.rd:
-        return "dual-op-pair: same destination register"
+        _fail("dual-op-pair: same destination register")
 
     # The A-slot op must not feed the B-slot op — these are independent
     # operations, not a producer/consumer chain.  This also forbids the A-slot
     # op from clobbering a shared source before B reads it.
     if a.rd is not None and a.rd in b.uses_regs:
-        return f"dual-op-pair: A result (x{a.rd}) feeds B"
+        _fail(f"dual-op-pair: A result (x{a.rd}) feeds B")
 
     # Reverse (non-canonical) order is only legal when fully independent.
     # Canonical order may let the B-slot op write a shared source (a WAR that
     # resolves correctly because B executes second).
     if reversed_order and b.rd is not None and b.rd in a.uses_regs:
-        return f"dual-op-pair: B result (x{b.rd}) conflicts with sources; reorder not allowed"
+        _fail(f"dual-op-pair: B result (x{b.rd}) conflicts with sources; reorder not allowed")
 
     return None
 
@@ -631,16 +647,16 @@ _LI_BRANCH_A_MN = frozenset({"addi"})
 _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 
 
-def _li_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _li_branch_pair(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
-        return "li-branch-pair: A not li form (must be addi rd, x0, imm)"
+        _fail("li-branch-pair: A not li form (must be addi rd, x0, imm)")
     if not a.imm_fits(8):
-        return f"li-branch-pair: immediate {a.imm} out of 8-bit signed range [-128..127]"
+        _fail(f"li-branch-pair: immediate {a.imm} out of 8-bit signed range [-128..127]")
     if b.rs1 != a.rd and b.rs2 != a.rd:
-        return f"li-branch-pair: B does not use A's result (x{a.rd})"
+        _fail(f"li-branch-pair: B does not use A's result (x{a.rd})")
     if a.rd in b.live_out:
-        return f"li-branch-pair: A's result (x{a.rd}) escapes after B"
+        _fail(f"li-branch-pair: A's result (x{a.rd}) escapes after B")
     return None
 
 
@@ -661,16 +677,16 @@ _ADDI_BRANCH_A_MN = frozenset({"addi", "addiw"})
 _ADDI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 
 
-def _addi_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
     """addi/addiw RSD + comparison branch consuming the result."""
     if not a.is_rsd:
-        return "addi-branch-pair: A not RSD form"
+        _fail("addi-branch-pair: A not RSD form")
     if a.rd not in _RSD_ALU_REGS:
-        return f"addi-branch-pair: rd (x{a.rd}) not in x0..x15"
+        _fail(f"addi-branch-pair: rd (x{a.rd}) not in x0..x15")
     if not a.imm_fits(8):
-        return f"addi-branch-pair: immediate {a.imm} out of 8-bit range [-128..127]"
+        _fail(f"addi-branch-pair: immediate {a.imm} out of 8-bit range [-128..127]")
     if b.rs1 != a.rd and b.rs2 != a.rd:
-        return f"addi-branch-pair: B does not use A's result (x{a.rd})"
+        _fail(f"addi-branch-pair: B does not use A's result (x{a.rd})")
     return None
 
 
@@ -710,7 +726,7 @@ def _shift_for_zero_test(imm) -> Optional[tuple]:
     return None
 
 
-def _bit_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _bit_branch_pair(a: Instruction, b: Instruction) -> None:
     """A isolates or masks bits; B branches on zero/nonzero; A's result is dead after B.
 
     andi with a pow2 immediate isolates a single bit and encodes directly.
@@ -720,18 +736,18 @@ def _bit_branch_pair(a: Instruction, b: Instruction) -> Optional[str]:
     All forms require a zero-test branch (beqz/bnez or beq/bne with rs2==x0).
     """
     if a.rd is None:
-        return "bit-branch-pair: A has no destination"
+        _fail("bit-branch-pair: A has no destination")
     # beq/bne with zero are aliases for beqz/bnez; non-zero comparisons not supported
     if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
-        return "bit-branch-pair: beq/bne B slot requires rs2==zero"
+        _fail("bit-branch-pair: beq/bne B slot requires rs2==zero")
     if a.mnemonic == "andi":
         if not _is_pow2_imm(a.imm) and _shift_for_zero_test(a.imm) is None:
-            return f"bit-branch-pair: andi immediate {a.imm} not pow2 or shift-expressible"
+            _fail(f"bit-branch-pair: andi immediate {a.imm} not pow2 or shift-expressible")
     # slli/srli: any shift amount is accepted
     if b.rs1 != a.rd:
-        return f"bit-branch-pair: B tests x{b.rs1} but A's result is x{a.rd}"
+        _fail(f"bit-branch-pair: B tests x{b.rs1} but A's result is x{a.rd}")
     if b.rd != a.rd and a.rd in b.live_out:
-        return f"bit-branch-pair: A's result (x{a.rd}) escapes after B"
+        _fail(f"bit-branch-pair: A's result (x{a.rd}) escapes after B")
     return None
 
 
@@ -759,57 +775,66 @@ _PRE_INC_A_MN = frozenset(a for a, _ in _PRE_INC_TUPLES)
 _PRE_INC_B_MN = frozenset(b for _, b in _PRE_INC_TUPLES)
 
 
-def _pre_inc_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
-        return f"pre-inc-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple"
+        _fail(f"pre-inc-pair: ({a.mnemonic}, {b.mnemonic}) not a recognised tuple")
     if not a.is_rsd:
-        return "pre-inc-pair: A not in RSD form (rd not a source register)"
+        _fail("pre-inc-pair: A not in RSD form (rd not a source register)")
     if a.rd is None:
-        return "pre-inc-pair: A has no destination"
+        _fail("pre-inc-pair: A has no destination")
     if b.rs1 != a.rd:
-        return f"pre-inc-pair: B rs1 (x{b.rs1}) does not match A result (x{a.rd})"
+        _fail(f"pre-inc-pair: B rs1 (x{b.rs1}) does not match A result (x{a.rd})")
     if b.has_mem_operand and b.imm != 0:
-        return "pre-inc-pair: B memory offset must be zero"
+        _fail("pre-inc-pair: B memory offset must be zero")
     if b.rd is not None and b.rd == a.rd:
-        return "pre-inc-pair: A and B write same register"
+        _fail("pre-inc-pair: A and B write same register")
     return None
 
 
-_EPILOGUE_A_MN = frozenset({"addi"})
-_EPILOGUE_B_MN = frozenset({"jalr", "ret"})
+_EPILOGUE_A_MN = frozenset({"addi", "jalr", "ret"})
+_EPILOGUE_B_MN = frozenset({"addi", "jalr", "ret"})
 
 
-def _prologue_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _prologue_pair(a: Instruction, b: Instruction) -> None:
     """A reserves stack frame, B stores return address at top of frame
     A: addi sp, sp, -N  - 7-bit uimm*16, nonzero
     B: sw ra, N-4(sp)  - store return address
     """
     if not a.nimm_fits(7, 4, nonzero=True):
-        return "addi out of range"
+        _fail("A-sp adjustment not a nonzero 7-bit nimm×16")
     if a.rd != 2 or a.rs1 != 2:
-        return "A not addi sp, sp"
-    if b.rs1 != 1:
-        return "B not sw/sd ra"
+        _fail("A-not addi sp, sp")
+    if b.rs1 != 2:
+        _fail("B-store base is not sp")
+    if b.rs2 != 1:
+        _fail("B-store value is not ra")
+    if b.access_width is None:
+        _fail("B-store has no access width")
     if b.imm + b.access_width + a.imm != 0:
-        return "B doesn't store at top of frame"
+        _fail("B-store is not at top of frame")
+    return None
 
 
-def _epilogue_pair(a: Instruction, b: Instruction) -> Optional[str]:
-    """A restores sp; B is an unconditional return or jump.
-
-    A: addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
-    B: ret or jalr rd∈{0,1} with 12-bit signed offset
-    """
-    if a.rd != 2 or a.rs1 != 2:
-        return "epilogue-pair: A not addi sp, sp"
-    if not a.uimm_fits(7, 4, nonzero=True):
-        return (f"epilogue-pair: sp adjustment {a.imm} not a nonzero "
-                f"7-bit uimm×16 (max {127*16})")
-    if b.rd not in (0, 1):
-        return f"epilogue-pair: B rd (x{b.rd}) must be x0 or x1"
-    if not b.imm_fits(12):
-        return f"epilogue-pair: jalr offset {b.imm} out of 12-bit range"
+def _epilogue_pair(a: Instruction, b: Instruction) -> None:
+    """Stack restore paired with an unconditional return or jump, in either order."""
+    if a.mnemonic == "addi":
+        sp_adj, jump = a, b
+    else:
+        sp_adj, jump = b, a
+    if sp_adj.mnemonic != "addi":
+        _fail("A/B-missing addi sp, sp")
+    if jump.mnemonic not in _EPILOGUE_B_MN or jump.mnemonic == "addi":
+        _fail("A/B-missing return or jump")
+    if sp_adj.rd != 2 or sp_adj.rs1 != 2:
+        _fail("A-sp adjust is not addi sp, sp")
+    if not sp_adj.uimm_fits(7, 4, nonzero=True):
+        _fail(f"A-sp adjustment {sp_adj.imm} not a nonzero "
+              f"7-bit uimm×16 (max {127*16})")
+    if jump.rd not in (0, 1):
+        _fail(f"B-jump rd (x{jump.rd}) must be x0 or x1")
+    if not jump.imm_fits(12):
+        _fail(f"B-jalr offset {jump.imm} out of 12-bit range")
     return None
 
 
@@ -849,27 +874,25 @@ def _is_small_jump(insn: Instruction) -> bool:
     return False
 
 
-def _arith_jump_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
     if not _is_small_jump(b):
-        return f"arith-jump-pair: B ({b.mnemonic}) is not a small unconditional jump"
-    r = _rsd_alu_diagnose(a)
-    if r:
-        return "arith-jump-pair" + r[len("rsd-alu-pair"):]
+        _fail(f"arith-jump-pair: B ({b.mnemonic}) is not a small unconditional jump")
+    _rsd_alu_diagnose(a)
     return None
 
 
-def _mvload_jump_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
     """mv / li, or a small-offset load, followed by a small control transfer."""
     if not _is_small_jump(b):
-        return f"mvload-jump-pair: B ({b.mnemonic}) is not a small unconditional jump"
+        _fail(f"mvload-jump-pair: B ({b.mnemonic}) is not a small unconditional jump")
     if a.is_mv or a.is_li:
         return None
     if a.reads_memory:
         if not _arith_mem_small_offset_ok(a):
-            return "mvload-jump-pair: load offset not in 2-bit scaled range (0..3×width)"
+            _fail("mvload-jump-pair: load offset not in 2-bit scaled range (0..3×width)")
         return None
-    return "mvload-jump-pair: A is not mv/li or a small-offset load"
+    _fail("mvload-jump-pair: A is not mv/li or a small-offset load")
 
 RULES: list[PairingRule] = [
     PairingRule(

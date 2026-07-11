@@ -2,8 +2,8 @@
 scheduler/pairing.py — Pairing mechanism: can_pair(), greedy_pair(), stamp_slot_eligibility().
 
 The pairing model is encoding-based allowlist: a pair (a, b) is valid iff at
-least one PairingRule accepts it. can_pair() returns None on success or a
-reason string if all applicable rules reject.
+least one PairingRule accepts it. Rule checks raise PairingFailure on reject;
+can_pair() returns None on success or a reason string if all applicable rules reject.
 
 Within a packet, a executes first (A-slot) and b executes second (B-slot).
 Pairing rules express only hardware structural constraints — not register
@@ -16,7 +16,10 @@ from __future__ import annotations
 from typing import Optional
 
 from isa.instruction import Instruction
-from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN
+from scheduler.rules import (
+    RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN,
+    PairingFailure,
+)
 
 # Re-export PairingRule so callers that imported it from here still work.
 from scheduler.rules import PairingRule  # noqa: F401
@@ -65,15 +68,17 @@ def stamp_solo_reasons(instructions: list[Instruction]) -> None:
             if not a_ok:
                 _record_solo_reason(insn, f"unsupported A-slot mnemonic ({insn.mnemonic})", rule.name)
             elif rule.diagnose_a is not None:
-                reason = rule.diagnose_a(insn)
-                if reason is not None:
-                    _record_solo_reason(insn, reason, rule.name)
+                try:
+                    rule.diagnose_a(insn)
+                except PairingFailure as exc:
+                    _record_solo_reason(insn, exc.reason, rule.name)
             if not b_ok:
                 _record_solo_reason(insn, f"unsupported B-slot mnemonic ({insn.mnemonic})", rule.name)
             elif rule.diagnose_b is not None and rule.diagnose_b is not rule.diagnose_a:
-                reason = rule.diagnose_b(insn)
-                if reason is not None:
-                    _record_solo_reason(insn, reason, rule.name)
+                try:
+                    rule.diagnose_b(insn)
+                except PairingFailure as exc:
+                    _record_solo_reason(insn, exc.reason, rule.name)
 
 
 def _a_eligible_rules(a: Instruction) -> list:
@@ -111,9 +116,12 @@ def find_b_partners(a: Instruction, candidates: list[Instruction]) -> list[tuple
                 continue
             if not all(getattr(b, p) for p in rule.b_prerequisites):
                 continue
-            if rule.check(a, b) is None:
-                results.append((b, rule))
-                break
+            try:
+                rule.check(a, b)
+            except PairingFailure:
+                continue
+            results.append((b, rule))
+            break
     return results
 
 
@@ -132,10 +140,12 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
-        result = rule.check(a, b)
-        if result is None:
-            return None
-        reasons.append(result)
+        try:
+            rule.check(a, b)
+        except PairingFailure as exc:
+            reasons.append(exc.reason)
+            continue
+        return None
     if reasons:
         return "; ".join(reasons)
     return "no applicable encoding"
@@ -194,9 +204,10 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                                 for p in failed:
                                     _record_solo_reason(curr, p, rule.name)
                                 continue
-                            reason = rule.check(free, curr)
-                            if reason is not None:
-                                _record_solo_reason(curr, reason, rule.name)
+                            try:
+                                rule.check(free, curr)
+                            except PairingFailure as exc:
+                                _record_solo_reason(curr, exc.reason, rule.name)
                     result.append(('solo', free))
                     free = curr
                     i += 1

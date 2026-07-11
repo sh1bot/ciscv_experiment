@@ -13,6 +13,7 @@ from scheduler.pairing import (
     can_pair, greedy_pair, stamp_slot_eligibility, stamp_solo_reasons, RULES,
     find_b_partners,
 )
+from scheduler.rules import PairingFailure
 
 
 def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=None):
@@ -580,14 +581,16 @@ class TestIndepPair:
         a = make_insn("addi", rd=10, rs1=10, imm=48)
         b = make_insn("ret",  rd=0, rs1=1, imm=0)
         epi = next(r for r in RULES if r.name == "epilogue-pair")
-        assert epi.check(a, b) is not None
+        with pytest.raises(PairingFailure):
+            epi.check(a, b)
 
     def test_epilogue_negative_sp_no_pair(self):
         """Negative sp adjustment (prologue) doesn't qualify as an *epilogue*."""
         a = make_insn("addi", rd=2, rs1=2, imm=-48)
         b = make_insn("ret",  rd=0, rs1=1, imm=0)
         epi = next(r for r in RULES if r.name == "epilogue-pair")
-        assert epi.check(a, b) is not None
+        with pytest.raises(PairingFailure):
+            epi.check(a, b)
 
     def test_epilogue_sp_adjust_out_of_range_no_pair(self):
         """sp adjustment beyond 7-bit uimm×16 (>2032) doesn't pair."""
@@ -692,7 +695,8 @@ class TestPreIncPair:
         a = make_insn("addi", rd=12, rs1=12, imm=8)
         b = make_insn("ld", rd=10, rs1=14, imm=0)     # loads from a4, not a2
         pre_inc = next(r for r in RULES if r.name == "pre-inc-pair")
-        assert pre_inc.check(a, b) is not None
+        with pytest.raises(PairingFailure):
+            pre_inc.check(a, b)
 
     def test_addi_ld_nonzero_offset_no_pair(self):
         """B memory offset must be zero."""
