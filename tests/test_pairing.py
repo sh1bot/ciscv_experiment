@@ -3,7 +3,7 @@ Tests for scheduler/pairing.py — pairing rules and can_pair().
 
 Covers the full rule set defined in scheduler/rules.py (rsd-alu-pair,
 chain/load/store-chain, the *-branch rules, mem-pair, arith-mem-pair,
-dual-op-pair, pre-inc-pair, epilogue-pair, ...).  See scheduler/RULES.md
+dual-*-pair, pre-inc-pair, epilogue-pair, ...).  See scheduler/RULES.md
 for the authoritative description of each rule.
 """
 
@@ -204,7 +204,7 @@ class TestRsdAluPair:
 
 
 # ---------------------------------------------------------------------------
-# dual-op-pair: two ops from a canonical tuple sharing inputs, distinct outputs
+# dual-*-pair family: two ops from a canonical tuple sharing inputs, distinct outputs
 # ---------------------------------------------------------------------------
 
 class TestDualOpPair:
@@ -235,7 +235,7 @@ class TestDualOpPair:
     def test_a_clobbers_shared_source_no_pair(self):
         """A-slot op writing a shared source corrupts B's read.
 
-        min/max chosen so no chain/rsd rule applies — isolates dual-op-pair.
+        min/max chosen so no chain/rsd rule applies — isolates dual-arith2-pair.
         """
         a = make_insn("min", rd=12, rs1=12, rs2=13)   # rd == shared rs1
         b = make_insn("max", rd=11, rs1=12, rs2=13)
@@ -713,11 +713,11 @@ class TestPreIncPair:
         assert can_pair(a, b) is not None
 
     def test_post_inc_pairs_as_dual_not_pre_inc(self):
-        """(ld, addi) is the canonical post-increment order and matches dual-op-pair/load_addi.
+        """(ld, addi) is the canonical post-increment order and matches dual-load-addi-pair.
         pre-inc-pair only matches (addi, ld), not the reverse."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("addi", rd=12, rs1=12, imm=8)
-        assert can_pair(a, b) is None  # accepted — but by dual-op-pair, not pre-inc-pair
+        assert can_pair(a, b) is None  # accepted — but by dual-load-addi-pair, not pre-inc-pair
 
     def test_unrecognised_tuple_no_pair(self):
         """addi+slt is not in the pre-inc tuple table."""

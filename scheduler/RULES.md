@@ -525,23 +525,24 @@ lw   a2, 0(a0)      ; B reads a0 = A's result → "A result feeds B"
 
 ---
 
-### 3.11 `dual-op-pair`
+### 3.11 dual-op family (`dual-*-pair`)
 
-The most general rule: two ops drawn from the **same canonical opcode tuple**
-that share their inputs (or operands by role) and write distinct outputs. One
-packet, two results. The legal tuples and their "match kinds" live in
-`_DUAL_TUPLES`:
+Two ops drawn from the **same canonical opcode tuple** that share their inputs
+(or operands by role) and write distinct outputs. One packet, two results. The
+legal tuples live in `_DUAL_TUPLES`; each family is its own PairingRule (so its
+statistics stand alone) but all share one mechanism (`dual_family`):
 
-| Kind | Tuples | Sharing requirement |
+| Rule | Tuples | Sharing requirement |
 |---|---|---|
-| `arith2` | `add/sub`, `addw/subw`, `min/max`, `minu/maxu`, `mul/mulh`, `mul/mulhu`, `mul/mulhsu`, `div/rem`, `divu/remu`, `divw/remw`, `divuw/remuw` | both R-type; share `rs1` *and* `rs2` positionally |
-| `load_addi` | `ld/addi`, `lw/addi`, `lwu/addi` | load base == addi source; load offset 0; addi imm = nonzero width-scaled `uimm5` (the stride) |
-| `store_addi` | `sd/addi`, `sw/addi` | store base == addi source; store offset 0; addi imm = nonzero width-scaled `uimm5` |
-| `load_shadd` | `ld/sh3add`, `lw/sh2add`, `lwu/sh2add` | load base == shadd source; load offset 0 (register post-increment form) |
-| `store_shadd` | `sd/sh3add`, `sw/sh2add` | store `{base, value}` == shadd's two sources; store offset 0 |
-| `indep_pair` | `addi/addi` | both must be `li` / `mv` / `addi4spn`; `addi4spn` imm must fit `uimm5×4` in `[4,128]` |
+| `dual-arith2-pair` | `add/sub`, `addw/subw`, `min/max`, `minu/maxu`, `mul/mulh`, `mul/mulhu`, `mul/mulhsu`, `div/rem`, `divu/remu`, `divw/remw`, `divuw/remuw` | both R-type; share `rs1` *and* `rs2` positionally |
+| `dual-load-addi-pair` | `ld/addi`, `lw/addi`, `lwu/addi` | load base == addi source; load offset 0; addi imm = nonzero width-scaled `uimm5` (the stride) |
+| `dual-store-addi-pair` | `sd/addi`, `sw/addi` | store base == addi source; store offset 0; addi imm = nonzero width-scaled `uimm5` |
+| `dual-load-shadd-pair` | `ld/sh3add`, `lw/sh2add`, `lwu/sh2add` | load base == shadd source; load offset 0 (register post-increment form) |
+| `dual-store-shadd-pair` | `sd/sh3add`, `sw/sh2add` | store `{base, value}` == shadd's two sources; store offset 0 |
+| `dual-indep-pair` | `addi/addi` | both must be `li` / `mv` / `addi4spn`; `addi4spn` imm must fit `uimm5×4` in `[4,128]` |
 
-Common constraints applied to *every* kind (`_dual_op_pair`):
+Common constraints applied to *every* family (via `dual_family` /
+`_canonical_dual` / `_reject_dependence`):
 
 * the pair must form a recognised tuple in **either** order;
 * outputs must be distinct (`a.rd != b.rd` where both exist);
@@ -871,7 +872,7 @@ ret
 | `base-chain-load-pair` | load | load | pointer chase, dead | A offset 0; B offset uimm10×w |
 | `mem-pair` | load/store | same | adjacent elements | offsets differ by width; uimm5/8×w |
 | `arith-mem-pair` | RSD arith | load/store | independent | A regs x0–x15; B offset 0..3×w |
-| `dual-op-pair` | tuple op | tuple op | shared inputs | per-kind (see table above) |
+| `dual-*-pair` | tuple op | tuple op | shared inputs | per-family (see §3.11) |
 | `li-branch-pair` | li | cmp-branch | A→B, dead | imm8 signed |
 | `addi-branch-pair` | addi/addiw RSD | cmp-branch | A→B, alive | rd x0–x15; imm8 signed |
 | `bit-branch-pair` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
