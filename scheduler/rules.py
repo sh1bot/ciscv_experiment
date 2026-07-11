@@ -210,7 +210,7 @@ def a_is_rsd_or_li(func: Callable):
 def b_is_rsd(func: Callable):
     @wraps(func)
     def check_b_is_rsd(a: Instruction, b: Instruction):
-        if not a.is_rsd:
+        if not b.is_rsd:
             return "B-is-not-rsd"
         return func(a, b)
     return check_b_is_rsd
@@ -223,6 +223,29 @@ def b_is_rsd_or_li(func: Callable):
             return "B-is-not-rsd-or-li"
         return func(a, b)
     return check_b_is_rsd_or_li
+
+
+# is_rsd is structural ("rd is also a source"): it accepts rd==rs2 as well as
+# rd==rs1.  But the compressed two-address encoding only realizes rd==rs2 by
+# swapping operands, which is legal only for a commutative op.  These decorators
+# refine the loose is_rsd gate down to what the encoding can actually express;
+# li forms (is_rsd is False) pass through untouched.
+def a_rsd_swappable(func: Callable):
+    @wraps(func)
+    def check_a_rsd_swappable(a: Instruction, b: Instruction):
+        if a.is_rsd and a.rd != a.rs1 and not a.is_commutative:
+            return "A-rd==rs2-requires-commutative"
+        return func(a, b)
+    return check_a_rsd_swappable
+
+
+def b_rsd_swappable(func: Callable):
+    @wraps(func)
+    def check_b_rsd_swappable(a: Instruction, b: Instruction):
+        if b.is_rsd and b.rd != b.rs1 and not b.is_commutative:
+            return "B-rd==rs2-requires-commutative"
+        return func(a, b)
+    return check_b_rsd_swappable
 
 
 def exclusive_rd(func: Callable):
@@ -294,6 +317,8 @@ def uses_low_regs_here(*these_regs: str):
 
 @a_is_rsd_or_li
 @b_is_rsd_or_li
+@a_rsd_swappable
+@b_rsd_swappable
 @uses_low_regs
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
@@ -982,6 +1007,7 @@ def _is_small_jump(insn: Instruction) -> bool:
 
 
 @a_is_rsd_or_li
+@a_rsd_swappable
 @uses_low_regs_here("a.rd", "a.rs2")
 def _arith_jump_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
