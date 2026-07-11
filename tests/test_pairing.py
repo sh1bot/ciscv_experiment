@@ -10,7 +10,7 @@ for the authoritative description of each rule.
 import pytest
 from isa.instruction import Instruction
 from scheduler.pairing import (
-    can_pair, greedy_pair, stamp_slot_eligibility, stamp_solo_reasons, RULES,
+    can_pair, greedy_pair, stamp_slot_eligibility, RULES,
     find_b_partners,
 )
 
@@ -823,14 +823,6 @@ class TestNoApplicableRule:
 # ---------------------------------------------------------------------------
 
 class TestSoloReasons:
-
-    def test_intrinsic_reasons_from_stamp(self):
-        """stamp_solo_reasons gives each instruction its own intrinsic reasons."""
-        a = make_add(10, 11, 12)   # not rsd-form
-        b = make_add(13, 14, 15)
-        stamp_solo_reasons([a, b])
-        assert "rsd-alu-pair" in a.solo_reasons["not RSD or li form"]
-        assert "rsd-alu-pair" in b.solo_reasons["not RSD or li form"]
 
     def test_greedy_annotates_b_with_pair_specific_reason(self):
         """When A is eligible but pair fails, B gets the pair-specific reason."""

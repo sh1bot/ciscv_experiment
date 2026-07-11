@@ -36,12 +36,6 @@ class PairingRule:
     # Properties that must be True on b for the rule to be applicable.
     b_prerequisites: list = field(default_factory=list)
 
-    # Per-slot self-diagnosis: diagnose_a(insn) / diagnose_b(insn) -> reason str
-    # or None if the instruction passes all per-slot constraints for that slot.
-    # Called after mnemonic_set passes; need not re-check mnemonic membership.
-    diagnose_a: Optional[Callable] = None
-    diagnose_b: Optional[Callable] = None
-
 
 # ---------------------------------------------------------------------------
 # pairing failure exception
@@ -340,11 +334,6 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # chain-alu-pair
 # ---------------------------------------------------------------------------
 
-def _chain_alu_diagnose(insn: Instruction) -> Optional[str]:
-    """Per-slot self-diagnosis for chain-alu-pair (no RSD requirement)."""
-    return _alu_diagnose_regs_imm(insn)
-
-
 @uses_low_regs
 @must_chain
 @no_escape
@@ -396,10 +385,6 @@ def _load_chain_diagnose_a(insn: Instruction) -> Optional[str]:
     return _sp_mem_diagnose(insn)
 
 
-def _load_chain_diagnose_b(insn: Instruction) -> Optional[str]:
-    return _alu_diagnose_regs_imm(insn)
-
-
 @chain_uses_low_regs
 @must_chain
 @no_escape
@@ -413,10 +398,6 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     if a.rd is None:
         return "load has no destination register"
     return None
-
-
-def _store_chain_diagnose_a(insn: Instruction) -> Optional[str]:
-    return _alu_diagnose_regs_imm(insn)
 
 
 def _store_chain_diagnose_b(insn: Instruction) -> Optional[str]:
@@ -1041,24 +1022,18 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_RSD_ALU_MN,
         b_mnemonic_set=_RSD_ALU_MN,
         check=_chain_alu_pair,
-        diagnose_a=_chain_alu_diagnose,
-        diagnose_b=_chain_alu_diagnose,
     ),
     PairingRule(
         name="load-chain-alu-pair",
         a_mnemonic_set=_SP_LOAD_MN,
         b_mnemonic_set=_RSD_ALU_MN,
         check=_load_chain_alu_pair,
-        diagnose_a=_load_chain_diagnose_a,
-        diagnose_b=_load_chain_diagnose_b,
     ),
     PairingRule(
         name="store-chain-alu-pair",
         a_mnemonic_set=_RSD_ALU_MN,
         b_mnemonic_set=_SP_STORE_MN,
         check=_store_chain_alu_pair,
-        diagnose_a=_store_chain_diagnose_a,
-        diagnose_b=_store_chain_diagnose_b,
     ),
     PairingRule(
         name="load-sp-branch",

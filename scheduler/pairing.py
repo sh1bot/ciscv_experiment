@@ -35,33 +35,6 @@ def stamp_slot_eligibility(instructions: list[Instruction]) -> None:
         insn.b_slot_ok = not any(getattr(insn, p) for p in B_SLOT_DISQUALIFIERS)
 
 
-def stamp_solo_reasons(instructions: list[Instruction]) -> None:
-    """Precompute per-instruction solo reasons from rule self-diagnosis.
-
-    Checks mnemonic_set membership, then runs diagnose_a / diagnose_b against
-    every instruction and records reasons on the instruction itself.
-    """
-    for insn in instructions:
-        for rule in RULES:
-            a_ok = rule.a_mnemonic_set is None or insn.mnemonic in rule.a_mnemonic_set
-            b_ok = rule.b_mnemonic_set is None or insn.mnemonic in rule.b_mnemonic_set
-            if not a_ok and not b_ok:
-                insn.solo_reasons["unsupported mnemonic"].add(rule.name)
-                continue
-            if not a_ok:
-                insn.solo_reasons["unsupported A-slot mnemonic"].add(rule.name)
-            elif rule.diagnose_a is not None:
-                reason = rule.diagnose_a(insn)
-                if reason is not None:
-                    insn.solo_reasons[reason].add(rule.name)
-            if not b_ok:
-                insn.solo_reasons["unsupported B-slot mnemonic"].add(rule.name)
-            elif rule.diagnose_b is not None and rule.diagnose_b is not rule.diagnose_a:
-                reason = rule.diagnose_b(insn)
-                if reason is not None:
-                    insn.solo_reasons[reason].add(rule.name)
-
-
 def _a_eligible_rules(a: Instruction) -> list:
     """Return the subset of RULES for which a passes A-slot mnemonic and prerequisites.
 
