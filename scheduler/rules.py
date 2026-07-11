@@ -73,17 +73,12 @@ _RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
 # Shared per-slot helpers (mnemonic already confirmed by rule.mnemonic_set)
 # ---------------------------------------------------------------------------
 
-def _alu_diagnose_regs_imm(insn: Instruction,
-                           exclude: Optional[int] = None) -> None:
-    """Check register range and immediate constraints only; mnemonic already ok.
+def _imm_in_range(insn: Instruction) -> None:
+    """Immediate / shift-amount range check for an RSD ALU op (mnemonic already ok).
 
-    exclude: a register number that is exempt from the range check (the chain
-    register, which is not encoded in the packet and may be anywhere).
+    Register-range checks are not done here: they belong to the uses_low_regs
+    family of decorators, which every caller already applies.
     """
-    for field in ("rd", "rs1", "rs2"):
-        reg = getattr(insn, field, None)
-        if reg is not None and reg != exclude and reg not in _RSD_ALU_REGS:
-            raise NotPair("out-of-range-register")
     if insn.mnemonic in _RSD_IMM_MN:
         imm = insn.imm
         # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
@@ -97,7 +92,6 @@ def _alu_diagnose_regs_imm(insn: Instruction,
             raise NotPair("missing-shift-amount")
         if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
             raise NotPair("out-of-range-immediate")
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -294,24 +288,22 @@ def chain_uses_low_regs(func: Callable):
     return check_low_regs1
 
 
-def a_chain_alu(func: Callable):
-    """A-slot passes the RSD ALU range/immediate checks, with the chain register
-    (a.rd, not encoded in the packet) exempt from the range check."""
+def a_imm_ok(func: Callable):
+    """A-slot's immediate / shift amount is in the RSD-encodable range."""
     @wraps(func)
-    def check_a_chain_alu(a: Instruction, b: Instruction):
-        _alu_diagnose_regs_imm(a, exclude=a.rd)
+    def check_a_imm_ok(a: Instruction, b: Instruction):
+        _imm_in_range(a)
         return func(a, b)
-    return check_a_chain_alu
+    return check_a_imm_ok
 
 
-def b_chain_alu(func: Callable):
-    """B-slot passes the RSD ALU range/immediate checks, with the chain register
-    (a.rd) exempt from the range check."""
+def b_imm_ok(func: Callable):
+    """B-slot's immediate / shift amount is in the RSD-encodable range."""
     @wraps(func)
-    def check_b_chain_alu(a: Instruction, b: Instruction):
-        _alu_diagnose_regs_imm(b, exclude=a.rd)
+    def check_b_imm_ok(a: Instruction, b: Instruction):
+        _imm_in_range(b)
         return func(a, b)
-    return check_b_chain_alu
+    return check_b_imm_ok
 
 
 def uses_low_regs_here(*these_regs: str):
@@ -334,6 +326,8 @@ def uses_low_regs_here(*these_regs: str):
 @a_rsd_swappable
 @b_rsd_swappable
 @uses_low_regs
+@a_imm_ok
+@b_imm_ok
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     """Both instructions RSD or li form, x0..x15, immediates in range, and the
@@ -345,9 +339,6 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     not be in x0..x15) or B does not (making A's write dead).  Either way this
     rule should not claim the pair; require distinct destinations.
     """
-    _alu_diagnose_regs_imm(a)
-    _alu_diagnose_regs_imm(b)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -357,8 +348,8 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 @uses_low_regs
 @must_chain
 @no_escape
-@a_chain_alu
-@b_chain_alu
+@a_imm_ok
+@b_imm_ok
 def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A computes a value that B immediately consumes; that value is dead after B.
 
@@ -390,21 +381,20 @@ _ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})
 ALL_BRANCH_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu", "beqz", "bnez"})
 
 
-def _sp_mem_diagnose(insn: Instruction) -> None:
+def _sp_mem_check(insn: Instruction) -> None:
     """sp-relative memory op with a nonnegative 8-bit scaled offset."""
     if insn.rs1 != 2:
         raise NotPair("not-SP-base")
     shift = insn.access_shift or 0
     if not insn.uimm_fits(8, shift):
-        raise NotPair(f"out-of-range-immediate")
-    return None
+        raise NotPair("out-of-range-immediate")
 
 
 def a_sp_mem(func: Callable):
     """A-slot is an sp-relative memory op with an in-range 8-bit scaled offset."""
     @wraps(func)
     def check_a_sp_mem(a: Instruction, b: Instruction):
-        _sp_mem_diagnose(a)
+        _sp_mem_check(a)
         return func(a, b)
     return check_a_sp_mem
 
@@ -413,7 +403,7 @@ def b_sp_mem(func: Callable):
     """B-slot is an sp-relative memory op with an in-range 8-bit scaled offset."""
     @wraps(func)
     def check_b_sp_mem(a: Instruction, b: Instruction):
-        _sp_mem_diagnose(b)
+        _sp_mem_check(b)
         return func(a, b)
     return check_b_sp_mem
 
@@ -425,7 +415,7 @@ def b_sp_mem(func: Callable):
 @must_chain
 @no_escape
 @a_sp_mem
-@b_chain_alu
+@b_imm_ok
 def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
     return None
@@ -434,7 +424,7 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
 @chain_uses_low_regs
 @must_chain_stored
 @no_escape
-@a_chain_alu
+@a_imm_ok
 @b_sp_mem
 def _store_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
@@ -1015,13 +1005,12 @@ def _is_small_jump(insn: Instruction) -> bool:
 
 @a_is_rsd_or_li
 @a_rsd_swappable
-@uses_low_regs_here("a.rd", "a.rs2")
+@uses_low_regs_here("a.rd", "a.rs1", "a.rs2")
+@a_imm_ok
 def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
-    _alu_diagnose_regs_imm(a)
     if not _is_small_jump(b):
         raise NotPair("B-not-small-jump")
-    return None
 
 
 def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
