@@ -2,7 +2,9 @@
 scheduler/pairing.py — Pairing mechanism: can_pair(), greedy_pair(), stamp_slot_eligibility().
 
 The pairing model is encoding-based allowlist: a pair (a, b) is valid iff at
-least one PairingRule accepts it. can_pair() returns None on success or a
+least one PairingRule accepts it. A rule's check() raises NotPair(reason) to
+reject a candidate and returns None to accept it; this module catches NotPair
+at each check() call site. can_pair() returns None on success or a joined
 reason string if all applicable rules reject.
 
 Within a packet, a executes first (A-slot) and b executes second (B-slot).
@@ -16,7 +18,7 @@ from __future__ import annotations
 from typing import Optional
 
 from isa.instruction import Instruction
-from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN
+from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN, NotPair
 
 # Re-export PairingRule so callers that imported it from here still work.
 from scheduler.rules import PairingRule  # noqa: F401
@@ -70,9 +72,12 @@ def find_b_partners(a: Instruction, candidates: list[Instruction]) -> list[tuple
                 continue
             if not all(getattr(b, p) for p in rule.b_prerequisites):
                 continue
-            if rule.check(a, b) is None:
-                results.append((b, rule))
-                break
+            try:
+                rule.check(a, b)
+            except NotPair:
+                continue
+            results.append((b, rule))
+            break
     return results
 
 
@@ -91,10 +96,11 @@ def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
             continue
         if not all(getattr(b, p) for p in rule.b_prerequisites):
             continue
-        result = rule.check(a, b)
-        if result is None:
+        try:
+            rule.check(a, b)
             return None
-        reasons.append(result)
+        except NotPair as exc:
+            reasons.append(exc.reason)
     if reasons:
         return "; ".join(reasons)
     return "no applicable encoding"
@@ -153,9 +159,10 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                                 for p in failed:
                                     curr.solo_reasons[p].update(f"{rule.name}: {p}" for p in failed)
                                 continue
-                            reason = rule.check(free, curr)
-                            if reason is not None:
-                                curr.solo_reasons[reason].add(rule.name)
+                            try:
+                                rule.check(free, curr)
+                            except NotPair as exc:
+                                curr.solo_reasons[exc.reason].add(rule.name)
                     result.append(('solo', free))
                     free = curr
                     i += 1
