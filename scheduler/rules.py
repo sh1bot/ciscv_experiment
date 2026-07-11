@@ -789,8 +789,10 @@ def _prologue_pair(a: Instruction, b: Instruction) -> Optional[str]:
         return "addi out of range"
     if a.rd != 2 or a.rs1 != 2:
         return "A not addi sp, sp"
-    if b.rs1 != 1:
-        return "B not sw/sd ra"
+    if b.rs1 != 2:
+        return "B-not-SP-base"
+    if b.rs2 != 1:
+        return "B-not-RA-src"
     if b.imm + b.access_width + a.imm != 0:
         return "B doesn't store at top of frame"
 
