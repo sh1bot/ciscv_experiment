@@ -230,6 +230,7 @@ def exclusive_rd(func: Callable):
     def check_rd_exclusive(a: Instruction, b: Instruction):
         if a.rd and b.rd and a.rd == b.rd:  # zeroes and Nones aren't collisions
             return "rd-collision"
+        return func(a, b)
     return check_rd_exclusive
 
 
