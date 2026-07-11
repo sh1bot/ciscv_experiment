@@ -170,6 +170,10 @@ class Instruction:
         return self.reads_memory or self.writes_memory or self._has_mem_operand
 
     @property
+    def rbase(self) -> Optional[int]:
+        return self.rs1 if self.has_mem_operand else None
+
+    @property
     def reads_stack(self) -> bool:
         """Load instruction whose base register is sp (x2)."""
         return self.reads_memory and self.rs1 == 2
