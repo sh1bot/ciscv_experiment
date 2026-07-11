@@ -244,6 +244,8 @@ class Instruction:
             "and", "or", "xor",
             "min", "minu", "max", "maxu",
             "fadd.s", "fadd.d", "fmul.s", "fmul.d",
+            "beq", "bne", "blt", "bge", "bltu", "bgeu",
+            "beqz", "bnez", "bltz", "bgez", "blez", "bgtz",
         }
 
     @property
