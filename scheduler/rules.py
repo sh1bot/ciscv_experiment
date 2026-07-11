@@ -294,6 +294,26 @@ def chain_uses_low_regs(func: Callable):
     return check_low_regs1
 
 
+def a_chain_alu(func: Callable):
+    """A-slot passes the RSD ALU range/immediate checks, with the chain register
+    (a.rd, not encoded in the packet) exempt from the range check."""
+    @wraps(func)
+    def check_a_chain_alu(a: Instruction, b: Instruction):
+        if r := _alu_diagnose_regs_imm(a, exclude=a.rd): return r
+        return func(a, b)
+    return check_a_chain_alu
+
+
+def b_chain_alu(func: Callable):
+    """B-slot passes the RSD ALU range/immediate checks, with the chain register
+    (a.rd) exempt from the range check."""
+    @wraps(func)
+    def check_b_chain_alu(a: Instruction, b: Instruction):
+        if r := _alu_diagnose_regs_imm(b, exclude=a.rd): return r
+        return func(a, b)
+    return check_b_chain_alu
+
+
 def uses_low_regs_here(*these_regs: str):
     def uses_low_regs_dec(func: Callable):
         @wraps(func)
@@ -337,6 +357,8 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 @uses_low_regs
 @must_chain
 @no_escape
+@a_chain_alu
+@b_chain_alu
 def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A computes a value that B immediately consumes; that value is dead after B.
 
@@ -344,9 +366,6 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     (or rs2 if B is commutative).  A's rd must be dead after B — either B
     overwrites it (b.rd == a.rd) or it is not live in b.live_out.
     """
-    # a.rd is the chain register — not encoded in the packet; exempt from range.
-    if r := _alu_diagnose_regs_imm(a, exclude=a.rd): return r
-    if r := _alu_diagnose_regs_imm(b, exclude=a.rd): return r
     return None
 
 
@@ -381,39 +400,44 @@ def _sp_mem_diagnose(insn: Instruction) -> Optional[str]:
     return None
 
 
-def _load_chain_diagnose_a(insn: Instruction) -> Optional[str]:
-    return _sp_mem_diagnose(insn)
+def a_sp_mem(func: Callable):
+    """A-slot is an sp-relative memory op with an in-range 8-bit scaled offset."""
+    @wraps(func)
+    def check_a_sp_mem(a: Instruction, b: Instruction):
+        if r := _sp_mem_diagnose(a): return r
+        return func(a, b)
+    return check_a_sp_mem
 
 
+def b_sp_mem(func: Callable):
+    """B-slot is an sp-relative memory op with an in-range 8-bit scaled offset."""
+    @wraps(func)
+    def check_b_sp_mem(a: Instruction, b: Instruction):
+        if r := _sp_mem_diagnose(b): return r
+        return func(a, b)
+    return check_b_sp_mem
+
+
+# a.rd (the chain register) is dead after B and not encoded in the packet, so it
+# is exempt from range checks.  @must_chain / @must_chain_stored already reject
+# a.rd is None, so the ALU/mem checks below never see a destination-less A.
 @chain_uses_low_regs
 @must_chain
 @no_escape
+@a_sp_mem
+@b_chain_alu
 def _load_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
-    r = _load_chain_diagnose_a(a)
-    if r:
-        return r
-    # a.rd is the loaded chain value — not encoded; exempt from range check.
-    if r := _alu_diagnose_regs_imm(b, exclude=a.rd): return r
-    if a.rd is None:
-        return "load has no destination register"
     return None
-
-
-def _store_chain_diagnose_b(insn: Instruction) -> Optional[str]:
-    return _sp_mem_diagnose(insn)
 
 
 @chain_uses_low_regs
 @must_chain_stored
 @no_escape
+@a_chain_alu
+@b_sp_mem
 def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
-    # a.rd is the chain result — not encoded in the packet; exempt from range check.
-    if r := _alu_diagnose_regs_imm(a, exclude=a.rd): return r
-    if r := _store_chain_diagnose_b(b): return r
-    if a.rd is None:
-        return "A has no destination register"
     return None
 
 
