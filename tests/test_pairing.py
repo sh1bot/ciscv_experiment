@@ -908,6 +908,29 @@ def make_sd(rs1, rs2, imm=0):
     return make_insn("sd", rs1=rs1, rs2=rs2, imm=imm)
 
 
+class TestChainAluPair:
+    """A computes a value B consumes; the chain register dies within the pair."""
+
+    def test_basic_chain_pairs(self):
+        # add x10, x8, x9; add x11, x10, x12 — B consumes x10, which then dies
+        a = make_insn("add", rd=10, rs1=8, rs2=9)
+        b = make_insn("add", rd=11, rs1=10, rs2=12)
+        assert can_pair(a, b) is None
+
+    def test_high_chain_register_pairs(self):
+        """The chain register dies within the pair and is not encoded, so it is
+        exempt from the x0..x15 range limit even when it is a high register."""
+        a = make_insn("add", rd=16, rs1=8, rs2=9)     # chain reg x16 (out of window)
+        b = make_insn("add", rd=10, rs1=16, rs2=11)   # consumes x16; x16 dead after
+        assert can_pair(a, b) is None
+
+    def test_high_encoded_register_still_rejects(self):
+        """A genuinely encoded operand (A's source) out of window still rejects."""
+        a = make_insn("add", rd=8, rs1=16, rs2=9)     # a.rs1 = x16 is encoded
+        b = make_insn("add", rd=10, rs1=8, rs2=11)
+        assert can_pair(a, b) is not None
+
+
 class TestLoadChainAluPair:
     """A = sp-relative load (8-bit scaled offset); B = ALU consuming the value."""
 

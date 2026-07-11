@@ -345,7 +345,7 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 # chain-alu-pair
 # ---------------------------------------------------------------------------
 
-@uses_low_regs
+@chain_uses_low_regs
 @must_chain
 @no_escape
 @a_imm_ok
@@ -356,8 +356,12 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
     A has free choice of rd and rs1.  B must use A's rd as its rs1 input
     (or rs2 if B is commutative).  A's rd must be dead after B — either B
     overwrites it (b.rd == a.rd) or it is not live in b.live_out.
+
+    Because a.rd is produced and consumed within the packet and dies there, it
+    is not encoded and is exempt from the x0..x15 range limit — hence
+    @chain_uses_low_regs (which skips a.rd and B's consuming source), matching
+    load-chain / store-chain.
     """
-    return None
 
 
 # ---------------------------------------------------------------------------
