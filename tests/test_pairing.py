@@ -1110,7 +1110,7 @@ class TestLoadBaseBranch:
         assert _rule_reason("load-base-branch", a, b) is not None
 
 
-class TestLiBranchPair:
+class TestChainLiBranch:
     """A = li rtmp, imm8; B = comparison branch consuming rtmp; rtmp dies."""
 
     def test_basic_pairs(self):
@@ -1127,13 +1127,13 @@ class TestLiBranchPair:
     def test_immediate_over_8bit_no_pair(self):
         a = make_insn("addi", rd=10, rs1=0, imm=200)      # 200 > int8 max 127
         b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
-        assert _rule_reason("li-branch-pair", a, b) is not None
+        assert _rule_reason("chain-li-branch", a, b) is not None
 
     def test_value_escapes_no_pair(self):
         a = make_insn("addi", rd=10, rs1=0, imm=5)
         b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
         b.live_out = frozenset({10})                      # rtmp still live after B
-        assert _rule_reason("li-branch-pair", a, b) is not None
+        assert _rule_reason("chain-li-branch", a, b) is not None
 
 
 class TestAddiBranchPair:
@@ -1162,7 +1162,7 @@ class TestAddiBranchPair:
         assert _rule_reason("addi-branch-pair", a, b) is not None
 
 
-class TestBitBranchPair:
+class TestChainBitTestBranch:
     """A isolates/masks bits (andi pow2, or slli/srli); B branches on zero."""
 
     def test_andi_pow2_pairs(self):
@@ -1178,12 +1178,12 @@ class TestBitBranchPair:
     def test_andi_non_pow2_no_pair(self):
         a = make_insn("andi", rd=10, rs1=10, imm=6)       # 6 not pow2/shift-expressible
         b = make_insn("bnez", rs1=10, branch_target="L")
-        assert _rule_reason("bit-branch-pair", a, b) is not None
+        assert _rule_reason("chain-bit-test-branch", a, b) is not None
 
     def test_beq_requires_zero_rs2_no_pair(self):
         a = make_insn("andi", rd=10, rs1=10, imm=8)
         b = make_insn("beq", rs1=10, rs2=11, branch_target="L")  # not a zero-test
-        assert _rule_reason("bit-branch-pair", a, b) is not None
+        assert _rule_reason("chain-bit-test-branch", a, b) is not None
 
 
 class TestProloguePair:

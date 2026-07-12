@@ -9,6 +9,7 @@ from typing import Optional
 
 from isa.instruction import Instruction
 from isa.registers import reg_name
+from scheduler.rules import RULES
 
 
 @dataclass
@@ -50,10 +51,12 @@ def _stats_comment_lines(stats: PairingStats, label: str, rule_breakdown: bool =
     lines.append(f"#   instructions: {n}  packets: {pk}  pairs: {p}  solos: {s}")
     lines.append(f"#   pair rate:    {stats.pair_rate()*100:.1f}%  ({p*2}/{n} instructions paired)")
     lines.append(f"#   RVC-eligible: {stats.rvc_rate()*100:.1f}%  ({stats.rvc_total}/{n} instructions)")
-    if rule_breakdown and stats.rule_hits:
+    if rule_breakdown:
         lines.append("#   rule hits:")
-        for rule, count in sorted(stats.rule_hits.items()):
-            lines.append(f"#     {rule}: {count}")
+        # List every rule in definition order, including those that never fired,
+        # so dead / unreachable rules are visible as an explicit `: 0`.
+        for rule in RULES:
+            lines.append(f"#     {rule.name}: {stats.rule_hits.get(rule.name, 0)}")
     return lines
 
 

@@ -588,7 +588,7 @@ mulh a0, a2, a3     ; same destination a0 → rejected
 
 ---
 
-### 3.12 `li-branch-pair`
+### 3.12 `chain-li-branch`
 
 Materialise a small comparison constant, then branch comparing it against a
 register. The constant register is dead after the branch (it only carried the
@@ -597,7 +597,7 @@ literal).
 * **A mnemonics:** `{addi}`; **A prerequisite:** `["is_li"]`.
 * **B mnemonics:** `_LI_BRANCH_B_MN` = `{beq, bne, blt, bge, bltu, bgeu}`
   (the two-register comparison branches — *not* `beqz/bnez`).
-* **`check` (`_li_branch_pair`):** `a` is `li`; immediate fits **8-bit signed**
+* **`check` (`_chain_li_branch`):** `a` is `li`; immediate fits **8-bit signed**
   (`-128..127`); `b` uses `a.rd` as `rs1` *or* `rs2`; `a.rd` is dead after `b`
   (`a.rd ∉ b.live_out`).
 
@@ -625,7 +625,7 @@ blt  a0, a1, .L     ; branch doesn't use t0 → "B does not use A's result"
 ### 3.13 `addi-branch-pair`
 
 The loop-counter / pointer-stride idiom: bump a register in place, then a
-comparison branch reads it. Unlike `li-branch-pair`, the register is *not*
+comparison branch reads it. Unlike `chain-li-branch`, the register is *not*
 required to be dead (a loop counter usually lives on).
 
 * **A mnemonics:** `{addi, addiw}`; **A prerequisite:** `["is_rsd"]`.
@@ -655,7 +655,7 @@ blt  a6, a7, .L
 
 ---
 
-### 3.14 `bit-branch-pair`
+### 3.14 `chain-bit-test-branch`
 
 Isolate a bit (or a bit field) and branch on whether it is zero. `a`'s result is
 dead after `b`. Notably, `andi` immediates that are not single bits but *are*
@@ -666,7 +666,7 @@ outcome.
 * **A mnemonics:** `_BIT_BRANCH_A_MN` = `{andi, slli, srli}` (note: **not**
   `srai`).
 * **B mnemonics:** `_BIT_BRANCH_B_MN` = `{beqz, bnez, beq, bne}`.
-* **`check` (`_bit_branch_pair`):**
+* **`check` (`_chain_bit_test_branch`):**
   * `a.rd` exists;
   * if `b` is `beq`/`bne`, its `rs2` must be `x0` (so it is a true zero-test —
     the alias of `beqz`/`bnez`);
@@ -910,9 +910,9 @@ ret
 | `mem-pair` | load/store | same | adjacent elements | offsets differ by width; uimm5/8×w |
 | `arith-mem-pair` | RSD arith | load/store | independent | A regs x0–x15; B offset 0..3×w |
 | `dual-*-pair` | tuple op | tuple op | shared inputs | per-family (see §3.11) |
-| `li-branch-pair` | li | cmp-branch | A→B, dead | imm8 signed |
+| `chain-li-branch` | li | cmp-branch | A→B, dead | imm8 signed |
 | `addi-branch-pair` | addi/addiw RSD | cmp-branch | A→B, alive | rd x0–x15; imm8 signed |
-| `bit-branch-pair` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
+| `chain-bit-test-branch` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
 | `pre-inc-pair` | RSD addi/sh2add/add | ld/sd/lw/sw/slt | A→B, alive | B mem offset 0 |
 | `prologue-pair` | addi sp (−N) | sw/sd ra | A→B (alloc then save) | sp adj nimm7×16; ra at frame top |
 | `epilogue-pair` | addi sp / ret-jalr | A→B (addi then transfer) | — | sp adj uimm7×16; ret rd x0/x1 |

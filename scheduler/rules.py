@@ -791,7 +791,7 @@ def _dual_indep(first: Instruction, second: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# li-branch-pair
+# chain-li-branch
 # ---------------------------------------------------------------------------
 # A loads a small constant into a temporary; B is any conditional comparison
 # branch that uses that temporary as one of its two operands (either slot),
@@ -810,7 +810,7 @@ _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 
 @must_chain
 @no_escape
-def _li_branch_pair(a: Instruction, b: Instruction) -> None:
+def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
         raise NotPair("A not li form (must be addi rd, x0, imm)")
@@ -847,7 +847,7 @@ def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# bit-branch-pair
+# chain-bit-test-branch
 # ---------------------------------------------------------------------------
 # A isolates a single bit (mask or shift); B branches on whether it is zero.
 # A's result register is dead after B — it carries only the bit to the branch.
@@ -884,7 +884,7 @@ def _shift_for_zero_test(imm) -> Optional[tuple]:
 
 @must_chain
 @no_escape
-def _bit_branch_pair(a: Instruction, b: Instruction) -> None:
+def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
     """A isolates or masks bits; B branches on zero/nonzero; A's result is dead after B.
 
     andi with a pow2 immediate isolates a single bit and encodes directly.
@@ -1142,11 +1142,11 @@ RULES: list[PairingRule] = [
         check=_dual_indep,
     ),
     PairingRule(
-        name="li-branch-pair",
+        name="chain-li-branch",
         a_mnemonic_set=_LI_BRANCH_A_MN,
         b_mnemonic_set=_LI_BRANCH_B_MN,
         a_prerequisites=["is_li"],
-        check=_li_branch_pair,
+        check=_chain_li_branch,
     ),
     PairingRule(
         name="addi-branch-pair",
@@ -1156,10 +1156,10 @@ RULES: list[PairingRule] = [
         check=_addi_branch_pair,
     ),
     PairingRule(
-        name="bit-branch-pair",
+        name="chain-bit-test-branch",
         a_mnemonic_set=_BIT_BRANCH_A_MN,
         b_mnemonic_set=_BIT_BRANCH_B_MN,
-        check=_bit_branch_pair,
+        check=_chain_bit_test_branch,
     ),
     PairingRule(
         name="pre-inc-pair",
