@@ -150,9 +150,14 @@ between:
   encoded register in `x0`–`x15`), `@chain_uses_low_regs` (same, but the chain
   register that dies within the packet is exempt), and `@uses_low_regs_here(...)`
   (only the named fields);
-* **immediate range** — `@a_imm_ok` / `@b_imm_ok`, backed by `_imm_in_range`:
-  `addi/addiw/andi` immediate in `[-64, 64]` (zero allowed; it degenerates to a
-  register move), and shift amounts `slli/srli/srai` in `[1, 32]`.
+* **immediate range** — `@a_imm_ok(validate)` / `@b_imm_ok(validate)`, which take
+  a validator naming the instruction class being matched. The validator receives
+  the instruction whose immediate it checks and the data size deduced from the
+  paired slot (its load/store access width, or `None`), and raises `NotPair` on an
+  out-of-range immediate. The RSD ALU validator `_rsd_alu_imm_ok` (width-
+  independent, so it ignores the data size) accepts `addi/addiw/andi` immediates
+  in `[-64, 64]` (zero allowed; it degenerates to a register move) and shift
+  amounts `slli/srli/srai` in `[1, 32]`.
 
 Other reusable decorators include `@must_chain*` (B consumes A's result),
 `@no_escape` (that result is dead after B), `@exclusive_rd` (distinct
@@ -177,8 +182,8 @@ Two independent in-place ALU operations packed together.
 * **`check` (`_rsd_alu_pair`):** the body is empty; the constraints are a
   decorator stack applied to *both* `a` and `b`:
   * `@uses_low_regs` — all encoded registers (`rd`, `rs1`, `rs2`) in `x0`–`x15`;
-  * `@a_imm_ok` / `@b_imm_ok` — `addi/addiw/andi` immediate in `[-64, 64]`;
-    shifts in `[1, 32]`;
+  * `@a_imm_ok(_rsd_alu_imm_ok)` / `@b_imm_ok(_rsd_alu_imm_ok)` —
+    `addi/addiw/andi` immediate in `[-64, 64]`; shifts in `[1, 32]`;
   * `@a_is_rsd_or_li` / `@b_is_rsd_or_li` — each slot is RSD form, or the `li`
     form (`addi rd, x0, imm`), which is always allowed once the range checks pass;
   * `@a_rsd_swappable` / `@b_rsd_swappable` — if `rd == rs2` (not `rs1`) the op

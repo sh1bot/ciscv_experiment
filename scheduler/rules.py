@@ -73,8 +73,14 @@ _RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
 # Shared per-slot helpers (mnemonic already confirmed by rule.mnemonic_set)
 # ---------------------------------------------------------------------------
 
-def _imm_in_range(insn: Instruction) -> None:
+def _rsd_alu_imm_ok(insn: Instruction, data_size: Optional[int] = None) -> None:
     """Immediate / shift-amount range check for an RSD ALU op (mnemonic already ok).
+
+    A validator for the @a_imm_ok / @b_imm_ok family: it takes the instruction
+    whose immediate is being validated and the data size deduced from the paired
+    slot.  An RSD ALU immediate is width-independent, so `data_size` is accepted
+    and ignored here; classes whose immediate range scales with the companion's
+    access width can use it.
 
     Register-range checks are not done here: they belong to the uses_low_regs
     family of decorators, which every caller already applies.
@@ -286,22 +292,42 @@ def chain_uses_low_regs(func: Callable):
     return check_low_regs1
 
 
-def a_imm_ok(func: Callable):
-    """A-slot's immediate / shift amount is in the RSD-encodable range."""
-    @wraps(func)
-    def check_a_imm_ok(a: Instruction, b: Instruction):
-        _imm_in_range(a)
-        return func(a, b)
-    return check_a_imm_ok
+def _data_size(insn: Instruction) -> Optional[int]:
+    """Data size implied by `insn` for a companion slot's immediate check: the
+    load/store access width, or None when `insn` carries no width information."""
+    return insn.access_width
 
 
-def b_imm_ok(func: Callable):
-    """B-slot's immediate / shift amount is in the RSD-encodable range."""
-    @wraps(func)
-    def check_b_imm_ok(a: Instruction, b: Instruction):
-        _imm_in_range(b)
-        return func(a, b)
-    return check_b_imm_ok
+def a_imm_ok(validate: Callable):
+    """A-slot's immediate is accepted by `validate`.
+
+    `validate(insn, data_size)` receives the A instruction and the data size
+    deduced from B (its load/store access width, or None); it raises NotPair on
+    an out-of-range immediate.  Pass the validator whose name names the
+    instruction class being matched (e.g. `_rsd_alu_imm_ok`)."""
+    def deco(func: Callable):
+        @wraps(func)
+        def check_a_imm_ok(a: Instruction, b: Instruction):
+            validate(a, _data_size(b))
+            return func(a, b)
+        return check_a_imm_ok
+    return deco
+
+
+def b_imm_ok(validate: Callable):
+    """B-slot's immediate is accepted by `validate`.
+
+    `validate(insn, data_size)` receives the B instruction and the data size
+    deduced from A (its load/store access width, or None); it raises NotPair on
+    an out-of-range immediate.  Pass the validator whose name names the
+    instruction class being matched (e.g. `_rsd_alu_imm_ok`)."""
+    def deco(func: Callable):
+        @wraps(func)
+        def check_b_imm_ok(a: Instruction, b: Instruction):
+            validate(b, _data_size(a))
+            return func(a, b)
+        return check_b_imm_ok
+    return deco
 
 
 def uses_low_regs_here(*these_regs: str):
@@ -323,8 +349,8 @@ def uses_low_regs_here(*these_regs: str):
 @a_rsd_swappable
 @b_rsd_swappable
 @uses_low_regs
-@a_imm_ok
-@b_imm_ok
+@a_imm_ok(_rsd_alu_imm_ok)
+@b_imm_ok(_rsd_alu_imm_ok)
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     """Both instructions RSD or li form, x0..x15, immediates in range, and the
@@ -345,8 +371,8 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 @chain_uses_low_regs
 @must_chain
 @no_escape
-@a_imm_ok
-@b_imm_ok
+@a_imm_ok(_rsd_alu_imm_ok)
+@b_imm_ok(_rsd_alu_imm_ok)
 def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A computes a value that B immediately consumes; that value is dead after B.
 
@@ -417,7 +443,7 @@ def b_sp_mem(func: Callable):
 @must_chain
 @no_escape
 @a_sp_mem
-@b_imm_ok
+@b_imm_ok(_rsd_alu_imm_ok)
 def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
     return None
@@ -426,7 +452,7 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
 @chain_uses_low_regs
 @must_chain_stored
 @no_escape
-@a_imm_ok
+@a_imm_ok(_rsd_alu_imm_ok)
 @b_sp_mem
 def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
@@ -994,7 +1020,7 @@ def _is_small_jump(insn: Instruction) -> bool:
 @a_is_rsd_or_li
 @a_rsd_swappable
 @uses_low_regs_here("a.rd", "a.rs1", "a.rs2")
-@a_imm_ok
+@a_imm_ok(_rsd_alu_imm_ok)
 def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
     if not _is_small_jump(b):
