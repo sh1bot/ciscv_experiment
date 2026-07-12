@@ -69,17 +69,17 @@ A pair `(a, b)` is legal if **at least one** rule accepts it. For a given rule,
    truthy on `a` (e.g. `"is_rsd"`, `"is_li"`, `"reads_stack"`).
 3. **B-slot mnemonic.** `b.mnemonic` must be in `rule.b_mnemonic_set`.
 4. **B prerequisites.** Every property in `rule.b_prerequisites` must hold on `b`.
-5. **`check(a, b)`.** Returns `None` to *accept*, or a human-readable string
-   explaining the *rejection*. The string is what shows up as a "solo reason"
-   annotation in the output.
+5. **`check(a, b)`.** *Accepts* by returning (falling off the end, i.e.
+   returning `None`); *rejects* by raising `NotPair(reason)`, where `reason` is a
+   human-readable string. `pairing.py` catches `NotPair` at each `check()` call
+   site; the reason is what shows up as a "solo reason" annotation in the output.
 
 If no rule accepts, the instruction goes **solo** (it occupies a packet alone).
 
-> **Note on `diagnose_a` / `diagnose_b`.** Some rules also carry per-slot
-> *self-diagnosis* callbacks. These do **not** affect the pairing decision —
-> they exist purely for annotation, to explain why a single instruction could
-> never fill that slot *for any partner* (e.g. "immediate out of range"),
-> independent of who its neighbour is.
+> **Note on how rejections read.** Because most per-slot constraints are applied
+> by composable decorators (see §2) that wrap the rule's `check()`, the raised
+> reason names the *first* failing constraint in the decorator stack, not
+> necessarily the one you'd guess from the rule's core body.
 
 ### 1.4 Slot disqualifiers (apply to all rules)
 
@@ -140,10 +140,23 @@ These properties (defined on `Instruction` in
   checks for unsigned / signed immediates, with optional scaling and a
   `nonzero='remap'` mode (zero re-encoded as the top of range to balance it).
 
-A recurring shared helper, `_alu_diagnose_regs_imm`, enforces the common ALU
-constraints for the `rsd`/`chain` family: every encoded register in `x0`–`x15`,
-`addi/addiw/andi` immediate in `[-64, 64]` (zero allowed; it degenerates to a
-register move), and shift amounts `slli/srli/srai` in `[1, 32]`.
+Most per-slot constraints are expressed as **composable decorators** that wrap a
+rule's `check()`; each raises `NotPair(reason)` on failure and otherwise calls
+through. A rule's decorator stack *is* most of its definition, and its body is
+often empty. The common ALU constraints for the `rsd`/`chain` family are split
+between:
+
+* **register range** — the `uses_low_regs` family: `@uses_low_regs` (every
+  encoded register in `x0`–`x15`), `@chain_uses_low_regs` (same, but the chain
+  register that dies within the packet is exempt), and `@uses_low_regs_here(...)`
+  (only the named fields);
+* **immediate range** — `@a_imm_ok` / `@b_imm_ok`, backed by `_imm_in_range`:
+  `addi/addiw/andi` immediate in `[-64, 64]` (zero allowed; it degenerates to a
+  register move), and shift amounts `slli/srli/srai` in `[1, 32]`.
+
+Other reusable decorators include `@must_chain*` (B consumes A's result),
+`@no_escape` (that result is dead after B), `@exclusive_rd` (distinct
+destinations), and `@a_is_rsd` / `@a_rsd_swappable` (RSD-encodability).
 
 ---
 
@@ -161,15 +174,18 @@ Two independent in-place ALU operations packed together.
 * **A-slot / B-slot mnemonics:** `_RSD_ALU_MN` =
   `{addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu}`
 * **Prerequisites:** none.
-* **`check` (`_rsd_alu_pair`):** *both* `a` and `b` must independently satisfy
-  `_rsd_alu_diagnose`:
-  * all encoded registers (`rd`, `rs1`, `rs2`) in `x0`–`x15`;
-  * `addi/addiw/andi` immediate in `[-64, 64]`; shifts in `[1, 32]`;
-  * the `li` form (`addi rd, x0, imm`) is always allowed once the range checks pass;
-  * otherwise it must be RSD form. If `rd == rs2` (not `rs1`) the op must be
-    **commutative**, because the narrowed encoding writes back to the first
-    source slot.
-  * and the two slots must write **distinct destinations** (`a.rd != b.rd`).
+* **`check` (`_rsd_alu_pair`):** the body is empty; the constraints are a
+  decorator stack applied to *both* `a` and `b`:
+  * `@uses_low_regs` — all encoded registers (`rd`, `rs1`, `rs2`) in `x0`–`x15`;
+  * `@a_imm_ok` / `@b_imm_ok` — `addi/addiw/andi` immediate in `[-64, 64]`;
+    shifts in `[1, 32]`;
+  * `@a_is_rsd_or_li` / `@b_is_rsd_or_li` — each slot is RSD form, or the `li`
+    form (`addi rd, x0, imm`), which is always allowed once the range checks pass;
+  * `@a_rsd_swappable` / `@b_rsd_swappable` — if `rd == rs2` (not `rs1`) the op
+    must be **commutative**, because the narrowed encoding writes back to the
+    first source slot;
+  * `@exclusive_rd` — the two slots must write **distinct destinations**
+    (`a.rd != b.rd`).
     This rule packs two independent, both-live results; a shared destination
     means either B consumes A (a chain — handled, more capably, by
     `chain-alu-pair`, whose shared register need not be in `x0`–`x15`) or A's
