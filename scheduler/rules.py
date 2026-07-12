@@ -49,6 +49,23 @@ class NotPair(Exception):
         super().__init__(self.reason)
 
 
+class Malformed(NotPair):
+    """Raised when a candidate instruction is structurally invalid — a
+    decoder-level defect such as a load with no base register, or an ALU op
+    with no destination — rather than a well-formed instruction that some
+    encoding rule merely declines to pair.
+
+    Subclassing NotPair keeps the pairing mechanism robust: every `except
+    NotPair` site still catches it, so a malformed instruction simply never
+    pairs (it falls out solo) instead of crashing a run.  The distinct type
+    lets callers tell a malformed instruction apart from an ordinary policy
+    rejection without inspecting the reason text; the reason is tagged
+    MALFORMED so it still reads distinctly in solo annotations."""
+
+    def __init__(self, reason: str):
+        super().__init__(f"MALFORMED: {reason}")
+
+
 # ---------------------------------------------------------------------------
 # Shared constants
 # ---------------------------------------------------------------------------
@@ -91,11 +108,11 @@ def _rsd_alu_imm_ok(insn: Instruction, data_size: Optional[int] = None) -> None:
         if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
             raise NotPair("big-imm")
         if imm is None:
-            raise NotPair("MALFORMED: missing-imm")
+            raise Malformed("missing-imm")
     elif insn.mnemonic in _RSD_SHIFT_MN:
         imm = insn.imm
         if imm is None:
-            raise NotPair("MALFORMED: missing-imm")
+            raise Malformed("missing-imm")
         if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
             raise NotPair("big-imm")
 
@@ -477,9 +494,9 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 def _load_branch_check(a: Instruction, b: Instruction,
                        imm_bits: int) -> None:
     if a.rbase is None:
-        raise NotPair("MALFORMED: missing-base")
+        raise Malformed("missing-base")
     if a.rd is None:
-        raise NotPair("MALFORMED: missing-dest")
+        raise Malformed("missing-dest")
     if not a.uimm_fits(imm_bits):
         raise NotPair("A-big-imm")
     return None
@@ -526,9 +543,9 @@ _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
     if a.rbase is None:
-        raise NotPair("MALFORMED: missing-base")
+        raise Malformed("missing-base")
     if a.rd is None:
-        raise NotPair("MALFORMED: missing-dest")
+        raise Malformed("missing-dest")
     shift = a.access_shift or 0
     if not a.uimm_fits(10, shift):
         raise NotPair("A-big-imm")
@@ -543,9 +560,9 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
 def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
     if a.rbase is None:
-        raise NotPair("MALFORMED: missing-base")
+        raise Malformed("missing-base")
     if a.rd is None:
-        raise NotPair("MALFORMED: missing-dest")
+        raise Malformed("missing-dest")
     if a.imm != 0:
         raise NotPair("A-nonzero-offset")
     shift = b.access_shift or 0
@@ -589,11 +606,11 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     if a.mnemonic != b.mnemonic:
         raise NotPair("opcode-mismatch")
     if a.rbase is None or b.rbase is None:
-        raise NotPair("MALFORMED: missing-base")
+        raise Malformed("missing-base")
     if a.rbase != b.rbase:
         raise NotPair("base-reg-mismatch")
     if a.imm is None or b.imm is None:
-        raise NotPair("MALFORMED: missing-imm")
+        raise Malformed("missing-imm")
     width = a.access_width or (1 << (a.access_shift or 0))
     if abs(a.imm - b.imm) != width:
         raise NotPair("bad-delta")
@@ -750,7 +767,7 @@ def dual_family(role: str):
 def _dual_arith2(a: Instruction, b: Instruction) -> None:
     """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...)."""
     if None in (a.rs1, a.rs2, b.rs1, b.rs2):
-        raise NotPair("MALFORMED: missing-reg")
+        raise Malformed("missing-reg")
     if a.rs1 != b.rs1 or a.rs2 != b.rs2:
         raise NotPair("source-mismatch")
 
@@ -895,7 +912,7 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
     All forms require a zero-test branch (beqz/bnez or beq/bne with rs2==x0).
     """
     if a.rd is None:
-        raise NotPair("MALFORMED: missing-dest")
+        raise Malformed("missing-dest")
     # beq/bne with zero are aliases for beqz/bnez; non-zero comparisons not supported
     if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
         raise NotPair("B-not-zero-test")

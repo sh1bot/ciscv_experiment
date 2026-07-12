@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Optional
 
 from isa.instruction import Instruction
-from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN, NotPair
+from scheduler.rules import RULES, A_SLOT_DISQUALIFIERS, B_SLOT_DISQUALIFIERS, ALL_BRANCH_MN, NotPair, Malformed  # noqa: F401
 
 # Re-export PairingRule so callers that imported it from here still work.
 from scheduler.rules import PairingRule  # noqa: F401

@@ -73,6 +73,12 @@ A pair `(a, b)` is legal if **at least one** rule accepts it. For a given rule,
    returning `None`); *rejects* by raising `NotPair(reason)`, where `reason` is a
    human-readable string. `pairing.py` catches `NotPair` at each `check()` call
    site; the reason is what shows up as a "solo reason" annotation in the output.
+   A structurally invalid instruction (a decoder-level defect — a load with no
+   base register, an op with no destination or immediate) is rejected with the
+   `Malformed(reason)` subclass instead; it is caught wherever `NotPair` is (so a
+   malformed instruction just falls out solo rather than crashing), but its type
+   marks it as a defect and its reason is tagged `MALFORMED:`. Well-formed input
+   never raises it.
 
 If no rule accepts, the instruction goes **solo** (it occupies a packet alone).
 

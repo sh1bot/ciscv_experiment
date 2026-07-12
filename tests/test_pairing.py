@@ -13,7 +13,7 @@ from scheduler.pairing import (
     can_pair, greedy_pair, stamp_slot_eligibility, RULES,
     find_b_partners,
 )
-from scheduler.rules import NotPair
+from scheduler.rules import NotPair, Malformed
 
 
 def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=None):
@@ -1246,3 +1246,34 @@ class TestRvcEligiblePseudoOps:
     def test_jal_ra_does_not_compress_on_rv64(self):
         # c.jal is RV32C-only; jal ra, target must NOT compress on RV64.
         assert not make_insn("jal", rd=1).rvc_eligible
+
+
+class TestMalformed:
+    """A structurally invalid instruction (a decoder-level defect) is reported
+    via the Malformed exception rather than an ordinary policy rejection.  It
+    subclasses NotPair so the pairing mechanism tolerates it — the instruction
+    falls out solo instead of crashing a run — and never appears for the
+    well-formed instructions the rest of the suite exercises."""
+
+    def test_malformed_is_notpair_subclass(self):
+        # Every `except NotPair` site must keep catching it.
+        assert issubclass(Malformed, NotPair)
+
+    def test_reason_is_tagged(self):
+        assert Malformed("missing-base").reason == "MALFORMED: missing-base"
+
+    def test_baseless_load_raises_malformed(self):
+        # lw with no base register (rs1=None) — the decoder should never emit
+        # this, so the load-base-branch rule flags it as malformed, not a miss.
+        a = make_insn("lw", rd=10, rs1=None, imm=0)
+        b = make_insn("beqz", rs1=10)
+        with pytest.raises(Malformed):
+            next(r for r in RULES if r.name == "load-base-branch").check(a, b)
+
+    def test_malformed_falls_out_solo_not_crash(self):
+        # can_pair catches Malformed (via NotPair) and reports it as a reason;
+        # it must not propagate out of the mechanism.
+        a = make_insn("lw", rd=10, rs1=None, imm=0)
+        b = make_insn("beqz", rs1=10)
+        reason = can_pair(a, b)
+        assert reason is not None and "MALFORMED" in reason
