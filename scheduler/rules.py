@@ -477,9 +477,9 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 def _load_branch_check(a: Instruction, b: Instruction,
                        imm_bits: int) -> None:
     if a.rbase is None:
-        raise NotPair("A-no-base")
+        raise NotPair("MALFORMED: missing-base")
     if a.rd is None:
-        raise NotPair("A-no-dest")
+        raise NotPair("MALFORMED: missing-dest")
     if not a.uimm_fits(imm_bits):
         raise NotPair("A-big-imm")
     return None
@@ -525,8 +525,10 @@ _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 @a_base_not_from_auipc
 def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
-    if a.rbase is None or a.rd is None:
-        raise NotPair("A-no-base/dest")
+    if a.rbase is None:
+        raise NotPair("MALFORMED: missing-base")
+    if a.rd is None:
+        raise NotPair("MALFORMED: missing-dest")
     shift = a.access_shift or 0
     if not a.uimm_fits(10, shift):
         raise NotPair("A-big-imm")
@@ -540,8 +542,10 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
 @a_base_not_from_auipc
 def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
-    if a.rbase is None or a.rd is None:
-        raise NotPair("A-no-base/dest")
+    if a.rbase is None:
+        raise NotPair("MALFORMED: missing-base")
+    if a.rd is None:
+        raise NotPair("MALFORMED: missing-dest")
     if a.imm != 0:
         raise NotPair("A-nonzero-offset")
     shift = b.access_shift or 0
@@ -584,7 +588,9 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
     if a.mnemonic != b.mnemonic:
         raise NotPair("opcode-mismatch")
-    if a.rbase != b.rbase or a.rbase is None:
+    if a.rbase is None or b.rbase is None:
+        raise NotPair("MALFORMED: missing-base")
+    if a.rbase != b.rbase:
         raise NotPair("base-reg-mismatch")
     if a.imm is None or b.imm is None:
         raise NotPair("MALFORMED: missing-imm")
@@ -889,7 +895,7 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
     All forms require a zero-test branch (beqz/bnez or beq/bne with rs2==x0).
     """
     if a.rd is None:
-        raise NotPair("A-no-dest")
+        raise NotPair("MALFORMED: missing-dest")
     # beq/bne with zero are aliases for beqz/bnez; non-zero comparisons not supported
     if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
         raise NotPair("B-not-zero-test")
