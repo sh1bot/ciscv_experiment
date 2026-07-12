@@ -956,6 +956,49 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
+# epilogue-restore-pair
+# ---------------------------------------------------------------------------
+# The load-side counterpart of prologue-pair: restore a callee-saved register
+# from the stack frame, then pop the frame, in one packet.
+#
+#   A: <load> rX, off(sp)   — sp base; the restored register survives
+#   B: addi sp, sp, +N      — pop the frame (positive 7-bit uimm×16)
+#
+# Order-sensitive: the packet runs A before B, and B rewrites sp, so the load
+# must be A (it reads sp *before* the pop) and the frame-popping addi must be B.
+# The reverse would pop the frame first and load from the wrong address; the
+# dependency graph (A reads sp, B writes sp — an anti-dependence) already
+# forbids that reorder.
+#
+# sp is implied on BOTH sides (the load base and the addi's rd/rs1), so it is
+# never encoded — only the restored register, the load offset and the frame
+# size occupy fields.  Because just one free register (rX) is named, it is not
+# subject to the x0..x15 limit that rules packing two registers impose.
+
+_EPILOGUE_RESTORE_B_MN = frozenset({"addi"})
+
+
+def _epilogue_restore_pair(a: Instruction, b: Instruction) -> None:
+    """A restores a register from the stack; B pops the frame.
+
+    A: <load> rX, off(sp)  — sp base, rX not sp/x0, nonneg 7-bit uimm×width off
+    B: addi sp, sp, +N     — nonzero 7-bit uimm×16 (positive multiple of 16)
+    """
+    if a.rs1 != 2:
+        raise NotPair("A-not-SP-base")
+    # x0 dest is a dead load; x2 (sp) dest would be clobbered by B's addi.
+    if a.rd is None or a.rd == 0 or a.rd == 2:
+        raise NotPair("A-bad-dest")
+    shift = a.access_shift or 0
+    if not a.uimm_fits(7, shift):
+        raise NotPair("A-big-imm")
+    if b.rd != 2 or b.rs1 != 2:
+        raise NotPair("B-not-addi-sp")
+    if not b.uimm_fits(7, 4, nonzero=True):
+        raise NotPair("B-big-imm")
+
+
+# ---------------------------------------------------------------------------
 # arith-jump-pair / mvload-jump-pair
 # ---------------------------------------------------------------------------
 # Pack a productive instruction into the same packet as a trailing unconditional
@@ -1138,6 +1181,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_EPILOGUE_A_MN,
         b_mnemonic_set=_EPILOGUE_B_MN,
         check=_epilogue_pair,
+    ),
+    PairingRule(
+        name="epilogue-restore-pair",
+        a_mnemonic_set=_ALL_LOAD_MN,
+        b_mnemonic_set=_EPILOGUE_RESTORE_B_MN,
+        a_prerequisites=["reads_stack"],
+        check=_epilogue_restore_pair,
     ),
     PairingRule(
         name="arith-jump-pair",

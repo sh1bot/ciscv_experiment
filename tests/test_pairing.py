@@ -1217,6 +1217,54 @@ class TestProloguePair:
         assert _rule_reason("prologue-pair", a, b) is not None
 
 
+class TestEpilogueRestorePair:
+    """A = load rX from sp frame; B = addi sp,sp,+N (pop the frame)."""
+
+    def test_basic_pairs(self):
+        a = make_insn("ld", rd=1, rs1=2, imm=8)           # ld ra, 8(sp)
+        b = make_insn("addi", rd=2, rs1=2, imm=16)        # addi sp, sp, 16
+        assert can_pair(a, b) is None
+
+    def test_high_saved_reg_pairs(self):
+        # s2 == x18 is outside x0..x15, but sp is the only implied reg so the
+        # single free destination field can still name it.
+        a = make_insn("ld", rd=18, rs1=2, imm=8)
+        b = make_insn("addi", rd=2, rs1=2, imm=16)
+        assert can_pair(a, b) is None
+
+    def test_deep_frame_offset_pairs(self):
+        a = make_insn("lw", rd=10, rs1=2, imm=296)        # 296 = 74*4, uimm7×4
+        b = make_insn("addi", rd=2, rs1=2, imm=384)       # 384 = 24*16
+        assert can_pair(a, b) is None
+
+    def test_dest_sp_rejected(self):
+        # Loading into sp would be clobbered by B's addi.
+        a = make_insn("ld", rd=2, rs1=2, imm=8)
+        b = make_insn("addi", rd=2, rs1=2, imm=16)
+        assert _rule_reason("epilogue-restore-pair", a, b) == "A-bad-dest"
+
+    def test_non_sp_base_rejected(self):
+        a = make_insn("ld", rd=8, rs1=10, imm=8)          # base a0, not sp
+        b = make_insn("addi", rd=2, rs1=2, imm=16)
+        assert _rule_reason("epilogue-restore-pair", a, b) == "A-not-SP-base"
+
+    def test_negative_adjust_rejected(self):
+        # addi sp,sp,-N is a prologue, not a frame pop.
+        a = make_insn("ld", rd=1, rs1=2, imm=8)
+        b = make_insn("addi", rd=2, rs1=2, imm=-16)
+        assert _rule_reason("epilogue-restore-pair", a, b) == "B-big-imm"
+
+    def test_adjust_not_multiple_of_16_rejected(self):
+        a = make_insn("ld", rd=1, rs1=2, imm=8)
+        b = make_insn("addi", rd=2, rs1=2, imm=24)        # 24 not a mult of 16
+        assert _rule_reason("epilogue-restore-pair", a, b) == "B-big-imm"
+
+    def test_addi_not_on_sp_rejected(self):
+        a = make_insn("ld", rd=1, rs1=2, imm=8)
+        b = make_insn("addi", rd=10, rs1=10, imm=16)      # addi a0,a0,16
+        assert _rule_reason("epilogue-restore-pair", a, b) == "B-not-addi-sp"
+
+
 class TestRvcEligiblePseudoOps:
     """RVC eligibility must recognise pseudo-op spellings, and reject RV32-only
     c.jal on an RV64 target."""

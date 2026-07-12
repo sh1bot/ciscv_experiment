@@ -832,6 +832,66 @@ ret                 ;   (but this DOES pair via arith-jump-pair, §3.18)
 
 ---
 
+### 3.17a `epilogue-restore-pair`
+
+The load-side counterpart of `prologue-pair`: restore a callee-saved register
+from the stack frame, then pop the frame, in one packet. Order-sensitive: the
+packet runs A before B, and B rewrites `sp`, so the load must be A (it reads
+`sp` *before* the pop) and the frame-popping `addi` must be B. The reverse
+would pop the frame first and load from the wrong address; the dependency graph
+(A reads `sp`, B writes `sp` — an anti-dependence) already forbids that
+reorder.
+
+`sp` is implied on **both** sides (the load base and the `addi`'s `rd`/`rs1`),
+so it is never encoded — only the restored register, the load offset and the
+frame size occupy fields. Because just one free register (`rX`) is named, it is
+**not** restricted to `x0..x15` (unlike rules that pack two registers), so deep
+saved registers like `s2`(=`x18`) are still encodable.
+
+* **A mnemonics:** all loads (`_ALL_LOAD_MN`), with the `reads_stack`
+  prerequisite (`sp` base).
+* **B mnemonics:** `{addi}`.
+* **`check` (`_epilogue_restore_pair`):**
+  * A is `<load> rX, off(sp)` (`a.rs1 == sp`) with `rX` neither `x0` (a dead
+    load) nor `sp` (would be clobbered by B), and `off` a non-negative
+    **7-bit `uimm×width`**;
+  * B is `addi sp, sp, +N` (`b.rd == b.rs1 == sp`) with `N` a nonzero
+    **7-bit `uimm×16`** (positive multiple of 16, max 2032).
+
+**Matches**
+
+```asm
+ld   ra, 8(sp)      ; restore return address
+addi sp, sp, 16     ; pop the frame
+```
+```asm
+ld   s2, 8(sp)      ; s2 = x18, outside x0..x15, still fine (sp is implied)
+addi sp, sp, 16
+```
+
+**Does not match**
+
+```asm
+ld   sp, 8(sp)      ; loads into sp → clobbered by the addi → "A-bad-dest"
+addi sp, sp, 16
+```
+```asm
+lw   a0, 8(a1)      ; base is a1, not sp → "A-not-SP-base"
+addi sp, sp, 16
+```
+```asm
+ld   ra, 8(sp)
+addi sp, sp, 24     ; 24 not a multiple of 16 → "B-big-imm"
+```
+
+> **Overlap caveat.** In multi-register epilogues the adjacent restores already
+> pair via `mem-pair` and the trailing `addi sp` + `ret` already pairs via
+> `epilogue-pair`, so this rule's *marginal* contribution is small — it wins
+> only where a lone restore would otherwise be left solo. On the sample corpora
+> it adds ~54 net pairs on `godot.s` and ~1 on `testcase0.s`.
+
+---
+
 ### 3.18 `arith-jump-pair`
 
 Pack a productive RSD ALU op into the same packet as a trailing unconditional
@@ -932,6 +992,7 @@ ret
 | `pre-inc-pair` | RSD addi/sh2add/add | ld/sd/lw/sw/slt | A→B, alive | B mem offset 0 |
 | `prologue-pair` | addi sp (−N) | sw/sd ra | A→B (alloc then save) | sp adj nimm7×16; ra at frame top |
 | `epilogue-pair` | addi sp / ret-jalr | A→B (addi then transfer) | — | sp adj uimm7×16; ret rd x0/x1 |
+| `epilogue-restore-pair` | load from sp | addi sp (+N) | A→B (restore then pop) | off uimm7×w; sp adj uimm7×16; rX≠sp/x0 |
 | `arith-jump-pair` | RSD ALU | ret/jr/j/jalr | independent | A regs x0–x15; calls excluded |
 | `mvload-jump-pair` | mv/li or small-offset load | ret/jr/j/jalr | independent | load offset 0..3×w; calls excluded |
 
