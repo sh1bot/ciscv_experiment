@@ -83,15 +83,15 @@ def _imm_in_range(insn: Instruction) -> None:
         imm = insn.imm
         # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
         if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
-            raise NotPair("out-of-range-immediate")
+            raise NotPair("big-imm")
         if imm is None:
-            raise NotPair("missing-immediate")
+            raise NotPair("MALFORMED: missing-immediate")
     elif insn.mnemonic in _RSD_SHIFT_MN:
         imm = insn.imm
         if imm is None:
-            raise NotPair("missing-shift-amount")
+            raise NotPair("MALFORMED: missing-shift-amount")
         if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
-            raise NotPair("out-of-range-immediate")
+            raise NotPair("big-imm")
 
 
 # ---------------------------------------------------------------------------
@@ -262,15 +262,15 @@ def _get_fields(insn: Iterable[Instruction], fields: Iterable[str], f: Callable)
 
 def _confirm_low_regs(a: Instruction, b: Instruction, fields: Iterable[str]):
     r_is_low = lambda r: r is None or r in _RSD_ALU_REGS
-    return all(_get_fields((a, b), fields, r_is_low))
+    if not all(_get_fields((a, b), fields, r_is_low)):
+        raise NotPair("big-reg")
 
 
 def uses_low_regs(func: Callable):
     all_regs = ("a.rd", "a.rs1", "a.rs2", "b.rd", "b.rs1", "b.rs2")
     @wraps(func)
     def check_low_regs(a: Instruction, b: Instruction):
-        if not _confirm_low_regs(a, b, all_regs):
-            raise NotPair("out-of-range-register")
+        _confirm_low_regs(a, b, all_regs)
         return func(a, b)
     return check_low_regs
 
@@ -279,11 +279,9 @@ def chain_uses_low_regs(func: Callable):
     @wraps(func)
     def check_low_regs1(a: Instruction, b: Instruction):
         if b.is_commutative and b.rs2 == a.rd:
-            if not _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs1")):
-                raise NotPair("out-of-range-register")
+            _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs1"))
         else:
-            if not _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs2")):
-                raise NotPair("out-of-range-register")
+            _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs2"))
         return func(a, b)
     return check_low_regs1
 
@@ -310,8 +308,7 @@ def uses_low_regs_here(*these_regs: str):
     def uses_low_regs_dec(func: Callable):
         @wraps(func)
         def check_low_regs_here(a: Instruction, b: Instruction):
-            if not _confirm_low_regs(a, b, these_regs):
-                raise NotPair("out-of-range-register")
+            _confirm_low_regs(a, b, these_regs)
             return func(a, b)
         return check_low_regs_here
     return uses_low_regs_dec
@@ -362,6 +359,7 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
     @chain_uses_low_regs (which skips a.rd and B's consuming source), matching
     load-chain / store-chain.
     """
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +389,7 @@ def _sp_mem_check(insn: Instruction) -> None:
         raise NotPair("not-SP-base")
     shift = insn.access_shift or 0
     if not insn.uimm_fits(8, shift):
-        raise NotPair("out-of-range-immediate")
+        raise NotPair("big-imm")
 
 
 def a_sp_mem(func: Callable):
@@ -523,7 +521,7 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A offset must be zero")
     shift = b.access_shift or 0
     if not b.uimm_fits(10, shift):
-        raise NotPair("out-of-range-immediate")
+        raise NotPair("big-imm")
     return None
 
 
@@ -536,17 +534,14 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 #
 # Match kinds (per tuple):
 #   "arith2"      both R-type; share rs1, rs2 positionally; two distinct dests.
-#   "load_addi"   load + addi; share the base register and the (width-scaled)
+#   "mem_addi"    load + addi; share the base register and the (width-scaled)
 #                 immediate offset; two distinct dests.
-#   "load_shadd"  load + shNadd; share the base register only, with the load
-#                 offset forced to zero — a register post-increment form.
-#   "store_shadd" store + shNadd; the store's {base, value} registers equal the
-#                 shadd's two source registers; the store carries the
-#                 (width-scaled) offset immediate.
+#   "mem_shadd"   load/store + shNadd; share the base register only, with the
+#                 load offset forced to zero — a register post-increment form.
 #
-# Width-scaled immediate (load_addi, store_shadd): the memory op implies a data
-# width; the shared/offset immediate must be a nonzero unsigned 5-bit value with
-# remap, scaled by that width — i.e. a nonzero multiple of the width in
+# Width-scaled immediate (mem_addi): the memory op implies a data width; the
+# shared/offset immediate must be a nonzero unsigned 5-bit value with remap,
+# scaled by that width — i.e. a nonzero multiple of the width in
 # [width, 32*width].  This trades granularity for reach.
 #
 # Canonical order is (tuple[0], tuple[1]).  The reverse order is accepted only
@@ -563,11 +558,11 @@ _MEM_PAIR_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld",
 def _mem_pair(a: Instruction, b: Instruction) -> None:
     """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
     if a.mnemonic != b.mnemonic:
-        raise NotPair("mnemonic mismatch")
+        raise NotPair("opcode-mismatch")
     if a.rbase != b.rbase or a.rbase is None:
-        raise NotPair("base registers differ")
+        raise NotPair("base-reg-mismatch")
     if a.imm is None or b.imm is None:
-        raise NotPair("missing memory offset")
+        raise NotPair("MALFORMED: memory offset absent")
     width = a.access_width or (1 << (a.access_shift or 0))
     if abs(a.imm - b.imm) != width:
         raise NotPair(f"bad-delta")
@@ -617,9 +612,9 @@ def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
         # Immediate field is [-64, 64] inclusive, excluding 0 (encode a zero
         # immediate as a move from x0 instead).
         if a.imm is None or a.imm == 0 or not (-64 <= a.imm <= 64):
-            raise NotPair("out-of-range-immediate")
+            raise NotPair("A-big-imm")
     if not _arith_mem_small_offset_ok(b):
-        raise NotPair("out-of-range-offset")
+        raise NotPair("B-big-imm")
     return None
 
 
@@ -637,19 +632,19 @@ _DUAL_TUPLES: dict = {
     ("divw", "remw"):     "arith2",
     ("divuw", "remuw"):   "arith2",
     # load + addi — 32/64-bit only; zero load offset; addi imm = width-scaled stride
-    ("ld",  "addi"):      "load_addi",
-    ("lw",  "addi"):      "load_addi",
-    ("lwu", "addi"):      "load_addi",
+    ("ld",  "addi"):      "mem_addi",
+    ("lw",  "addi"):      "mem_addi",
+    ("lwu", "addi"):      "mem_addi",
     # store + addi — 32/64-bit only; zero store offset; addi imm = width-scaled stride
-    ("sd",  "addi"):      "store_addi",
-    ("sw",  "addi"):      "store_addi",
+    ("sd",  "addi"):      "mem_addi",
+    ("sw",  "addi"):      "mem_addi",
     # load + shNadd — zero load offset
-    ("ld",  "sh3add"):    "load_shadd",
-    ("lw",  "sh2add"):    "load_shadd",
-    ("lwu", "sh2add"):    "load_shadd",
+    ("ld",  "sh3add"):    "mem_shadd",
+    ("lw",  "sh2add"):    "mem_shadd",
+    ("lwu", "sh2add"):    "mem_shadd",
     # store + shNadd — zero store offset
-    ("sd",  "sh3add"):    "store_shadd",
-    ("sw",  "sh2add"):    "store_shadd",
+    ("sd",  "sh3add"):    "mem_shadd",
+    ("sw",  "sh2add"):    "mem_shadd",
     # (adjacent load/store pairs are handled by the dedicated mem-pair rule)
     # independent single-output pairs — no shared operands required
     # ("addi", "addi") is overloaded: it covers three pseudo-ops (li, mv,
@@ -722,70 +717,46 @@ def dual_family(role: str):
 
 
 @dual_family("arith2")
-def _dual_arith2(first: Instruction, second: Instruction) -> None:
+def _dual_arith2(a: Instruction, b: Instruction) -> None:
     """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...)."""
-    if None in (first.rs1, first.rs2, second.rs1, second.rs2):
-        raise NotPair("missing register operand")
-    if first.rs1 != second.rs1 or first.rs2 != second.rs2:
-        raise NotPair("source operands differ")
+    if None in (a.rs1, a.rs2, b.rs1, b.rs2):
+        raise NotPair("MALFORMED: missing register operand")
+    if a.rs1 != b.rs1 or a.rs2 != b.rs2:
+        raise NotPair("source-operand-mismatch")
 
 
-@dual_family("load_addi")
-def _dual_load_addi(first: Instruction, second: Instruction) -> None:
-    """Load + addi pointer stride: base == addi source, zero load offset, addi
+@dual_family("mem_addi")
+def _dual_mem_addi(a: Instruction, b: Instruction) -> None:
+    """Mem + addi pointer stride: base == addi source, zero mem offset, addi
     immediate a nonzero width-scaled uimm5."""
-    if first.rs1 != second.rs1:
-        raise NotPair("base register differs from addi source")
-    if first.imm != 0:
-        raise NotPair("load offset must be zero")
-    if not _width_stride_ok(first, second):
-        raise NotPair(f"addi immediate not a nonzero {first.access_width}-scaled uimm5")
+    if a.rs1 != b.rs1:
+        raise NotPair("base-reg-mismatch")
+    if a.imm != 0:
+        raise NotPair("nonzero-offset")
+    if not _width_stride_ok(a, b):
+        raise NotPair("B-addi-imm-mismatch")
 
 
-@dual_family("store_addi")
-def _dual_store_addi(first: Instruction, second: Instruction) -> None:
-    """Store + addi pointer stride: base == addi source, zero store offset, addi
-    immediate a nonzero width-scaled uimm5."""
-    if first.rs1 != second.rs1:
-        raise NotPair("base register differs from addi source")
-    if first.imm != 0:
-        raise NotPair("store offset must be zero")
-    if not _width_stride_ok(first, second):
-        raise NotPair(f"addi immediate not a nonzero {first.access_width}-scaled uimm5")
-
-
-@dual_family("load_shadd")
-def _dual_load_shadd(first: Instruction, second: Instruction) -> None:
+@dual_family("mem_shadd")
+def _dual_mem_shadd(a: Instruction, b: Instruction) -> None:
     """Load + shNadd index: load base == shadd source, zero load offset."""
-    if first.rs1 != second.rs1:
-        raise NotPair("load base differs from shadd source")
-    if first.imm != 0:
-        raise NotPair("load offset must be zero")
-
-
-@dual_family("store_shadd")
-def _dual_store_shadd(first: Instruction, second: Instruction) -> None:
-    """Store + shNadd index: store {base, value} == shadd's two sources, zero
-    store offset."""
-    if None in (first.rs1, first.rs2, second.rs1, second.rs2):
-        raise NotPair("missing register operand")
-    if {first.rs1, first.rs2} != {second.rs1, second.rs2}:
-        raise NotPair("store regs differ from shadd sources")
-    if first.imm != 0:
-        raise NotPair("store offset must be zero")
+    if a.rs1 != b.rs1:
+        raise NotPair("base-reg-mismatch")
+    if a.imm != 0:
+        raise NotPair("nonzero-offset")
 
 
 @dual_family("indep_pair")
-def _dual_indep(first: Instruction, second: Instruction) -> None:
+def _dual_indep(a: Instruction, b: Instruction) -> None:
     """Two fully independent small pseudo-ops (li / mv / addi4spn)."""
-    for insn in (first, second):
+    for insn in (a, b):
         if not _is_li_mv_addi4spn(insn):
-            raise NotPair("not a li/mv/addi4spn pattern")
+            raise NotPair("is-not-li_mv_addi4spn")
         if insn.is_addi4spn and not insn.uimm_fits(5, 2, nonzero='remap'):
             raise NotPair(f"addi4spn immediate {insn.imm} out of range [4,128]")
     # A→B independence is enforced by _reject_dependence; also require B↛A
     # (reversed_order is never set for this symmetric tuple).
-    if second.rd is not None and second.rd in first.uses_regs:
+    if b.rd is not None and b.rd in a.uses_regs:
         raise NotPair("B result feeds A")
 
 
@@ -838,11 +809,11 @@ _ADDI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
     """addi/addiw RSD + comparison branch consuming the result."""
     if not a.is_rsd:
-        raise NotPair("is-not-rsd")
+        raise NotPair("A-is-not-rsd")
     if a.rd not in _RSD_ALU_REGS:
-        raise NotPair("A-out-of-range-register")
+        raise NotPair("A-big-reg")
     if not a.imm_fits(8):
-        raise NotPair("out-of-range-immediate")
+        raise NotPair("B-big-imm")
     return None
 
 
@@ -954,7 +925,7 @@ def _prologue_pair(a: Instruction, b: Instruction) -> None:
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
     if not a.nimm_fits(7, 4, nonzero=True):
-        raise NotPair("A-out-of-range-immediate")
+        raise NotPair("A-big-imm")
     if b.rs1 != 2:
         raise NotPair("B-not-SP-base")
     if b.rs2 != 1:
@@ -977,11 +948,11 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
     if not a.uimm_fits(7, 4, nonzero=True):
-        raise NotPair("A-out-of-range-immediate")
+        raise NotPair("A-big-imm")
     if b.rd not in (0, 1):
         raise NotPair("B rd must be x0 or x1")
     if not b.imm_fits(12):
-        raise NotPair("B-out-of-range-immediate")
+        raise NotPair("B-big-imm")
 
 
 # ---------------------------------------------------------------------------
@@ -1038,7 +1009,7 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
         return None
     if a.reads_memory:
         if not _arith_mem_small_offset_ok(a):
-            raise NotPair("A-out-of-range-offset")
+            raise NotPair("A-big-imm")
         return None
     raise NotPair("A is not mv/li or a small-offset load")
 
@@ -1112,28 +1083,16 @@ RULES: list[PairingRule] = [
         check=_dual_arith2,
     ),
     PairingRule(
-        name="dual-load-addi-pair",
-        a_mnemonic_set=_role_mnems("load_addi"),
-        b_mnemonic_set=_role_mnems("load_addi"),
-        check=_dual_load_addi,
+        name="dual-mem-addi-pair",
+        a_mnemonic_set=_role_mnems("mem_addi"),
+        b_mnemonic_set=_role_mnems("mem_addi"),
+        check=_dual_mem_addi,
     ),
     PairingRule(
-        name="dual-store-addi-pair",
-        a_mnemonic_set=_role_mnems("store_addi"),
-        b_mnemonic_set=_role_mnems("store_addi"),
-        check=_dual_store_addi,
-    ),
-    PairingRule(
-        name="dual-load-shadd-pair",
-        a_mnemonic_set=_role_mnems("load_shadd"),
-        b_mnemonic_set=_role_mnems("load_shadd"),
-        check=_dual_load_shadd,
-    ),
-    PairingRule(
-        name="dual-store-shadd-pair",
-        a_mnemonic_set=_role_mnems("store_shadd"),
-        b_mnemonic_set=_role_mnems("store_shadd"),
-        check=_dual_store_shadd,
+        name="dual-mem-shadd-pair",
+        a_mnemonic_set=_role_mnems("mem_shadd"),
+        b_mnemonic_set=_role_mnems("mem_shadd"),
+        check=_dual_mem_shadd,
     ),
     PairingRule(
         name="dual-indep-pair",

@@ -152,7 +152,7 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                     if eligible:
                         for rule in eligible:
                             if rule.b_mnemonic_set is not None and curr.mnemonic not in rule.b_mnemonic_set:
-                                curr.solo_reasons["mnemonic not supported"].add(rule.name)
+                                curr.solo_reasons["bad-opcode"].add(rule.name)
                                 continue
                             failed = [p for p in rule.b_prerequisites if not getattr(curr, p)]
                             if failed:
