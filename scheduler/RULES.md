@@ -783,7 +783,7 @@ sd   ra, 8(sp)      ; ra at the top: 8 + 8 (sd width) − 16 = 0
 
 ```asm
 addi sp, sp, -16
-sd   ra, 0(sp)      ; delta 0 + 8 − 16 ≠ 0 → "B-bad-delta"
+sd   ra, 0(sp)      ; delta 0 + 8 − 16 ≠ 0 → "bad-delta"
                     ;   (but this DOES pair via pre-inc-pair, §3.15)
 ```
 

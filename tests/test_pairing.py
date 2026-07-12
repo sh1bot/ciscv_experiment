@@ -1204,7 +1204,7 @@ class TestProloguePair:
         # so assert against the prologue rule directly.
         a = make_insn("addi", rd=2, rs1=2, imm=-16)
         b = make_insn("sd", rs1=2, rs2=1, imm=0)          # 0+8-16 != 0
-        assert _rule_reason("prologue-pair", a, b) == "B-bad-delta"
+        assert _rule_reason("prologue-pair", a, b) == "bad-delta"
 
     def test_not_ra_source_no_pair(self):
         a = make_insn("addi", rd=2, rs1=2, imm=-16)

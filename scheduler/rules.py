@@ -91,11 +91,11 @@ def _rsd_alu_imm_ok(insn: Instruction, data_size: Optional[int] = None) -> None:
         if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
             raise NotPair("big-imm")
         if imm is None:
-            raise NotPair("MALFORMED: missing-immediate")
+            raise NotPair("MALFORMED: missing-imm")
     elif insn.mnemonic in _RSD_SHIFT_MN:
         imm = insn.imm
         if imm is None:
-            raise NotPair("MALFORMED: missing-shift-amount")
+            raise NotPair("MALFORMED: missing-imm")
         if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
             raise NotPair("big-imm")
 
@@ -477,11 +477,11 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 def _load_branch_check(a: Instruction, b: Instruction,
                        imm_bits: int) -> None:
     if a.rbase is None:
-        raise NotPair("load has no base register")
+        raise NotPair("A-no-base")
     if a.rd is None:
-        raise NotPair("load has no destination")
+        raise NotPair("A-no-dest")
     if not a.uimm_fits(imm_bits):
-        raise NotPair(f"offset exceeds {imm_bits}-bit unsigned range")
+        raise NotPair("A-big-imm")
     return None
 
 
@@ -490,7 +490,7 @@ def _load_branch_check(a: Instruction, b: Instruction,
 def _load_sp_branch(a: Instruction, b: Instruction) -> None:
     """sp-relative load (uimm10 byte offset) -> beqz/bnez; rd kept alive."""
     if a.rbase != 2:
-        raise NotPair("not-SP-base")
+        raise NotPair("A-not-SP-base")
     _load_branch_check(a, b, 10)
 
 
@@ -526,13 +526,12 @@ _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
     if a.rbase is None or a.rd is None:
-        raise NotPair("A missing base/dest register")
+        raise NotPair("A-no-base/dest")
     shift = a.access_shift or 0
     if not a.uimm_fits(10, shift):
-        max_off = ((1 << 10) - 1) << shift
-        raise NotPair(f"A offset exceeds 10-bit scaled range (max {max_off})")
+        raise NotPair("A-big-imm")
     if b.imm != 0:
-        raise NotPair("B offset must be zero")
+        raise NotPair("B-nonzero-offset")
     return None
 
 
@@ -542,12 +541,12 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
 def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
     if a.rbase is None or a.rd is None:
-        raise NotPair("A missing base/dest register")
+        raise NotPair("A-no-base/dest")
     if a.imm != 0:
-        raise NotPair("A offset must be zero")
+        raise NotPair("A-nonzero-offset")
     shift = b.access_shift or 0
     if not b.uimm_fits(10, shift):
-        raise NotPair("big-imm")
+        raise NotPair("B-big-imm")
     return None
 
 
@@ -588,16 +587,15 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     if a.rbase != b.rbase or a.rbase is None:
         raise NotPair("base-reg-mismatch")
     if a.imm is None or b.imm is None:
-        raise NotPair("MALFORMED: memory offset absent")
+        raise NotPair("MALFORMED: missing-imm")
     width = a.access_width or (1 << (a.access_shift or 0))
     if abs(a.imm - b.imm) != width:
-        raise NotPair(f"bad-delta")
+        raise NotPair("bad-delta")
     shift = a.access_shift or 0
     imm_bits = 8 if a.is_local else 5
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
-            max_off = ((1 << imm_bits) - 1) << shift
-            raise NotPair(f"offset exceeds {imm_bits}-bit scaled range (max {max_off})")
+            raise NotPair("big-imm")
     return None
 
 
@@ -746,9 +744,9 @@ def dual_family(role: str):
 def _dual_arith2(a: Instruction, b: Instruction) -> None:
     """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...)."""
     if None in (a.rs1, a.rs2, b.rs1, b.rs2):
-        raise NotPair("MALFORMED: missing register operand")
+        raise NotPair("MALFORMED: missing-reg")
     if a.rs1 != b.rs1 or a.rs2 != b.rs2:
-        raise NotPair("source-operand-mismatch")
+        raise NotPair("source-mismatch")
 
 
 @dual_family("mem_addi")
@@ -760,7 +758,7 @@ def _dual_mem_addi(a: Instruction, b: Instruction) -> None:
     if a.imm != 0:
         raise NotPair("nonzero-offset")
     if not _width_stride_ok(a, b):
-        raise NotPair("B-addi-imm-mismatch")
+        raise NotPair("bad-stride")
 
 
 @dual_family("mem_shadd")
@@ -777,13 +775,13 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
     """Two fully independent small pseudo-ops (li / mv / addi4spn)."""
     for insn in (a, b):
         if not _is_li_mv_addi4spn(insn):
-            raise NotPair("is-not-li_mv_addi4spn")
+            raise NotPair("not-li/mv/addi4spn")
         if insn.is_addi4spn and not insn.uimm_fits(5, 2, nonzero='remap'):
-            raise NotPair(f"addi4spn immediate {insn.imm} out of range [4,128]")
+            raise NotPair("big-imm")
     # A→B independence is enforced by _reject_dependence; also require B↛A
     # (reversed_order is never set for this symmetric tuple).
     if b.rd is not None and b.rd in a.uses_regs:
-        raise NotPair("B result feeds A")
+        raise NotPair("cannot-reorder")
 
 
 
@@ -810,9 +808,9 @@ _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
-        raise NotPair("A not li form (must be addi rd, x0, imm)")
+        raise NotPair("A-not-li")
     if not a.imm_fits(8):
-        raise NotPair("immediate out of 8-bit signed range [-128..127]")
+        raise NotPair("A-big-imm")
     return None
 
 
@@ -839,7 +837,7 @@ def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
     if a.rd not in _RSD_ALU_REGS:
         raise NotPair("A-big-reg")
     if not a.imm_fits(8):
-        raise NotPair("B-big-imm")
+        raise NotPair("A-big-imm")
     return None
 
 
@@ -891,13 +889,13 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
     All forms require a zero-test branch (beqz/bnez or beq/bne with rs2==x0).
     """
     if a.rd is None:
-        raise NotPair("A has no destination")
+        raise NotPair("A-no-dest")
     # beq/bne with zero are aliases for beqz/bnez; non-zero comparisons not supported
     if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
-        raise NotPair("beq/bne B slot requires rs2==zero")
+        raise NotPair("B-not-zero-test")
     if a.mnemonic == "andi":
         if not _is_pow2_imm(a.imm) and _shift_for_zero_test(a.imm) is None:
-            raise NotPair(f"andi immediate {a.imm} not pow2 or shift-expressible")
+            raise NotPair("A-bad-mask")
     # slli/srli: any shift amount is accepted
     return None
 
@@ -935,7 +933,7 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("bad-tuple")
     # TOOD: check immediate range?
     if b.has_mem_operand and b.imm != 0:
-        raise NotPair("B-nonzero-immediate")
+        raise NotPair("B-nonzero-offset")
     return None
 
 
@@ -957,7 +955,7 @@ def _prologue_pair(a: Instruction, b: Instruction) -> None:
     if b.rs2 != 1:
         raise NotPair("B-not-RA-src")
     if b.imm + b.access_width + a.imm != 0:
-        raise NotPair("B-bad-delta")
+        raise NotPair("bad-delta")
 
 
 def _epilogue_pair(a: Instruction, b: Instruction) -> None:
@@ -976,7 +974,7 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
     if not a.uimm_fits(7, 4, nonzero=True):
         raise NotPair("A-big-imm")
     if b.rd not in (0, 1):
-        raise NotPair("B rd must be x0 or x1")
+        raise NotPair("B-bad-rd")
     if not b.imm_fits(12):
         raise NotPair("B-big-imm")
 
@@ -1037,7 +1035,7 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
         if not _arith_mem_small_offset_ok(a):
             raise NotPair("A-big-imm")
         return None
-    raise NotPair("A is not mv/li or a small-offset load")
+    raise NotPair("A-not-mv/li/load")
 
 RULES: list[PairingRule] = [
     PairingRule(
