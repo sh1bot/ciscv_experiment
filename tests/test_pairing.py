@@ -1064,16 +1064,27 @@ def _rule_reason(name, a, b):
 
 
 class TestLoadSpBranch:
-    """A = sp-relative load (uimm10 byte offset); B = beqz/bnez on the value.
-    The loaded value is kept alive (null-check idiom)."""
+    """A = sp-relative load (width-scaled uimm10 offset); B = beqz/bnez on the
+    value.  The loaded value is kept alive (null-check idiom)."""
 
     def test_basic_pairs(self):
         a = make_insn("lw", rd=10, rs1=2, imm=8)          # lw a0, 8(sp)
         b = make_insn("beqz", rs1=10, branch_target="L")  # beqz a0, L
         assert can_pair(a, b) is None
 
+    def test_scaled_offset_extends_reach(self):
+        # 2048 exceeds a 10-bit *byte* range but is 512×4 — in range once scaled.
+        a = make_insn("lw", rd=10, rs1=2, imm=2048)
+        b = make_insn("beqz", rs1=10, branch_target="L")
+        assert can_pair(a, b) is None
+
     def test_offset_over_10bit_no_pair(self):
-        a = make_insn("lw", rd=10, rs1=2, imm=1024)       # 1024 > uimm10 max 1023
+        a = make_insn("lw", rd=10, rs1=2, imm=4096)       # 4096>>2 = 1024 > uimm10 max 1023
+        b = make_insn("beqz", rs1=10, branch_target="L")
+        assert can_pair(a, b) is not None
+
+    def test_unaligned_offset_no_pair(self):
+        a = make_insn("lw", rd=10, rs1=2, imm=6)          # 6 not a multiple of 4
         b = make_insn("beqz", rs1=10, branch_target="L")
         assert can_pair(a, b) is not None
 
@@ -1091,15 +1102,26 @@ class TestLoadSpBranch:
 
 
 class TestLoadBaseBranch:
-    """A = any-base load (uimm5 byte offset); B = beqz/bnez on the value."""
+    """A = any-base load (width-scaled uimm5 offset); B = beqz/bnez on the value."""
 
     def test_basic_pairs(self):
-        a = make_insn("lw", rd=10, rs1=11, imm=8)         # lw a0, 8(a1)
+        a = make_insn("lw", rd=10, rs1=11, imm=8)         # lw a0, 8(a1): 8 = 2×4
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert can_pair(a, b) is None
+
+    def test_byte_load_unscaled_offset_pairs(self):
+        # lb has width 1 (shift 0), so any byte offset up to 31 is in range.
+        a = make_insn("lb", rd=10, rs1=11, imm=31)
         b = make_insn("bnez", rs1=10, branch_target="L")
         assert can_pair(a, b) is None
 
     def test_offset_over_5bit_no_pair(self):
-        a = make_insn("lw", rd=10, rs1=11, imm=64)        # 64 > uimm5 max 31
+        a = make_insn("lw", rd=10, rs1=11, imm=128)       # 128>>2 = 32 > uimm5 max 31
+        b = make_insn("bnez", rs1=10, branch_target="L")
+        assert can_pair(a, b) is not None
+
+    def test_unaligned_offset_no_pair(self):
+        a = make_insn("lw", rd=10, rs1=11, imm=6)         # 6 not a multiple of 4
         b = make_insn("bnez", rs1=10, branch_target="L")
         assert can_pair(a, b) is not None
 
