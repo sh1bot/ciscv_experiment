@@ -89,10 +89,16 @@ def rule_ok(rule, a, b):
         return False
 
 
+def _regs(insn):                           # non-None, non-x0 register operands
+    return [r for r in (insn.rd, insn.rs1, insn.rs2) if r not in (None, 0)]
+
+
 def collect(paths):
     cooc   = defaultdict(Counter)          # rule -> Counter[(opA,opB)]
     widthA = defaultdict(Counter)          # rule -> Counter[bits]
     widthB = defaultdict(Counter)
+    nmatch = Counter()                     # rule -> matches
+    nlow   = Counter()                     # rule -> matches with all regs <= x15
     for path in paths:
         with open(path) as f:
             src = f.read()
@@ -116,8 +122,11 @@ def collect(paths):
                         wa, wb = imm_width(a), imm_width(b)
                         if wa is not None: widthA[rule.name][wa] += 1
                         if wb is not None: widthB[rule.name][wb] += 1
+                        nmatch[rule.name] += 1
+                        if all(r < 16 for r in _regs(a) + _regs(b)):
+                            nlow[rule.name] += 1
                         break          # first accepting rule, greedy-style
-    return cooc, widthA, widthB
+    return cooc, widthA, widthB, nmatch, nlow
 
 
 def leaves_for(counter, frac):
@@ -146,7 +155,7 @@ def pctile_bits(counter, frac):
 def main():
     paths = sys.argv[1:] or ["tests/godot.s"]
     paths = [p if os.path.isabs(p) else os.path.join(os.path.dirname(__file__), "..", p) for p in paths]
-    cooc, widthA, widthB = collect(paths)
+    cooc, widthA, widthB, nmatch, nlow = collect(paths)
 
     print(f"# Encoding budget over: {', '.join(os.path.basename(p) for p in paths)}\n")
     header = f"{'rule':24} {'match':>6} {'pairs':>5} {'L90':>4} {'L95':>4} {'L99':>4} " \
@@ -185,6 +194,14 @@ def main():
     print(f"  -> need a dedicated wide/sp-relative immediate variant:")
     for name, iA, iB in wide_imm:
         print(f"    {name:24} immA95={iA} immB95={iB}")
+
+    print(f"\nRegister-field pressure (share of matches with all regs <= x15):")
+    print(f"  {'<95% -> a 4-bit register cut would cost real coverage'}")
+    for name in order:
+        if not nmatch[name]: continue
+        frac = 100 * nlow[name] / nmatch[name]
+        flag = "" if frac > 99.5 else ("  <- 4-bit cut costly" if frac < 95 else "  <- minor")
+        print(f"    {name:24} {frac:5.1f}%{flag}")
 
 
 if __name__ == "__main__":

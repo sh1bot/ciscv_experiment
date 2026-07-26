@@ -120,6 +120,39 @@ are sized about right, not arbitrarily.
 smaller committed `results/` table. Tiling coverage is corpus- and
 vocabulary-dependent — the 60% figure is godot-only over the full 45-op set.)
 
+## Result 4 — the 4-bit-register cut is free for rsd-alu, costly for others
+
+`encoding.md` carries a TODO that the two-result frames "will probably have to
+be cut down to 4-bit register fields." Measuring the share of each frame's real
+matches whose registers all fit `x0..x15`:
+
+| frame | matches | all regs ≤ x15 | 4-bit cut? |
+|---|--:|--:|---|
+| **rsd-alu-pair** | 2548 | **100.0%** | **free** — `uses_low_regs` already guarantees it |
+| store-chain / prologue / epilogue | — | 100.0% | free |
+| load-sp-branch | 855 | 99.5% | ~free |
+| chain-alu / chain-bit-test / arith-jump | — | 98–99% | minor loss |
+| load-base-branch | 568 | 89.4% | costly |
+| **mem-pair** | **6772** | **45.2%** | **must stay 5-bit** |
+| dual-indep-pair | 3975 | 50.4% | costly |
+| mvload-jump-pair | 936 | 48.0% | costly |
+| dual-arith2-pair | 13 | 23.1% | costly |
+| addi-branch / dual-mem-addi / pre-inc / arith-mem | — | 66–81% | costly |
+
+Two clean takeaways:
+
+- **`rsd-alu`'s 4-bit cut costs nothing** — every real match already fits
+  `x0..x15` (the rule enforces it), so the TODO is safe to act on and frees the
+  bits it needs. The same is true for `store-chain`, `prologue`, `epilogue`.
+- **`mem-pair` — the single largest frame — must keep 5-bit registers** (only
+  45% fit 4-bit), and it already does. Forcing it to 4-bit would drop more than
+  half its pairings.
+
+This dovetails with Result 1: because the opcode namespace fits with ~100 leaves
+to spare, frames that *need* 5-bit registers (mem-pair, the dual-* family) can
+afford them — the budget pressure was never on registers, it was the phantom
+opcode-explosion that turned out not to exist.
+
 ## Caveats
 
 - **Current-rule demand**, not a generalised encoding. Broadening any frame's
