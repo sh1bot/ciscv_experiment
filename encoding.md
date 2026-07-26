@@ -10,13 +10,21 @@
 │             imm[31:12]                 │   rd    │  opcode  │   U-type
 │        imm[20|10:1|11|19:12]           │   rd    │  opcode  │   J-type
 
+# Overview
+
+## Constraints
+
+ * The rd field must not be x0 or x1 when it describes a register
+   (sometimes it is an immediate, and then the bit pattern is allowed).
+   Encoding these registers here is reserved for different
+   instructions, as is demonstrated in the prologue/epilogue pairs.
 
 # Chain rules
 
-* One defined output register, plus x31 becomes undefined.
-* First instruction produces result for use by second instruction
-* Generally second operation produces result, but second op may have no output
-  (eg., store, branch) meaning result comes from first, or there's no result at all.
+ * One defined output register, plus x31 becomes undefined.
+ * First instruction produces result for use by second instruction
+ * Generally second operation produces result, but second op may have no output
+   (eg., store, branch) meaning result comes from first, or there's no result at all.
 
 ## chain-alu-pair
 
