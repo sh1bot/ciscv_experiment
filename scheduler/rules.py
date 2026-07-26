@@ -440,9 +440,12 @@ def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
 # The two variants differ in base register and offset range:
 #
 #   load-sp-branch:   A = any load with sp (x2) as base, 10-bit unsigned
-#                     byte offset.  Captures deep stack frames.
+#                     offset scaled by the access width.  Captures deep frames.
 #   load-base-branch: A = any load with any base register, 5-bit unsigned
-#                     byte offset.  Covers shallow struct fields.
+#                     offset scaled by the access width.  Shallow struct fields.
+#
+# Offsets are width-scaled (a multiple of the access size, encoded shifted),
+# matching every other memory rule here; unaligned offsets do not pair.
 #
 # rd is NOT required to be dead — the common case is a null-check where the
 # pointer is tested and then used on the non-null path.  Dead-after cases
@@ -454,15 +457,15 @@ def _load_branch_check(a: Instruction, b: Instruction,
         raise NotPair("load has no base register")
     if a.rd is None:
         raise NotPair("load has no destination")
-    if not a.uimm_fits(imm_bits):
-        raise NotPair(f"offset exceeds {imm_bits}-bit unsigned range")
+    if not a.uimm_fits(imm_bits, a.access_shift or 0):
+        raise NotPair(f"offset exceeds {imm_bits}-bit width-scaled range")
     return None
 
 
 @a_base_not_from_auipc
 @must_chain
 def _load_sp_branch(a: Instruction, b: Instruction) -> None:
-    """sp-relative load (uimm10 byte offset) -> beqz/bnez; rd kept alive."""
+    """sp-relative load (width-scaled uimm10 offset) -> beqz/bnez; rd kept alive."""
     if a.rbase != 2:
         raise NotPair("not-SP-base")
     _load_branch_check(a, b, 10)
@@ -471,7 +474,7 @@ def _load_sp_branch(a: Instruction, b: Instruction) -> None:
 @a_base_not_from_auipc
 @must_chain
 def _load_base_branch(a: Instruction, b: Instruction) -> None:
-    """Any-base load (uimm5 byte offset) -> beqz/bnez; rd kept alive."""
+    """Any-base load (width-scaled uimm5 offset) -> beqz/bnez; rd kept alive."""
     _load_branch_check(a, b, 5)
 
 
