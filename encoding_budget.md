@@ -100,10 +100,26 @@ exceeds that:
 
 Most "wide" cases are already covered by a dedicated sp-relative or `×16`
 10-bit variant in `encoding.md`. The genuine gap is **`li` constants**
-(`dual-indep`, `mvload-jump`): they want 8–10 significant bits but sit in a
-5-bit `imma`. This is the same un-range-checked `li` immediate flagged earlier
-in the rules (`is_li` accepts any concrete value). Options: a dedicated wide-`li`
-frame, `lui`-style upper-immediate pairing, or accept the coverage loss.
+(`dual-indep`, `mvload-jump`, and as an A/B operand in `arith-jump`/`rsd-alu`):
+they want 8+ significant bits but sit in a 5-bit `imma`. This is the same
+un-range-checked `li` immediate flagged earlier in the rules (`is_li` accepts
+any concrete value).
+
+The `li`-constant width distribution across li-bearing frames (6006 operands):
+
+| ≤ N bits | cumulative |
+|---|--:|
+| 0 (literal zero) | 51% |
+| ≤5 | 82% |
+| ≤7 (5-bit + g,h) | **89%** |
+| ≤9 | 95% |
+| ≤12 | 100% |
+
+So a 7-bit `li` field (the most `g,h` can extend a 5-bit `imma` to) covers ~89%
+of real `li` operands; the remaining **~11% tail (8–12 bits)** — real addresses
+and large constants — needs a full-width path. Options: a dedicated wide-`li`
+frame, `lui`-style upper-immediate pairing, or accept the ~11% loss on
+li-bearing pairs. This is the only immediate shortfall the corpus surfaces.
 
 ## Result 3 — the current op-set size is well-matched to the budget
 
@@ -157,8 +173,13 @@ opcode-explosion that turned out not to exist.
 
 - **Current-rule demand**, not a generalised encoding. Broadening any frame's
   op set raises its leaf count (Result 3).
-- Corpus = godot + testcase0. Two programs; a third would move the tail
-  (L99) more than the head (L90).
+- Corpus = godot + testcase0. Per-corpus totals confirm the head is robust
+  and the tail grows with diversity: at 95% the sums are 115 (godot) / 107
+  (testcase0) / 157 (combined); at 99% they are 179 / 142 / 236. So the
+  90–95% headroom is solid, but the 99% figure climbs as corpora accumulate
+  (rare pairs differ between programs) and would eventually spill into the
+  `g,h`-split (1024) space or need coverage triage. The 95% fit is the durable
+  claim; 99% is comfortable today but corpus-sensitive.
 - Greedy first-rule attribution assigns each real pair to one frame, matching
   the encoder; a different rule order shifts pairs between `rsd-alu` and
   `chain-alu` but not the total.
