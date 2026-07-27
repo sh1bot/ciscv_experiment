@@ -52,9 +52,8 @@ doc:
   - frame:
       name: chain-alu-pair
       level: 2
-      asm: |
-        alu     tmp, rs1a, rs2a/imma
-        alu     rdb, tmp, rs2b/immb
+      templates:
+        - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "funct3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "funct3", "rdb"]
@@ -64,12 +63,9 @@ doc:
   - frame:
       name: load-chain-alu-pair
       level: 2
-      asm: |
-        load    tmp, k*imma(rs1a)
-        alu     rdb, tmp, rs2b/immb
-
-        load    tmp, k*imma(sp)
-        alu     rdb, tmp, rs2b/immb
+      templates:
+        - ["load    tmp, k*imma(rs1a)", "alu     rdb, tmp, rs2b/immb"]
+        - ["load    tmp, k*imma(sp)", "alu     rdb, tmp, rs2b/immb"]
       rows:
         - ["h", "rs2b",      "imma[5:0]*2",      "rs1a", "funct3", "rdb"]
         - ["h", "immb[4:0]", "imma[5:0]*2",      "rs1a", "funct3", "rdb"]
@@ -79,12 +75,9 @@ doc:
   - frame:
       name: store-chain-alu-pair
       level: 2
-      asm: |
-        alu     tmp, rs1a, rs2a/imma
-        store   tmp, k*immb(rs1b)
-
-        alu     tmp, rs1a, rs2a/imma
-        store   tmp, k*immb(sp)
+      templates:
+        - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(rs1b)"]
+        - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(sp)"]
       rows:
         - ["h", "rs1b",      "g", "rs2a",      "rs1a", "funct3", "immb[4:0]"]
         - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "funct3", "immb[4:0]"]
@@ -94,9 +87,8 @@ doc:
   - frame:
       name: "deref-chain-load-pair, base-chain-load-pair"
       level: 2
-      asm: |
-        load    tmp, k*imma(rs1a)
-        load    rdb, k*immb(tmp)
+      templates:
+        - ["load    tmp, k*imma(rs1a)", "load    rdb, k*immb(tmp)"]
       rows:
         - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "funct3", "rdb"]
         - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "funct3", "rdb"]
@@ -108,9 +100,8 @@ doc:
   - frame:
       name: chain-li-branch
       level: 2
-      asm: |
-        li      tmp, imma
-        bXX     rs1b, tmp, 4*immb
+      templates:
+        - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1b", "funct3", "immb[4:0]"]
       notes: |
@@ -120,12 +111,9 @@ doc:
   - frame:
       name: chain-bit-test-branch
       level: 2
-      asm: |
-        andi    tmp, rs1a, imma
-        beqz/bnez tmp, immb
-
-        slli    tmp, rs1a, imma
-        blt/bge tmp, zero, 4*immb
+      templates:
+        - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
+        - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1a", "funct3", "immb[4:0]"]
 
@@ -135,12 +123,9 @@ doc:
   - frame:
       name: "load-sp-branch, load-base-branch"
       level: 2
-      asm: |
-        load    rda, k*imma(sp)
-        beqz/bnez rda, zero, 4*immb
-
-        load    rda, k*imma(rs1a)
-        beqz/bnez rda, zero, 4*immb
+      templates:
+        - ["load    rda, k*imma(sp)", "beqz/bnez rda, zero, 4*immb"]
+        - ["load    rda, k*imma(rs1a)", "beqz/bnez rda, zero, 4*immb"]
       rows:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "funct3", "immb[4:0]"]
         - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "funct3", "immb[4:0]"], tag: SP-relative}
@@ -150,9 +135,8 @@ doc:
   - frame:
       name: addi-branch-pair
       level: 2
-      asm: |
-        addi/addiw rsda, imma
-        beqz/bnez rsda, zero, 4*immb
+      templates:
+        - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rsda", "funct3", "immb[4:0]"]
 
@@ -164,18 +148,11 @@ doc:
   - frame:
       name: pre-inc-pair
       level: 2
-      asm: |
-        shXadd  rsda, rsda, rs2a
-        load    rdb, k*immb(rsda)
-
-        addi    rsda, rsda, imma
-        load    rdb, k*immb(rsda)
-
-        shXadd  rsda, rsda, rs2a
-        store   rs2b, k*immb(rsda)
-
-        addi    rsda, rsda, imma
-        store   rs2b, k*immb(rsda)
+      templates:
+        - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
+        - ["addi    rsda, rsda, imma", "load    rdb, k*immb(rsda)"]
+        - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
+        - ["addi    rsda, rsda, imma", "store   rs2b, k*immb(rsda)"]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "funct3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "funct3", "rdb"]
@@ -187,18 +164,11 @@ doc:
   - frame:
       name: "dual-mem-addi-pair, dual-mem-shadd-pair"
       level: 2
-      asm: |
-        load    rdb, 0(rsda)
-        shXadd  rsda, rsda, rs2a
-
-        store   rs2a, 0(rsda)
-        shXadd  rsda, rsda, rs2a
-
-        addi    rsda, rsda, k*imma
-        load    rdb, -k*imma(rsda)
-
-        addi    rsda, rsda, k*imma
-        store   rs2b, -k*imma(rsda)
+      templates:
+        - ["load    rdb, 0(rsda)", "shXadd  rsda, rsda, rs2a"]
+        - ["store   rs2a, 0(rsda)", "shXadd  rsda, rsda, rs2a"]
+        - ["addi    rsda, rsda, k*imma", "load    rdb, -k*imma(rsda)"]
+        - ["addi    rsda, rsda, k*imma", "store   rs2b, -k*imma(rsda)"]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "funct3", "imma[4:0]"]
         - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "funct3", "rdb"]
@@ -213,18 +183,11 @@ doc:
   - frame:
       name: mem-pair
       level: 1
-      asm: |
-        load    rda, k*imm(rbase)
-        load    rdb, k*imm+k(rbase)
-
-        store   rs2a, k*imm(rbase)
-        store   rs2b, k*imm+k(rbase)
-
-        load    rda, k*imm(sp)
-        load    rdb, k*imm+k(sp)
-
-        store   rs2a, k*imm(sp)
-        store   rs2b, k*imm+k(sp)
+      templates:
+        - ["load    rda, k*imm(rbase)", "load    rdb, k*imm+k(rbase)"]
+        - ["store   rs2a, k*imm(rbase)", "store   rs2b, k*imm+k(rbase)"]
+        - ["load    rda, k*imm(sp)", "load    rdb, k*imm+k(sp)"]
+        - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
       rows:
         - ["h", "rda",  "imm[5:0]*2",       "rbase", "funct3", "rdb"]
         - ["h", "rs2b", "i", "rs2a",        "rbase", "funct3", "imm[4:0]"]
@@ -237,21 +200,17 @@ doc:
   - frame:
       name: dual-arith2-pair
       level: 1
-      asm: |
-        alu     rda, rs1a, rs2a
-        alu     rdb, rs1a, rs2a
+      templates:
+        - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
       rows:
         - ["h", "rda", "g", "rs2a", "rs1a", "funct3", "rdb"]
 
   - frame:
       name: dual-indep-pair
       level: 1
-      asm: |
-        mv      rda, rs1a
-        mv/li   rdb, rs2b/immb
-
-        li      rda, imma
-        li      rdb, immb
+      templates:
+        - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
+        - ["li      rda, imma", "li      rdb, immb"]
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "funct3", "rdb"]
         - ["h", "rda", "g", "immb[4:0]", "rs1a",      "funct3", "rdb"]
@@ -260,9 +219,8 @@ doc:
   - frame:
       name: rsd-alu-pair
       level: 2
-      asm: |
-        alu rsda, rsda, rs2a/imma
-        alu rsdb, rsdb, rs2b/immb
+      templates:
+        - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "funct3", "rsdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "funct3", "rsdb"]
@@ -280,18 +238,16 @@ doc:
   - frame:
       name: prologue-pair
       level: 2
-      asm: |
-        addi    sp, -16*imm
-        store   rs1b, 16*imm-k(sp)
+      templates:
+        - ["addi    sp, -16*imm", "store   rs1b, 16*imm-k(sp)"]
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "funct3", "0 0 0 0 1"]
 
   - frame:
       name: epilogue-pair
       level: 2
-      asm: |
-        addi    sp, 16*imm
-        jr      rs1b
+      templates:
+        - ["addi    sp, 16*imm", "jr      rs1b"]
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "funct3", "0 0 0 0 1"]
 
@@ -301,15 +257,10 @@ doc:
   - frame:
       name: arith-jump-pair
       level: 2
-      asm: |
-        alu     rsda, rsda, rs2a/imma
-        jr/jalr rs1b
-
-        mv     rsda, rs2a
-        jr/jalr rs1b
-
-        li     rsda, imma
-        jr/jalr rs1b
+      templates:
+        - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
+        - ["mv     rsda, rs2a", "jr/jalr rs1b"]
+        - ["li     rsda, imma", "jr/jalr rs1b"]
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "funct3", "0 0 0 0 1"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "funct3", "0 0 0 0 1"]
@@ -317,12 +268,9 @@ doc:
   - frame:
       name: arith-mem-pair
       level: 1
-      asm: |
-        alu     rsda, rsda, rs2a/imma
-        load    rdb, k*immb(rs1b)
-
-        alu     rsda, rsda, rs2a/imma
-        store   rs2b, k*immb(rs1b)
+      templates:
+        - ["alu     rsda, rsda, rs2a/imma", "load    rdb, k*immb(rs1b)"]
+        - ["alu     rsda, rsda, rs2a/imma", "store   rs2b, k*immb(rs1b)"]
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "funct3", "rdb"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "funct3", "rs2b"]

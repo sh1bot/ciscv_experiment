@@ -109,7 +109,8 @@ def frame_scale(frame):
     """(const_scale:int|None, k_scale:bool) parsed from the asm templates:
     '16*imm' -> const 16; 'k*imm' -> width-scaled."""
     const, kflag = None, False
-    for m in _SCALE.finditer(frame["asm"]):
+    text = "\n".join(ln for pair in frame["templates"] for ln in pair)
+    for m in _SCALE.finditer(text):
         if m.group(1) == "k":
             kflag = True
         else:

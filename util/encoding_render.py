@@ -78,8 +78,11 @@ def render(spec) -> str:
             f = node["frame"]
             out.append("#" * f.get("level", 2) + " " + f["name"])
             out.append("")
-            for ln in f["asm"].rstrip("\n").split("\n"):
-                out.append("    " + ln if ln.strip() else "")
+            for i, pair in enumerate(f["templates"]):
+                if i:
+                    out.append("")                 # blank line between template pairs
+                for ln in pair:
+                    out.append("    " + ln)
             out.append("")
             out.extend(HEADER)
             for row in f["rows"]:
@@ -108,16 +111,8 @@ _NON_OPERAND_CELLS = {"h", "g", "i", "funct3", "opcode5", "10"}
 
 
 def asm_pairs(frame):
-    """Split the asm block into (line_a, line_b) template pairs on blank lines."""
-    chunk, pairs = [], []
-    for ln in frame["asm"].rstrip("\n").split("\n"):
-        if ln.strip():
-            chunk.append(ln.strip())
-        elif chunk:
-            pairs.append(chunk); chunk = []
-    if chunk:
-        pairs.append(chunk)
-    return pairs
+    """The frame's (line_a, line_b) template pairs."""
+    return [[ln.strip() for ln in pair] for pair in frame["templates"]]
 
 
 def asm_operands(pair):
