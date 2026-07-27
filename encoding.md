@@ -27,6 +27,11 @@
    bits are stored in bits `g` and `h` respectively.  Otherwise these
    bits are used to extend the range of the `funct3` field.
 
+# Reserved register encodings
+
+ * **rd field — x0/x1** [active]: When rd names a register it may not be x0 or x1; those two bit patterns are sentinels selecting the prologue / epilogue / jump marker formats (drawn "0 0 0 0 1").
+ * **any register field — x16..x31 (or x0..x3)** [reserved-future]: A contiguous block held out of the pairable register set, reserved for a future encoding extension. Which block (high x16..x31 or low x0..x3) is not yet decided.
+
 # Chain rules
 
  * One defined output register, plus x31 becomes undefined.

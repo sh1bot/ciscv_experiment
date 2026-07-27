@@ -43,6 +43,23 @@ doc:
          bits are stored in bits `g` and `h` respectively.  Otherwise these
          bits are used to extend the range of the `funct3` field.
 
+  - reserved:
+      - where: rd field
+        regs: [x0, x1]
+        status: active
+        note: >-
+          When rd names a register it may not be x0 or x1; those two bit
+          patterns are sentinels selecting the prologue / epilogue / jump
+          marker formats (drawn "0 0 0 0 1").
+      - where: any register field
+        regs: [x16..x31]
+        alt: [x0..x3]
+        status: reserved-future
+        note: >-
+          A contiguous block held out of the pairable register set, reserved
+          for a future encoding extension. Which block (high x16..x31 or low
+          x0..x3) is not yet decided.
+
   - md: |
       # Chain rules
 
@@ -59,6 +76,9 @@ doc:
       ops:
         a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
         b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
@@ -74,6 +94,9 @@ doc:
       ops:
         a: [lw, lwu, ld]
         b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+      imm:
+        imma: {signed: false, scale: w}
+        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rs2b",      "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
         - ["h", "immb[4:0]", "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
@@ -89,6 +112,9 @@ doc:
       ops:
         a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
         b: [sw, sd]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: false, scale: w}
       rows:
         - ["h", "rs1b",      "g", "rs2a",      "rs1a", "fn3", "immb[4:0]"]
         - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
@@ -103,6 +129,9 @@ doc:
       ops:
         a: [lb, lbu, lh, lhu, lw, lwu, ld]
         b: [lb, lbu, lh, lhu, lw, lwu, ld]
+      imm:
+        imma: {signed: false, scale: w}
+        immb: {signed: false, scale: w}
       rows:
         - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
         - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
@@ -119,6 +148,9 @@ doc:
       ops:
         a: [li]
         b: [beq, bne, blt, bge, bltu, bgeu]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1b", "fn3", "immb[4:0]"]
       notes: |
@@ -134,6 +166,9 @@ doc:
       ops:
         a: [andi, slli, srli]
         b: [beqz, bnez, beq, bne]
+      imm:
+        imma: {signed: false, scale: 1}
+        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1a", "fn3", "immb[4:0]"]
 
@@ -149,6 +184,9 @@ doc:
       ops:
         a: [lb, lbu, lh, lhu, lw, lwu, ld]
         b: [beqz, bnez]
+      imm:
+        imma: {signed: false, scale: w}
+        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
         - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
@@ -163,6 +201,9 @@ doc:
       ops:
         a: [addi, addiw]
         b: [beq, bne, blt, bge, bltu, bgeu]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rsda", "fn3", "immb[4:0]"]
 
@@ -181,6 +222,9 @@ doc:
         - ["addi    rsda, rsda, imma", "store   rs2b, k*immb(rsda)"]
       ops:
         tuples: [[addi, ld], [addi, sd], [sh2add, lw], [sh2add, sw], [add, slt]]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: false, scale: w}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -199,6 +243,8 @@ doc:
         - ["addi    rsda, rsda, k*imma", "store   rs2b, -k*imma(rsda)"]
       ops:
         tuples: [[ld, addi], [lw, addi], [lwu, addi], [sd, addi], [sw, addi], [ld, sh3add], [lw, sh2add], [lwu, sh2add], [sd, sh3add], [sw, sh2add]]
+      imm:
+        imm: {signed: false, scale: w, nonzero: remap}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -220,6 +266,8 @@ doc:
         - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
       ops:
         same: [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
+      imm:
+        imm: {signed: false, scale: w}
       rows:
         - ["h", "rda",  "imm[5:0]*2",       "rbase", "fn3", "rdb"]
         - ["h", "rs2b", "i", "rs2a",        "rbase", "fn3", "imm[4:0]"]
@@ -248,6 +296,9 @@ doc:
       ops:
         a: [li, mv, addi4spn]
         b: [li, mv, addi4spn]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
         - ["h", "rda", "g", "immb[4:0]", "rs1a",      "fn3", "rdb"]
@@ -261,6 +312,9 @@ doc:
       ops:
         a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
         b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "rsdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "rsdb"]
@@ -283,6 +337,8 @@ doc:
       ops:
         a: [addi]
         b: [sw, sd]
+      imm:
+        imma: {signed: false, scale: 16, nonzero: true, negated: true}
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 0 1"]
 
@@ -294,6 +350,8 @@ doc:
       ops:
         a: [addi]
         b: [jalr, ret]
+      imm:
+        imma: {signed: false, scale: 16, nonzero: true}
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 0 1"]
 
@@ -310,6 +368,8 @@ doc:
       ops:
         a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
         b: [ret, jalr, j, jal]
+      imm:
+        imma: {signed: true, scale: 1}
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 0 1"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 0 1"]
@@ -323,6 +383,9 @@ doc:
       ops:
         a: [add, sub, and, or, addi]
         b: [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
+      imm:
+        imma: {signed: true, scale: 1}
+        immb: {signed: false, scale: w}
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "rdb"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "rs2b"]

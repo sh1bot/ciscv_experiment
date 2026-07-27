@@ -31,26 +31,22 @@ from scheduler.rules import RULES, NotPair
 from analysis.encoding_budget import subform, signed_bits, unsigned_bits, IMM_SIGNED
 
 
-def required_bits(insn, const_scale, kflag, pair_mem_width):
+def required_bits(insn, scale, pair_mem_width=None):
     """Significant bits of insn's immediate once scaled the way this frame's
-    field scales it. Returns None if there is no immediate, 0 if it is zero.
-    An unaligned (non-divisible) immediate returns its unscaled width, which
-    will overflow any reasonable field -- correctly flagging it as unencodable."""
+    field scales it (scale = 1 | int | 'w'). For 'w' on a non-memory insn (e.g.
+    a dual-mem addi stride k*imm), the paired memory op's width is used.
+    Returns None if there is no immediate, 0 if zero. An unaligned immediate
+    returns its unscaled width, which overflows any field -- flagging it."""
     v = insn.imm
     if v is None:
         return None
     if v == 0:
         return 0
-    if insn.has_mem_operand:
-        div = insn.access_width or 1              # memory offsets scale by width
-    elif const_scale:
-        div = const_scale                         # e.g. addi sp, 16*imm
-    elif kflag and pair_mem_width:
-        div = pair_mem_width                      # dual-mem addi stride = k*imm
-    else:
-        div = 1
-    signed = subform(insn) in IMM_SIGNED
-    if v % div != 0:
+    # scale is the frame's declared multiplier: 1, an int (e.g. 16), or 'w'
+    # (the instruction's data width).
+    div = (insn.access_width or pair_mem_width or 1) if scale == "w" else int(scale)
+    signed = subform(insn) in IMM_SIGNED         # signedness stays per-opcode
+    if v % div != 0:                             # unaligned -> unencodable
         return signed_bits(v) if signed else unsigned_bits(abs(v))
     v //= div
     return signed_bits(v) if signed else unsigned_bits(abs(v))
@@ -102,20 +98,20 @@ def cap_for(cap, is_sp):
     return cap["base"] or cap["sp"] or None
 
 
-_SCALE = re.compile(r"(\d+|k)\s*\*\s*imm")
-
-
-def frame_scale(frame):
-    """(const_scale:int|None, k_scale:bool) parsed from the asm templates:
-    '16*imm' -> const 16; 'k*imm' -> width-scaled."""
-    const, kflag = None, False
-    text = "\n".join(ln for pair in frame["templates"] for ln in pair)
-    for m in _SCALE.finditer(text):
-        if m.group(1) == "k":
-            kflag = True
-        else:
-            const = int(m.group(1))
-    return const, kflag
+def imm_semantics(frame):
+    """Declared immediate semantics per slot: {'a': {...}, 'b': {...}} with
+    keys scale (1|int|'w') and unbounded (bool). 'imm' (shared) applies to both
+    slots; 'imma'->a, 'immb'->b. Slots with no declared immediate get None."""
+    sem = {"a": None, "b": None}
+    for name, spec in (frame.get("imm") or {}).items():
+        entry = {"scale": spec.get("scale", 1), "unbounded": spec.get("unbounded", False)}
+        if name == "imm":
+            sem["a"] = sem["b"] = entry
+        elif name == "imma":
+            sem["a"] = entry
+        elif name == "immb":
+            sem["b"] = entry
+    return sem
 
 
 def is_sp_mem(insn):
@@ -151,7 +147,7 @@ def main():
             continue
         f = node["frame"]
         caps[f["name"]] = frame_capacities(f)
-        scales[f["name"]] = frame_scale(f)
+        scales[f["name"]] = imm_semantics(f)
         for rn in [x.strip() for x in f["name"].split(",")]:
             rule2frame[rn] = f["name"]
 
@@ -192,12 +188,15 @@ def main():
                             break              # no declared layout to verify against
                         claimed[frame] += 1
                         cap = caps[frame]
-                        const_scale, kflag = scales[frame]
+                        sem = scales[frame]
                         mem_w = next((x.access_width for x in (a, b)
                                       if x.has_mem_operand and x.access_width), None)
                         ok, saw = True, False
-                        for insn in (a, b):
-                            need = required_bits(insn, const_scale, kflag, mem_w)
+                        for insn, side in ((a, "a"), (b, "b")):
+                            s = sem.get(side)
+                            if s is None or s["unbounded"]:
+                                continue           # no declared field / optimistic
+                            need = required_bits(insn, s["scale"], mem_w)
                             if need is None or need == 0:
                                 continue           # no / zero immediate to pack
                             saw = True

@@ -92,6 +92,16 @@ def render(spec) -> str:
         if "md" in node:
             out.append(node["md"].rstrip("\n"))
             out.append("")
+        elif "reserved" in node:
+            out.append("# Reserved register encodings")
+            out.append("")
+            for e in node["reserved"]:
+                regs = "/".join(e["regs"])
+                alt = f" (or {'/'.join(e['alt'])})" if e.get("alt") else ""
+                note = " ".join(e["note"].split())
+                out.append(f" * **{e['where']} — {regs}{alt}** "
+                           f"[{e['status']}]: {note}")
+            out.append("")
         elif "frame" in node:
             f = node["frame"]
             out.append("#" * f.get("level", 2) + " " + f["name"])
