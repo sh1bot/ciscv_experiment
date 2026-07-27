@@ -30,7 +30,8 @@
 # Reserved register encodings
 
  * **rd field — x0/x2** [active]: When rd names a register it may not be x0 or x2 (sp); those two bit patterns are sentinels selecting the prologue / epilogue / jump marker formats (drawn "0 0 0 1 0").
- * **any register field — x16..x31 (or x0..x3)** [reserved-future]: A contiguous block held out of the pairable register set, reserved for a future encoding extension. Which block (high x16..x31 or low x0..x3) is not yet decided.
+
+No general register block is reserved at present. Earlier drafts held out a contiguous block — the high registers x16..x31, or the low x0..x3 — to give dual-rsd and similar frames a fallback under encoding-space pressure, but the current layout fits without it. Such a block remains an option to reserve if a future frame ever needs one.
 
 # Chain rules
 

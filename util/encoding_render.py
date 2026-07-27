@@ -101,6 +101,9 @@ def render(spec) -> str:
                 note = " ".join(e["note"].split())
                 out.append(f" * **{e['where']} — {regs}{alt}** "
                            f"[{e['status']}]: {note}")
+            if node.get("note"):
+                out.append("")
+                out.append(" ".join(node["note"].split()))
             out.append("")
         elif "frame" in node:
             f = node["frame"]
