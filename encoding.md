@@ -16,7 +16,7 @@
 
 ## Constraints and general patterns
 
- * The rd field must not be x0 or x1 when it describes a register
+ * The rd field must not be x0 or x2 when it describes a register
    (sometimes it is an immediate, and then the bit pattern is allowed).
    Encoding these registers here is reserved for different
    instructions, as is demonstrated in the prologue/epilogue pairs.
@@ -29,7 +29,7 @@
 
 # Reserved register encodings
 
- * **rd field — x0/x1** [active]: When rd names a register it may not be x0 or x1; those two bit patterns are sentinels selecting the prologue / epilogue / jump marker formats (drawn "0 0 0 0 1").
+ * **rd field — x0/x2** [active]: When rd names a register it may not be x0 or x2 (sp); those two bit patterns are sentinels selecting the prologue / epilogue / jump marker formats (drawn "0 0 0 1 0").
  * **any register field — x16..x31 (or x0..x3)** [reserved-future]: A contiguous block held out of the pairable register set, reserved for a future encoding extension. Which block (high x16..x31 or low x0..x3) is not yet decided.
 
 # Chain rules
@@ -285,7 +285,7 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 0 1│ opcode5 │1 0│
+│h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
 ## epilogue-pair
 
@@ -295,7 +295,7 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 0 1│ opcode5 │1 0│
+│h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
 # Other desperate measures
 
@@ -313,8 +313,8 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │0 0 0 0 1│ opcode5 │1 0│
-│h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │0 0 0 0 1│ opcode5 │1 0│
+│h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
+│h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
 # arith-mem-pair
 

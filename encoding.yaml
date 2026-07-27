@@ -32,7 +32,7 @@ doc:
 
       ## Constraints and general patterns
 
-       * The rd field must not be x0 or x1 when it describes a register
+       * The rd field must not be x0 or x2 when it describes a register
          (sometimes it is an immediate, and then the bit pattern is allowed).
          Encoding these registers here is reserved for different
          instructions, as is demonstrated in the prologue/epilogue pairs.
@@ -45,12 +45,12 @@ doc:
 
   - reserved:
       - where: rd field
-        regs: [x0, x1]
+        regs: [x0, x2]
         status: active
         note: >-
-          When rd names a register it may not be x0 or x1; those two bit
+          When rd names a register it may not be x0 or x2 (sp); those two bit
           patterns are sentinels selecting the prologue / epilogue / jump
-          marker formats (drawn "0 0 0 0 1").
+          marker formats (drawn "0 0 0 1 0").
       - where: any register field
         regs: [x16..x31]
         alt: [x0..x3]
@@ -340,7 +340,7 @@ doc:
       imm:
         imma: {signed: false, scale: 16, nonzero: true, negated: true}
       rows:
-        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 0 1"]
+        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
 
   - frame:
       name: epilogue-pair
@@ -353,7 +353,7 @@ doc:
       imm:
         imma: {signed: false, scale: 16, nonzero: true}
       rows:
-        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 0 1"]
+        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
 
   - md: |
       # Other desperate measures
@@ -371,8 +371,8 @@ doc:
       imm:
         imma: {signed: true, scale: 1}
       rows:
-        - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 0 1"]
-        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 0 1"]
+        - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 1 0"]
+        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 1 0"]
 
   - frame:
       name: arith-mem-pair
