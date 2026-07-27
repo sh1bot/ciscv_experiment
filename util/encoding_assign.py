@@ -316,6 +316,20 @@ def line_ops(line):
     return set(_OPERAND.findall(rest)) - _IMPLICIT
 
 
+_ALT = re.compile(r"\b\w+(?:/\w+)+\b")
+
+
+def specialize(line, row_ops):
+    """Collapse each `X/Y` operand alternate to the side this row encodes, e.g.
+    `rs2a/imma` -> `rs2a` on a register row, `imma` on an immediate row. Opcode
+    alternates (`mv/li`, `beqz/bnez`) have neither side in row_ops — the op-
+    select bits don't pin them down — so they are left as written."""
+    def repl(m):
+        keep = [p for p in m.group(0).split("/") if p in row_ops]
+        return keep[0] if len(keep) == 1 else m.group(0)
+    return _ALT.sub(repl, line)
+
+
 def matches(row_cells, tag, a_ops, b_ops, sp_template, has_sp_rows):
     """A row realises a template when every field the row encodes is an operand
     of the template, and (for frames that distinguish them) its SP-relative
@@ -366,11 +380,12 @@ def render_frame_body(frame, colwidths, header):
         if approx:
             print("    (closest-fit encoding — this frame shares rows across forms)")
         for cells, tag in hits:
+            rops = row_operands(cells)
             toks = _tokens(cells, w)
             a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
             b = render_line(toks, o5, colwidths, keep=lambda base: base in b_ops)
-            print(f"{a}   {a_line}")
-            print(f"{b}   {b_line}")
+            print(f"{a}   {specialize(a_line, rops)}")
+            print(f"{b}   {specialize(b_line, rops)}")
 
 
 def main():
