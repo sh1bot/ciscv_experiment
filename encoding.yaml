@@ -8,11 +8,26 @@
 # individual bits align uniformly; bit widths below are the real encoding sizes
 # and sum to 32 including opcode5(5)+marker(2). (funct3's box, 5 cols, can't
 # hold the label, so it renders as "fn3".)
+#
+# A frame's `ops` is a list of {a: [...], b: [...]} clusters (bicliques). The
+# allowed (opA, opB) pairs are the union of each cluster's a×b cross-product,
+# and the opcode demand is the sum of the cluster products (clusters are
+# disjoint). A cross-product frame is one cluster; a tuple-wise constraint is
+# several; a shared-opcode frame (both slots identical) is a list of singleton
+# {a: [x], b: [x]} clusters.
 
 grid:
   columns:     [h, funct5, g, rs2, rs1, funct3, rd]
   display:     [1, 9,      1, 9,   9,   5,      9]
   bits:        [1, 5,      1, 5,   5,   3,      5]   # + opcode5(5) + marker(2) = 32
+
+# Named opcode sets, referenced from frame `ops` via YAML aliases (*name).
+# Kept here so the large recurring lists are written once.
+opsets:
+  rsd_alu:  &rsd_alu  [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+  loads:    &loads    [lb, lbu, lh, lhu, lw, lwu, ld]
+  branches: &branches [beq, bne, blt, bge, bltu, bgeu]
+  mem:      &mem      [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
 
 doc:
   - md: |
@@ -72,8 +87,7 @@ doc:
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
       ops:
-        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
-        b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        - {a: *rsd_alu, b: *rsd_alu}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 1}
@@ -90,8 +104,7 @@ doc:
         - ["load    tmp, k*imma(rs1a)", "alu     rdb, tmp, rs2b/immb"]
         - ["load    tmp, k*imma(sp)", "alu     rdb, tmp, rs2b/immb"]
       ops:
-        a: [lw, lwu, ld]
-        b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        - {a: [lw, lwu, ld], b: *rsd_alu}
       imm:
         imma: {signed: false, scale: w}
         immb: {signed: true, scale: 1}
@@ -108,8 +121,7 @@ doc:
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(rs1b)"]
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(sp)"]
       ops:
-        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
-        b: [sw, sd]
+        - {a: *rsd_alu, b: [sw, sd]}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: false, scale: w}
@@ -125,8 +137,7 @@ doc:
       templates:
         - ["load    tmp, k*imma(rs1a)", "load    rdb, k*immb(tmp)"]
       ops:
-        a: [lb, lbu, lh, lhu, lw, lwu, ld]
-        b: [lb, lbu, lh, lhu, lw, lwu, ld]
+        - {a: *loads, b: *loads}
       imm:
         imma: {signed: false, scale: w}
         immb: {signed: false, scale: w}
@@ -144,8 +155,7 @@ doc:
       templates:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
       ops:
-        a: [li]
-        b: [beq, bne, blt, bge, bltu, bgeu]
+        - {a: [li], b: *branches}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 4, unbounded: true}
@@ -162,8 +172,7 @@ doc:
         - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
         - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
       ops:
-        a: [andi, slli, srli]
-        b: [beqz, bnez, beq, bne]
+        - {a: [andi, slli, srli], b: [beqz, bnez, beq, bne]}
       imm:
         imma: {signed: false, scale: 1}
         immb: {signed: true, scale: 4, unbounded: true}
@@ -180,8 +189,7 @@ doc:
         - ["load    rda, k*imma(sp)", "beqz/bnez rda, zero, 4*immb"]
         - ["load    rda, k*imma(rs1a)", "beqz/bnez rda, zero, 4*immb"]
       ops:
-        a: [lb, lbu, lh, lhu, lw, lwu, ld]
-        b: [beqz, bnez]
+        - {a: *loads, b: [beqz, bnez]}
       imm:
         imma: {signed: false, scale: w}
         immb: {signed: true, scale: 4, unbounded: true}
@@ -197,8 +205,7 @@ doc:
       templates:
         - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
       ops:
-        a: [addi, addiw]
-        b: [beq, bne, blt, bge, bltu, bgeu]
+        - {a: [addi, addiw], b: *branches}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 4, unbounded: true}
@@ -219,7 +226,9 @@ doc:
         - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
         - ["addi    rsda, rsda, imma", "store   rs2b, k*immb(rsda)"]
       ops:
-        tuples: [[addi, ld], [addi, sd], [sh2add, lw], [sh2add, sw], [add, slt]]
+        - {a: [addi],   b: [ld, sd]}
+        - {a: [sh2add], b: [lw, sw]}
+        - {a: [add],    b: [slt]}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: false, scale: w}
@@ -240,7 +249,9 @@ doc:
         - ["addi    rsda, rsda, k*imma", "load    rdb, -k*imma(rsda)"]
         - ["addi    rsda, rsda, k*imma", "store   rs2b, -k*imma(rsda)"]
       ops:
-        tuples: [[ld, addi], [lw, addi], [lwu, addi], [sd, addi], [sw, addi], [ld, sh3add], [lw, sh2add], [lwu, sh2add], [sd, sh3add], [sw, sh2add]]
+        - {a: [ld, lw, lwu, sd, sw], b: [addi]}
+        - {a: [ld, sd],             b: [sh3add]}
+        - {a: [lw, lwu, sw],        b: [sh2add]}
       imm:
         imm: {signed: false, scale: w, nonzero: remap}
       rows:
@@ -262,8 +273,18 @@ doc:
         - ["store   rs2a, k*imm(rbase)", "store   rs2b, k*imm+k(rbase)"]
         - ["load    rda, k*imm(sp)", "load    rdb, k*imm+k(sp)"]
         - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
-      ops:
-        same: [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
+      ops:            # shared opcode: both slots identical, so one singleton per op
+        - {a: [lb],  b: [lb]}
+        - {a: [lbu], b: [lbu]}
+        - {a: [lh],  b: [lh]}
+        - {a: [lhu], b: [lhu]}
+        - {a: [lw],  b: [lw]}
+        - {a: [lwu], b: [lwu]}
+        - {a: [ld],  b: [ld]}
+        - {a: [sb],  b: [sb]}
+        - {a: [sh],  b: [sh]}
+        - {a: [sw],  b: [sw]}
+        - {a: [sd],  b: [sd]}
       imm:
         imm: {signed: false, scale: w}
       rows:
@@ -281,7 +302,15 @@ doc:
       templates:
         - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
       ops:
-        tuples: [[add, sub], [addw, subw], [min, max], [minu, maxu], [mul, mulh], [mul, mulhu], [mul, mulhsu], [div, rem], [divu, remu], [divw, remw], [divuw, remuw]]
+        - {a: [add],    b: [sub]}
+        - {a: [addw],   b: [subw]}
+        - {a: [min],    b: [max]}
+        - {a: [minu],   b: [maxu]}
+        - {a: [mul],    b: [mulh, mulhu, mulhsu]}
+        - {a: [div],    b: [rem]}
+        - {a: [divu],   b: [remu]}
+        - {a: [divw],   b: [remw]}
+        - {a: [divuw],  b: [remuw]}
       rows:
         - ["h", "rda", "g", "rs2a", "rs1a", "fn3", "rdb"]
 
@@ -292,8 +321,7 @@ doc:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
         - ["li      rda, imma", "li      rdb, immb"]
       ops:
-        a: [li, mv, addi4spn]
-        b: [li, mv, addi4spn]
+        - {a: [li, mv, addi4spn], b: [li, mv, addi4spn]}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 1}
@@ -308,8 +336,7 @@ doc:
       templates:
         - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
       ops:
-        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
-        b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        - {a: *rsd_alu, b: *rsd_alu}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 1}
@@ -333,8 +360,7 @@ doc:
       templates:
         - ["addi    sp, -16*imm", "store   rs1b, 16*imm-k(sp)"]
       ops:
-        a: [addi]
-        b: [sw, sd]
+        - {a: [addi], b: [sw, sd]}
       imm:
         imma: {signed: false, scale: 16, nonzero: true, negated: true}
       rows:
@@ -346,8 +372,7 @@ doc:
       templates:
         - ["addi    sp, 16*imm", "jr      rs1b"]
       ops:
-        a: [addi]
-        b: [jalr, ret]
+        - {a: [addi], b: [jalr, ret]}
       imm:
         imma: {signed: false, scale: 16, nonzero: true}
       rows:
@@ -364,8 +389,7 @@ doc:
         - ["mv     rsda, rs2a", "jr/jalr rs1b"]
         - ["li     rsda, imma", "jr/jalr rs1b"]
       ops:
-        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
-        b: [ret, jalr, j, jal]
+        - {a: *rsd_alu, b: [ret, jalr, j, jal]}
       imm:
         imma: {signed: true, scale: 1}
       rows:
@@ -379,8 +403,7 @@ doc:
         - ["alu     rsda, rsda, rs2a/imma", "load    rdb, k*immb(rs1b)"]
         - ["alu     rsda, rsda, rs2a/imma", "store   rs2b, k*immb(rs1b)"]
       ops:
-        a: [add, sub, and, or, addi]
-        b: [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
+        - {a: [add, sub, and, or, addi], b: *mem}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: false, scale: w}

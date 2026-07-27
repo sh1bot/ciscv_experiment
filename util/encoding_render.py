@@ -215,14 +215,12 @@ OPCODE_NAMESPACE = 1024
 
 
 def opcode_demand(ops):
-    """How many distinct (opA, opB) codepoints a frame's declared ops need."""
+    """How many distinct (opA, opB) codepoints a frame's declared ops need.
+    `ops` is a list of {a:[...], b:[...]} bicliques; the demand is the sum of
+    each cluster's cross-product (clusters are disjoint by construction)."""
     if not ops:
         return None
-    if "tuples" in ops:
-        return len(ops["tuples"])
-    if "same" in ops:                    # both slots the same op
-        return len(ops["same"])
-    return len(ops.get("a", [])) * len(ops.get("b", []))
+    return sum(len(c.get("a", [])) * len(c.get("b", [])) for c in ops)
 
 
 def opcodes(spec):
@@ -238,12 +236,10 @@ def opcodes(spec):
             missing.append(f["name"]); continue
         d = opcode_demand(ops)
         total += d
-        if "tuples" in ops:
-            shape = f"{len(ops['tuples'])} tuples"
-        elif "same" in ops:
-            shape = f"{len(ops['same'])} same"
+        if len(ops) == 1:
+            shape = f"{len(ops[0]['a'])}×{len(ops[0]['b'])}"
         else:
-            shape = f"{len(ops['a'])}×{len(ops['b'])}"
+            shape = f"{len(ops)} clusters"
         print(f"{f['name']:44} {shape:>13} {d:10}")
     print("-" * 70)
     print(f"{'TOTAL base (opA×opB) opcode demand':44} {'':>13} {total:10}")

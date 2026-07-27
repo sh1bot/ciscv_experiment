@@ -90,14 +90,11 @@ _FMT_OPC = {name: opc for name, opc in _FORMATS}
 
 
 def a_ops(frame):
-    ops = frame.get("ops") or {}
-    if "a" in ops:
-        return set(ops["a"])
-    if "same" in ops:
-        return set(ops["same"])
-    if "tuples" in ops:
-        return {t[0] for t in ops["tuples"]}
-    return set()
+    """Every A-slot opcode across the frame's biclique clusters."""
+    out = set()
+    for c in frame.get("ops") or []:
+        out |= set(c.get("a", []))
+    return out
 
 
 def a_format(frame):
