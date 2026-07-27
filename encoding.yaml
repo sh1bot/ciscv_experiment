@@ -325,6 +325,6 @@ doc:
         store   rs2b, k*immb(rs1b)
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "funct3", "rdb"]
-        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "funct3", "0 0 0 0 1"]
+        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "funct3", "rs2b"]
       notes: |
          * For this frame `g` and `h` provide a 2-bit `immb`.

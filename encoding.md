@@ -323,6 +323,6 @@ patterns as possible to tamp down the cost.
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│  rs1b   │g│  rs2a   │  rsda   │funct3│   rdb   │opcode5│10│
-│h│  rs1b   │g│imma[4:0]│  rsda   │funct3│0 0 0 0 1│opcode5│10│
+│h│  rs1b   │g│imma[4:0]│  rsda   │funct3│  rs2b   │opcode5│10│
 
 * For this frame `g` and `h` provide a 2-bit `immb`.
