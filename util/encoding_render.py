@@ -191,6 +191,59 @@ def lint(spec):
     return problems
 
 
+# --- opcode-field capacity ------------------------------------------------
+# The opcode5(5)+funct3(3) namespace = 256 base codepoints (x4 via g,h = 1024),
+# shared by all frames as a prefix code. Each frame's declared op-sets demand
+# one codepoint per (opA, opB) it allows.
+OPCODE_NAMESPACE = 256
+
+
+def opcode_demand(ops):
+    """How many distinct (opA, opB) codepoints a frame's declared ops need."""
+    if not ops:
+        return None
+    if "tuples" in ops:
+        return len(ops["tuples"])
+    if "same" in ops:                    # both slots the same op
+        return len(ops["same"])
+    return len(ops.get("a", [])) * len(ops.get("b", []))
+
+
+def opcodes(spec):
+    print(f"{'frame':44} {'shape':>13} {'codepoints':>10}")
+    print("-" * 70)
+    total, missing = 0, []
+    for node in spec["doc"]:
+        if "frame" not in node:
+            continue
+        f = node["frame"]
+        ops = f.get("ops")
+        if not ops:
+            missing.append(f["name"]); continue
+        d = opcode_demand(ops)
+        total += d
+        if "tuples" in ops:
+            shape = f"{len(ops['tuples'])} tuples"
+        elif "same" in ops:
+            shape = f"{len(ops['same'])} same"
+        else:
+            shape = f"{len(ops['a'])}×{len(ops['b'])}"
+        print(f"{f['name']:44} {shape:>13} {d:10}")
+    print("-" * 70)
+    print(f"{'TOTAL declared opcode demand':44} {'':>13} {total:10}")
+    print(f"\nopcode5+funct3 namespace = {OPCODE_NAMESPACE} base codepoints "
+          f"(x4 via g,h = {OPCODE_NAMESPACE*4}).")
+    verdict = ("FITS" if total <= OPCODE_NAMESPACE else
+               f"OVER by {total-OPCODE_NAMESPACE} ({total/OPCODE_NAMESPACE:.1f}x base; "
+               f"{'still <1024' if total <= OPCODE_NAMESPACE*4 else 'OVER 1024 too'})")
+    print(f"Total {total} vs {OPCODE_NAMESPACE}: {verdict}.")
+    print("This is the DECLARED (worst-case) demand -- every allowed (opA,opB).\n"
+          "Real corpus usage is far sparser (see analysis/encoding_verify + budget).")
+    if missing:
+        print(f"\nFrames with no ops declared: {missing}")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--yaml", default=os.path.join(ROOT, "encoding.yaml"))
@@ -199,11 +252,17 @@ def main():
                     help="diff the render against encoding.md and report")
     ap.add_argument("--lint", action="store_true",
                     help="check asm<->row operand correspondence")
+    ap.add_argument("--opcodes", action="store_true",
+                    help="report per-frame opcode-field demand vs namespace")
     args = ap.parse_args()
 
     if args.lint:
         with open(args.yaml) as fh:
             sys.exit(1 if lint(yaml.safe_load(fh)) else 0)
+
+    if args.opcodes:
+        with open(args.yaml) as fh:
+            sys.exit(opcodes(yaml.safe_load(fh)))
 
     with open(args.yaml) as fh:
         spec = yaml.safe_load(fh)

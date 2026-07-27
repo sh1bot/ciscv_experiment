@@ -56,6 +56,9 @@ doc:
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
+      ops:
+        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
@@ -68,6 +71,9 @@ doc:
       templates:
         - ["load    tmp, k*imma(rs1a)", "alu     rdb, tmp, rs2b/immb"]
         - ["load    tmp, k*imma(sp)", "alu     rdb, tmp, rs2b/immb"]
+      ops:
+        a: [lw, lwu, ld]
+        b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
       rows:
         - ["h", "rs2b",      "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
         - ["h", "immb[4:0]", "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
@@ -80,6 +86,9 @@ doc:
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(rs1b)"]
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(sp)"]
+      ops:
+        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        b: [sw, sd]
       rows:
         - ["h", "rs1b",      "g", "rs2a",      "rs1a", "fn3", "immb[4:0]"]
         - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
@@ -91,6 +100,9 @@ doc:
       level: 2
       templates:
         - ["load    tmp, k*imma(rs1a)", "load    rdb, k*immb(tmp)"]
+      ops:
+        a: [lb, lbu, lh, lhu, lw, lwu, ld]
+        b: [lb, lbu, lh, lhu, lw, lwu, ld]
       rows:
         - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
         - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
@@ -104,6 +116,9 @@ doc:
       level: 2
       templates:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
+      ops:
+        a: [li]
+        b: [beq, bne, blt, bge, bltu, bgeu]
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1b", "fn3", "immb[4:0]"]
       notes: |
@@ -116,6 +131,9 @@ doc:
       templates:
         - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
         - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
+      ops:
+        a: [andi, slli, srli]
+        b: [beqz, bnez, beq, bne]
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1a", "fn3", "immb[4:0]"]
 
@@ -128,6 +146,9 @@ doc:
       templates:
         - ["load    rda, k*imma(sp)", "beqz/bnez rda, zero, 4*immb"]
         - ["load    rda, k*imma(rs1a)", "beqz/bnez rda, zero, 4*immb"]
+      ops:
+        a: [lb, lbu, lh, lhu, lw, lwu, ld]
+        b: [beqz, bnez]
       rows:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
         - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
@@ -139,6 +160,9 @@ doc:
       level: 2
       templates:
         - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
+      ops:
+        a: [addi, addiw]
+        b: [beq, bne, blt, bge, bltu, bgeu]
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rsda", "fn3", "immb[4:0]"]
 
@@ -155,6 +179,8 @@ doc:
         - ["addi    rsda, rsda, imma", "load    rdb, k*immb(rsda)"]
         - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
         - ["addi    rsda, rsda, imma", "store   rs2b, k*immb(rsda)"]
+      ops:
+        tuples: [[addi, ld], [addi, sd], [sh2add, lw], [sh2add, sw], [add, slt]]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -171,6 +197,8 @@ doc:
         - ["store   rs2a, 0(rsda)", "shXadd  rsda, rsda, rs2a"]
         - ["addi    rsda, rsda, k*imma", "load    rdb, -k*imma(rsda)"]
         - ["addi    rsda, rsda, k*imma", "store   rs2b, -k*imma(rsda)"]
+      ops:
+        tuples: [[ld, addi], [lw, addi], [lwu, addi], [sd, addi], [sw, addi], [ld, sh3add], [lw, sh2add], [lwu, sh2add], [sd, sh3add], [sw, sh2add]]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -190,6 +218,8 @@ doc:
         - ["store   rs2a, k*imm(rbase)", "store   rs2b, k*imm+k(rbase)"]
         - ["load    rda, k*imm(sp)", "load    rdb, k*imm+k(sp)"]
         - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
+      ops:
+        same: [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
       rows:
         - ["h", "rda",  "imm[5:0]*2",       "rbase", "fn3", "rdb"]
         - ["h", "rs2b", "i", "rs2a",        "rbase", "fn3", "imm[4:0]"]
@@ -204,6 +234,8 @@ doc:
       level: 1
       templates:
         - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
+      ops:
+        tuples: [[add, sub], [addw, subw], [min, max], [minu, maxu], [mul, mulh], [mul, mulhu], [mul, mulhsu], [div, rem], [divu, remu], [divw, remw], [divuw, remuw]]
       rows:
         - ["h", "rda", "g", "rs2a", "rs1a", "fn3", "rdb"]
 
@@ -213,6 +245,9 @@ doc:
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
         - ["li      rda, imma", "li      rdb, immb"]
+      ops:
+        a: [li, mv, addi4spn]
+        b: [li, mv, addi4spn]
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
         - ["h", "rda", "g", "immb[4:0]", "rs1a",      "fn3", "rdb"]
@@ -223,6 +258,9 @@ doc:
       level: 2
       templates:
         - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
+      ops:
+        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        b: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "rsdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "rsdb"]
@@ -242,6 +280,9 @@ doc:
       level: 2
       templates:
         - ["addi    sp, -16*imm", "store   rs1b, 16*imm-k(sp)"]
+      ops:
+        a: [addi]
+        b: [sw, sd]
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 0 1"]
 
@@ -250,6 +291,9 @@ doc:
       level: 2
       templates:
         - ["addi    sp, 16*imm", "jr      rs1b"]
+      ops:
+        a: [addi]
+        b: [jalr, ret]
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 0 1"]
 
@@ -263,6 +307,9 @@ doc:
         - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
         - ["mv     rsda, rs2a", "jr/jalr rs1b"]
         - ["li     rsda, imma", "jr/jalr rs1b"]
+      ops:
+        a: [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+        b: [ret, jalr, j, jal]
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 0 1"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 0 1"]
@@ -273,6 +320,9 @@ doc:
       templates:
         - ["alu     rsda, rsda, rs2a/imma", "load    rdb, k*immb(rs1b)"]
         - ["alu     rsda, rsda, rs2a/imma", "store   rs2b, k*immb(rs1b)"]
+      ops:
+        a: [add, sub, and, or, addi]
+        b: [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "rdb"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "rs2b"]
