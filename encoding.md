@@ -1,3 +1,5 @@
+<!-- Generated from encoding.yaml by util/encoding_render.py — do not edit by hand. -->
+
 # RISC-V template
 
  31         25 24     20 19     15 14  12 11      7 6        0
@@ -45,7 +47,6 @@
 │h│immb[4:0]│g│  rs2a   │  rs1a   │funct3│   rdb   │opcode5│10│
 │h│immb[4:0]│g│imma[4:0]│  rs1a   │funct3│   rdb   │opcode5│10│
 
-
 ## load-chain-alu-pair
 
     load    tmp, k*imma(rs1a)
@@ -59,9 +60,8 @@
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│  rs2b   │ imma[5:0] │  rs1a   │funct3│   rdb   │opcode5│10│
 │h│immb[4:0]│ imma[5:0] │  rs1a   │funct3│   rdb   │opcode5│10│
-│h│  rs2b   │g│ imma[4:0|9:5]     │funct3│   rdb   │opcode5│10│ (SP-relative)
-│h│immb[4:0]│g│ imma[4:0|9:5]     │funct3│   rdb   │opcode5│10│ (SP-relative)
-
+│h│  rs2b   │g│   imma[4:0|9:5]   │funct3│   rdb   │opcode5│10│ (SP-relative)
+│h│immb[4:0]│g│   imma[4:0|9:5]   │funct3│   rdb   │opcode5│10│ (SP-relative)
 
 ## store-chain-alu-pair
 
@@ -75,10 +75,9 @@
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│  rs1b   │g│  rs2a   │  rs1a   │funct3│immb[4:0]│opcode5│10│
-│h│  rs1b   │g|imma[4:0]│  rs1a   │funct3│immb[4:0]│opcode5│10│
+│h│  rs1b   │g│imma[4:0]│  rs1a   │funct3│immb[4:0]│opcode5│10│
 │h│immb[9:5]│g│  rs2a   │  rs1a   │funct3│immb[4:0]│opcode5│10│ (SP-relative)
-│h│immb[9:5]│g|imma[4:0]│  rs1a   │funct3│immb[4:0]│opcode5│10│ (SP-relative)
-
+│h│immb[9:5]│g│imma[4:0]│  rs1a   │funct3│immb[4:0]│opcode5│10│ (SP-relative)
 
 ## deref-chain-load-pair, base-chain-load-pair
 
@@ -91,10 +90,9 @@
 │h│imma[9:5]│g│imma[4:0]│  rs1a   │funct3│   rdb   │opcode5│10│
 │h│immb[9:5]│g│immb[4:0]│  rs1a   │funct3│   rdb   │opcode5│10│
 
- * TODO: decide how to balance imma and immb sizes.
- * TODO: maybe use g and h for the other immediate?  Or switch them between +2 bits on a or b
-   immediate?
-
+* TODO: decide how to balance imma and immb sizes.
+* TODO: maybe use g and h for the other immediate?  Or switch them between +2 bits on a or b
+  immediate?
 
 ## chain-li-branch
 
@@ -106,9 +104,8 @@
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│immb[9:5]│ imma[5:0] │  rs1b   │funct3│immb[4:0]│opcode5│10│
 
- * For this frame `h` extends `imma` by one bit.
- * TODO: could replace li with alu op and compare result with zero (mostly?).
-
+* For this frame `h` extends `imma` by one bit.
+* TODO: could replace li with alu op and compare result with zero (mostly?).
 
 ## chain-bit-test-branch
 
@@ -122,7 +119,6 @@
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│immb[9:5]│ imma[5:0] │  rs1a   │funct3│immb[4:0]│opcode5│10│
-
 
 # Chain rules, but first op is result
 
@@ -138,10 +134,9 @@
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│   rda   │g│imma[4:0]│  rs1a   │funct3│immb[4:0]│opcode5│10│
-│h│   rda   │g│ imma[4:0|9:5]     │funct3│immb[4:0]│opcode5│10│ (SP-relative)
+│h│   rda   │g│   imma[4:0|9:5]   │funct3│immb[4:0]│opcode5│10│ (SP-relative)
 
- * For this frame `g` and `h` extend `immb` by two bits.
-
+* For this frame `g` and `h` extend `immb` by two bits.
 
 ## addi-branch-pair
 
@@ -152,7 +147,6 @@
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│immb[9:5]│ imma[5:0] │  rsda   │funct3│immb[4:0]│opcode5│10│
-
 
 # pre/post increment addressing
 
@@ -175,12 +169,12 @@ Also chain rules with surviving first result, but also sometimes a second result
 ┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
-│h|  rs2b   │g|  rs2a   │  rsda   │funct3│immb[4:0]│opcode5│10│
-│h|immb[4:0]│g|  rs2a   │  rsda   │funct3│  rdb    │opcode5│10│
-│h|  rs2b   │g|imma[4:0]│  rsda   │funct3│immb[4:0]│opcode5│10│
-│h|immb[4:0]│g|imma[4:0]│  rsda   │funct3│  rdb    │opcode5│10│
+│h│  rs2b   │g│  rs2a   │  rsda   │funct3│immb[4:0]│opcode5│10│
+│h│immb[4:0]│g│  rs2a   │  rsda   │funct3│   rdb   │opcode5│10│
+│h│  rs2b   │g│imma[4:0]│  rsda   │funct3│immb[4:0]│opcode5│10│
+│h│immb[4:0]│g│imma[4:0]│  rsda   │funct3│   rdb   │opcode5│10│
 
- * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
+* TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
 
 ## dual-mem-addi-pair, dual-mem-shadd-pair
 
@@ -199,17 +193,16 @@ Also chain rules with surviving first result, but also sometimes a second result
 ┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
-│h|  rs2b   │g|  rs2a   │  rsda   │funct3│imma[4:0]│opcode5│10│
-│h|imma[4:0]│g|  rs2a   │  rsda   │funct3│  rdb    │opcode5│10│
-│h|  rs2b   │g|imma[4:0]│  rsda   │funct3│imma[4:0]│opcode5│10│
-│h|imma[4:0]│g|imma[4:0]│  rsda   │funct3│  rdb    │opcode5│10│
+│h│  rs2b   │g│  rs2a   │  rsda   │funct3│imma[4:0]│opcode5│10│
+│h│imma[4:0]│g│  rs2a   │  rsda   │funct3│   rdb   │opcode5│10│
+│h│  rs2b   │g│imma[4:0]│  rsda   │funct3│imma[4:0]│opcode5│10│
+│h│imma[4:0]│g│imma[4:0]│  rsda   │funct3│   rdb   │opcode5│10│
 
- * Note: somewhat contorted logic for coherent `rd` field usage.
+* Note: somewhat contorted logic for coherent `rd` field usage.
 
 # Other stuff
 
 # mem-pair
-load/store	8 (u8×w, sp) / 5 (u5×w)	same op	0 (implied +w)	shared base
 
     load    rda, k*imm(rbase)
     load    rdb, k*imm+k(rbase)
@@ -227,12 +220,12 @@ load/store	8 (u8×w, sp) / 5 (u5×w)	same op	0 (implied +w)	shared base
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│   rda   │ imm[5:0]  │  rbase  │funct3│   rdb   │opcode5│10│
-│h│  rs2b   │i│  rs2a   │  rbase  │funct3│ imm[4:0]│opcode5│10│
-│h│   rda   │g│  imm[4:0|9:5]     │funct3│   rdb   │opcode5│10│ (SP-relative)
-│h│  rs2b   │g│  rs2a   │imm[9:5] │funct3│ imm[4:0]│opcode5│10│ (SP-relative)
+│h│  rs2b   │i│  rs2a   │  rbase  │funct3│imm[4:0] │opcode5│10│
+│h│   rda   │g│   imm[4:0|9:5]    │funct3│   rdb   │opcode5│10│ (SP-relative)
+│h│  rs2b   │g│  rs2a   │imm[9:5] │funct3│imm[4:0] │opcode5│10│ (SP-relative)
 
- * For row two, `i` extends `imm` by one bit (consistent with `imma` extension but in a B-type frame).
- * both opcodes in a pair must be identical operations
+* For row two, `i` extends `imm` by one bit (consistent with `imma` extension but in a B-type frame).
+* both opcodes in a pair must be identical operations
 
 # dual-arith2-pair
 
@@ -243,7 +236,6 @@ load/store	8 (u8×w, sp) / 5 (u5×w)	same op	0 (implied +w)	shared base
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
 │h│   rda   │g│  rs2a   │  rs1a   │funct3│   rdb   │opcode5│10│
-
 
 # dual-indep-pair
 
@@ -260,7 +252,6 @@ load/store	8 (u8×w, sp) / 5 (u5×w)	same op	0 (implied +w)	shared base
 │h│   rda   │g│immb[4:0]│  rs1a   │funct3│   rdb   │opcode5│10│
 │h│   rda   │g│immb[4:0]│imma[4:0]│funct3│   rdb   │opcode5│10│
 
-
 ## rsd-alu-pair
 
     alu rsda, rsda, rs2a/imma
@@ -274,8 +265,7 @@ load/store	8 (u8×w, sp) / 5 (u5×w)	same op	0 (implied +w)	shared base
 │h│immb[4:0]│g│  rs2a   │  rsda   │funct3│  rsdb   │opcode5│10│
 │h│immb[4:0]│g│imma[4:0]│  rsda   │funct3│  rsdb   │opcode5│10│
 
- * TODO: these will probably have to be cut down to 4-bit register fields.
-
+* TODO: these will probably have to be cut down to 4-bit register fields.
 
 # Function head and tail special cases
 
@@ -290,8 +280,7 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
-│h│   rs1b  │g│  imm[4:0|9:5]     │funct3│0 0 0 0 1│opcode5│10│
-
+│h│  rs1b   │g│   imm[4:0|9:5]    │funct3│0 0 0 0 1│opcode5│10│
 
 ## epilogue-pair
 
@@ -301,8 +290,7 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
-│h│   rs1b  │g│  imm[4:0|9:5]     │funct3│0 0 0 0 1│opcode5│10│
-
+│h│  rs1b   │g│   imm[4:0|9:5]    │funct3│0 0 0 0 1│opcode5│10│
 
 # Other desperate measures
 
@@ -320,8 +308,8 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
-│h│   rs1b  │g│  rs2a   │  rsda   │funct3│0 0 0 0 1│opcode5│10│
-│h│   rs1b  │g│imma[4:0]│  rsda   │funct3│0 0 0 0 1│opcode5│10│
+│h│  rs1b   │g│  rs2a   │  rsda   │funct3│0 0 0 0 1│opcode5│10│
+│h│  rs1b   │g│imma[4:0]│  rsda   │funct3│0 0 0 0 1│opcode5│10│
 
 # arith-mem-pair
 
@@ -334,7 +322,7 @@ patterns as possible to tamp down the cost.
 ┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐
 │h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │
 └─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘
-│h│   rs1b  │g│  rs2a   │  rsda   │funct3│   rdb   │opcode5│10│
-│h│   rs1b  │g│imma[4:0]│  rsda   │funct3│0 0 0 0 1│opcode5│10│
+│h│  rs1b   │g│  rs2a   │  rsda   │funct3│   rdb   │opcode5│10│
+│h│  rs1b   │g│imma[4:0]│  rsda   │funct3│0 0 0 0 1│opcode5│10│
 
- * For this frame `g` and `h` provide a 2-bit `immb`.
+* For this frame `g` and `h` provide a 2-bit `immb`.

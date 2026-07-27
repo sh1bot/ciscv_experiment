@@ -1,0 +1,330 @@
+# Structured source of truth for the pairing packet encoding.
+# Render back to markdown with:  python3 util/encoding_render.py
+#
+# Every data row describes the seven variable columns h..rd; the renderer
+# appends the invariant "opcode5│10" tail. A cell may span N columns with a
+# "*N" suffix (e.g. "imma[5:0]*2" spans g+rs2). Display widths below are the
+# ASCII column widths (chosen to fit the field labels); bit widths are the
+# real encoding sizes and sum to 32 including opcode5(5)+marker(2).
+
+grid:
+  columns:     [h, funct5, g, rs2, rs1, funct3, rd]
+  display:     [1, 9,      1, 9,   9,   6,      9]
+  bits:        [1, 5,      1, 5,   5,   3,      5]   # + opcode5(5) + marker(2) = 32
+
+doc:
+  - md: |
+      # RISC-V template
+
+       31         25 24     20 19     15 14  12 11      7 6        0
+      ┌─────────────┬─────────┬─────────┬──────┬─────────┬──────────┐
+      │   funct7    │  rs2    │  rs1    │funct3│   rd    │  opcode  │   R-type
+      └─────────────┴─────────┴─────────┴──────┴─────────┴──────────┘
+      │       imm[11:0]       │  rs1    │funct3│   rd    │  opcode  │   I-type
+      │  imm[11:5]  │  rs2    │  rs1    │funct3│ imm[4:0]│  opcode  │   S-type
+      │imm[12|10:5] │  rs2    │  rs1    │funct3│imm[4:1|11]│ opcode │   B-type
+      │             imm[31:12]                 │   rd    │  opcode  │   U-type
+      │        imm[20|10:1|11|19:12]           │   rd    │  opcode  │   J-type
+
+      # Overview
+
+      ## Constraints and general patterns
+
+       * The rd field must not be x0 or x1 when it describes a register
+         (sometimes it is an immediate, and then the bit pattern is allowed).
+         Encoding these registers here is reserved for different
+         instructions, as is demonstrated in the prologue/epilogue pairs.
+       * the value of `k` in instruction templates is the size of the
+         corresponding load or store data width.  The value of `X` in `shXadd`
+         mnemonics is the corresponding bit shift.
+       * When `imma` or `immb` are required to be 6-bit immediates, the extra
+         bits are stored in bits `g` and `h` respectively.  Otherwise these
+         bits are used to extend the range of the `funct3` field.
+
+  - md: |
+      # Chain rules
+
+       * One defined output register, plus x31 becomes undefined.
+       * First instruction produces result for use by second instruction
+       * Generally second operation produces result, but second op may have no output
+         (eg., store, branch) meaning result comes from first, or there's no result at all.
+
+  - frame:
+      name: chain-alu-pair
+      level: 2
+      asm: |
+        alu     tmp, rs1a, rs2a/imma
+        alu     rdb, tmp, rs2b/immb
+      rows:
+        - ["h", "rs2b",      "g", "rs2a",      "rs1a", "funct3", "rdb"]
+        - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "funct3", "rdb"]
+        - ["h", "immb[4:0]", "g", "rs2a",      "rs1a", "funct3", "rdb"]
+        - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "funct3", "rdb"]
+
+  - frame:
+      name: load-chain-alu-pair
+      level: 2
+      asm: |
+        load    tmp, k*imma(rs1a)
+        alu     rdb, tmp, rs2b/immb
+
+        load    tmp, k*imma(sp)
+        alu     rdb, tmp, rs2b/immb
+      rows:
+        - ["h", "rs2b",      "imma[5:0]*2",      "rs1a", "funct3", "rdb"]
+        - ["h", "immb[4:0]", "imma[5:0]*2",      "rs1a", "funct3", "rdb"]
+        - {c: ["h", "rs2b",      "g", "imma[4:0|9:5]*2", "funct3", "rdb"], tag: SP-relative}
+        - {c: ["h", "immb[4:0]", "g", "imma[4:0|9:5]*2", "funct3", "rdb"], tag: SP-relative}
+
+  - frame:
+      name: store-chain-alu-pair
+      level: 2
+      asm: |
+        alu     tmp, rs1a, rs2a/imma
+        store   tmp, k*immb(rs1b)
+
+        alu     tmp, rs1a, rs2a/imma
+        store   tmp, k*immb(sp)
+      rows:
+        - ["h", "rs1b",      "g", "rs2a",      "rs1a", "funct3", "immb[4:0]"]
+        - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "funct3", "immb[4:0]"]
+        - {c: ["h", "immb[9:5]", "g", "rs2a",      "rs1a", "funct3", "immb[4:0]"], tag: SP-relative}
+        - {c: ["h", "immb[9:5]", "g", "imma[4:0]", "rs1a", "funct3", "immb[4:0]"], tag: SP-relative}
+
+  - frame:
+      name: "deref-chain-load-pair, base-chain-load-pair"
+      level: 2
+      asm: |
+        load    tmp, k*imma(rs1a)
+        load    rdb, k*immb(tmp)
+      rows:
+        - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "funct3", "rdb"]
+        - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "funct3", "rdb"]
+      notes: |
+         * TODO: decide how to balance imma and immb sizes.
+         * TODO: maybe use g and h for the other immediate?  Or switch them between +2 bits on a or b
+           immediate?
+
+  - frame:
+      name: chain-li-branch
+      level: 2
+      asm: |
+        li      tmp, imma
+        bXX     rs1b, tmp, 4*immb
+      rows:
+        - ["h", "immb[9:5]", "imma[5:0]*2", "rs1b", "funct3", "immb[4:0]"]
+      notes: |
+         * For this frame `h` extends `imma` by one bit.
+         * TODO: could replace li with alu op and compare result with zero (mostly?).
+
+  - frame:
+      name: chain-bit-test-branch
+      level: 2
+      asm: |
+        andi    tmp, rs1a, imma
+        beqz/bnez tmp, immb
+
+        slli    tmp, rs1a, imma
+        blt/bge tmp, zero, 4*immb
+      rows:
+        - ["h", "immb[9:5]", "imma[5:0]*2", "rs1a", "funct3", "immb[4:0]"]
+
+  - md: |
+      # Chain rules, but first op is result
+
+  - frame:
+      name: "load-sp-branch, load-base-branch"
+      level: 2
+      asm: |
+        load    rda, k*imma(sp)
+        beqz/bnez rda, zero, 4*immb
+
+        load    rda, k*imma(rs1a)
+        beqz/bnez rda, zero, 4*immb
+      rows:
+        - ["h", "rda", "g", "imma[4:0]", "rs1a", "funct3", "immb[4:0]"]
+        - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "funct3", "immb[4:0]"], tag: SP-relative}
+      notes: |
+         * For this frame `g` and `h` extend `immb` by two bits.
+
+  - frame:
+      name: addi-branch-pair
+      level: 2
+      asm: |
+        addi/addiw rsda, imma
+        beqz/bnez rsda, zero, 4*immb
+      rows:
+        - ["h", "immb[9:5]", "imma[5:0]*2", "rsda", "funct3", "immb[4:0]"]
+
+  - md: |
+      # pre/post increment addressing
+
+      Also chain rules with surviving first result, but also sometimes a second result.
+
+  - frame:
+      name: pre-inc-pair
+      level: 2
+      asm: |
+        shXadd  rsda, rsda, rs2a
+        load    rdb, k*immb(rsda)
+
+        addi    rsda, rsda, imma
+        load    rdb, k*immb(rsda)
+
+        shXadd  rsda, rsda, rs2a
+        store   rs2b, k*immb(rsda)
+
+        addi    rsda, rsda, imma
+        store   rs2b, k*immb(rsda)
+      rows:
+        - ["h", "rs2b",      "g", "rs2a",      "rsda", "funct3", "immb[4:0]"]
+        - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "funct3", "rdb"]
+        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "funct3", "immb[4:0]"]
+        - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "funct3", "rdb"]
+      notes: |
+         * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
+
+  - frame:
+      name: "dual-mem-addi-pair, dual-mem-shadd-pair"
+      level: 2
+      asm: |
+        load    rdb, 0(rsda)
+        shXadd  rsda, rsda, rs2a
+
+        store   rs2a, 0(rsda)
+        shXadd  rsda, rsda, rs2a
+
+        addi    rsda, rsda, k*imma
+        load    rdb, -k*imma(rsda)
+
+        addi    rsda, rsda, k*imma
+        store   rs2b, -k*imma(rsda)
+      rows:
+        - ["h", "rs2b",      "g", "rs2a",      "rsda", "funct3", "imma[4:0]"]
+        - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "funct3", "rdb"]
+        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "funct3", "imma[4:0]"]
+        - ["h", "imma[4:0]", "g", "imma[4:0]", "rsda", "funct3", "rdb"]
+      notes: |
+         * Note: somewhat contorted logic for coherent `rd` field usage.
+
+  - md: |
+      # Other stuff
+
+  - frame:
+      name: mem-pair
+      level: 1
+      asm: |
+        load    rda, k*imm(rbase)
+        load    rdb, k*imm+k(rbase)
+
+        store   rs2a, k*imm(rbase)
+        store   rs2b, k*imm+k(rbase)
+
+        load    rda, k*imm(sp)
+        load    rdb, k*imm+k(sp)
+
+        store   rs2a, k*imm(sp)
+        store   rs2b, k*imm+k(sp)
+      rows:
+        - ["h", "rda",  "imm[5:0]*2",       "rbase", "funct3", "rdb"]
+        - ["h", "rs2b", "i", "rs2a",        "rbase", "funct3", "imm[4:0]"]
+        - {c: ["h", "rda",  "g", "imm[4:0|9:5]*2", "funct3", "rdb"], tag: SP-relative}
+        - {c: ["h", "rs2b", "g", "rs2a", "imm[9:5]", "funct3", "imm[4:0]"], tag: SP-relative}
+      notes: |
+         * For row two, `i` extends `imm` by one bit (consistent with `imma` extension but in a B-type frame).
+         * both opcodes in a pair must be identical operations
+
+  - frame:
+      name: dual-arith2-pair
+      level: 1
+      asm: |
+        alu     rda, rs1a, rs2a
+        alu     rdb, rs1a, rs2a
+      rows:
+        - ["h", "rda", "g", "rs2a", "rs1a", "funct3", "rdb"]
+
+  - frame:
+      name: dual-indep-pair
+      level: 1
+      asm: |
+        mv      rda, rs1a
+        mv/li   rdb, rs2b/immb
+
+        li      rda, imma
+        li      rdb, immb
+      rows:
+        - ["h", "rda", "g", "rs2b",      "rs1a",      "funct3", "rdb"]
+        - ["h", "rda", "g", "immb[4:0]", "rs1a",      "funct3", "rdb"]
+        - ["h", "rda", "g", "immb[4:0]", "imma[4:0]", "funct3", "rdb"]
+
+  - frame:
+      name: rsd-alu-pair
+      level: 2
+      asm: |
+        alu rsda, rsda, rs2a/imma
+        alu rsdb, rsdb, rs2b/immb
+      rows:
+        - ["h", "rs2b",      "g", "rs2a",      "rsda", "funct3", "rsdb"]
+        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "funct3", "rsdb"]
+        - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "funct3", "rsdb"]
+        - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "funct3", "rsdb"]
+      notes: |
+         * TODO: these will probably have to be cut down to 4-bit register fields.
+
+  - md: |
+      # Function head and tail special cases
+
+      Entry and exit into blocks makes alignment hard, so let's try to special-case as many common
+      patterns as possible to tamp down the cost.
+
+  - frame:
+      name: prologue-pair
+      level: 2
+      asm: |
+        addi    sp, -16*imm
+        store   rs1b, 16*imm-k(sp)
+      rows:
+        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "funct3", "0 0 0 0 1"]
+
+  - frame:
+      name: epilogue-pair
+      level: 2
+      asm: |
+        addi    sp, 16*imm
+        jr      rs1b
+      rows:
+        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "funct3", "0 0 0 0 1"]
+
+  - md: |
+      # Other desperate measures
+
+  - frame:
+      name: arith-jump-pair
+      level: 2
+      asm: |
+        alu     rsda, rsda, rs2a/imma
+        jr/jalr rs1b
+
+        mv     rsda, rs2a
+        jr/jalr rs1b
+
+        li     rsda, imma
+        jr/jalr rs1b
+      rows:
+        - ["h", "rs1b", "g", "rs2a",      "rsda", "funct3", "0 0 0 0 1"]
+        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "funct3", "0 0 0 0 1"]
+
+  - frame:
+      name: arith-mem-pair
+      level: 1
+      asm: |
+        alu     rsda, rsda, rs2a/imma
+        load    rdb, k*immb(rs1b)
+
+        alu     rsda, rsda, rs2a/imma
+        store   rs2b, k*immb(rs1b)
+      rows:
+        - ["h", "rs1b", "g", "rs2a",      "rsda", "funct3", "rdb"]
+        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "funct3", "0 0 0 0 1"]
+      notes: |
+         * For this frame `g` and `h` provide a 2-bit `immb`.
