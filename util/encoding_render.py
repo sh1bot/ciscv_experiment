@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import os
+import re
 import sys
 
 import yaml
@@ -97,13 +98,99 @@ def render(spec) -> str:
     return text.rstrip("\n") + "\n"
 
 
+# --- asm <-> row correspondence lint --------------------------------------
+# Operand meta-variables that may appear in an asm instruction. tmp (=x31) and
+# named architectural registers are IMPLICIT and are not encoded in a row.
+_OPERAND = re.compile(
+    r"\b(rs1a|rs2a|rs1b|rs2b|rsda|rsdb|rda|rdb|rbase|imma|immb|imm|tmp)\b")
+_IMPLICIT = {"tmp", "sp", "ra", "zero", "x0", "x31"}
+_NON_OPERAND_CELLS = {"h", "g", "i", "funct3", "opcode5", "10"}
+
+
+def asm_pairs(frame):
+    """Split the asm block into (line_a, line_b) template pairs on blank lines."""
+    chunk, pairs = [], []
+    for ln in frame["asm"].rstrip("\n").split("\n"):
+        if ln.strip():
+            chunk.append(ln.strip())
+        elif chunk:
+            pairs.append(chunk); chunk = []
+    if chunk:
+        pairs.append(chunk)
+    return pairs
+
+
+def asm_operands(pair):
+    """Encoded operand names used by an asm pair (implicit regs removed)."""
+    ops = set()
+    for line in pair:
+        _, _, rest = line.partition(" ")       # drop the opcode meta-variable
+        ops |= set(_OPERAND.findall(rest))
+    return ops - _IMPLICIT
+
+
+def row_operands(cells):
+    ops = set()
+    for cell in cells:
+        name = cell.split("*")[0].split("[")[0]
+        if name in _NON_OPERAND_CELLS:
+            continue
+        if re.fullmatch(r"[01 ]+", cell):       # fixed bit pattern e.g. "0 0 0 0 1"
+            continue
+        ops.add(name)
+    return ops
+
+
+def lint(spec):
+    problems = 0
+    for node in spec["doc"]:
+        if "frame" not in node:
+            continue
+        f = node["frame"]
+        pairs = asm_pairs(f)
+        asm_ops = set().union(*(asm_operands(p) for p in pairs)) if pairs else set()
+        rows = [r["c"] if isinstance(r, dict) else r for r in f["rows"]]
+        row_ops = set().union(*(row_operands(r) for r in rows)) if rows else set()
+
+        notes = f.get("notes", "") or ""
+        bad_pair = [p for p in pairs if len(p) != 2]
+        missing = asm_ops - row_ops           # operand in asm, never encoded
+        spurious = row_ops - asm_ops          # field in a row, not in any asm
+        # A small immediate carried in the g/h bits shows as "g"/"h" cells, not
+        # a named field; accept it when the frame's notes document that use.
+        documented = {m for m in missing
+                      if m.startswith("imm") and re.search(rf"\b{m}\b", notes)}
+        missing -= documented
+        if bad_pair or missing or spurious:
+            problems += 1
+            print(f"✗ {f['name']}")
+            if bad_pair:
+                print(f"    asm chunks that aren't 2-line pairs: "
+                      f"{[len(p) for p in bad_pair]}")
+            if missing:
+                print(f"    operands in asm but NOT encoded in any row: {sorted(missing)}")
+            if spurious:
+                print(f"    fields in rows but NOT used by any asm line: {sorted(spurious)}")
+        else:
+            extra = f"  [{','.join(sorted(documented))} in g/h per notes]" if documented else ""
+            print(f"✓ {f['name']}  ({len(pairs)} pair(s), {len(rows)} row(s)){extra}")
+    print(f"\n{problems} frame(s) with correspondence problems.")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--yaml", default=os.path.join(ROOT, "encoding.yaml"))
     ap.add_argument("-o", "--output")
     ap.add_argument("--check", action="store_true",
                     help="diff the render against encoding.md and report")
+    ap.add_argument("--lint", action="store_true",
+                    help="check asm<->row operand correspondence")
     args = ap.parse_args()
+
+    if args.lint:
+        with open(args.yaml) as fh:
+            sys.exit(1 if lint(yaml.safe_load(fh)) else 0)
 
     with open(args.yaml) as fh:
         spec = yaml.safe_load(fh)
