@@ -32,6 +32,11 @@ Two "nice-to-have" biases are applied when they don't cost feasibility:
     A-slot (g) and B-slot (h) wide-immediate extension bits — the "raised for
     the immediate form" convention from encoding.yaml's Overview.
 
+For each frame the tool prints its bare form, then walks the frame's asm
+templates and, for each, reprints the matching encoding row TWICE — once for the
+A instruction and once for the B instruction — blanking the fields that slot
+does not use, so it is visible which fields each slot owns and which they share.
+
 Usage:  python3 util/encoding_assign.py
 """
 import math
@@ -44,7 +49,8 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from encoding_render import _center, _cell, _spanned, header_lines, opcode_demand
+from encoding_render import (_center, _cell, _spanned, header_lines,
+                             opcode_demand, row_operands, _OPERAND, _IMPLICIT)
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
@@ -233,45 +239,138 @@ def word_chars(frame):
     return w
 
 
-def first_row(spec):
-    r = spec["rows"][0]
-    if isinstance(r, dict):
-        return list(r["c"]), r.get("tag")
-    return list(r), None
+def frame_rows(spec):
+    """(cells, tag) for every row, dict-form or bare-list."""
+    out = []
+    for r in spec["rows"]:
+        if isinstance(r, dict):
+            out.append((list(r["c"]), r.get("tag")))
+        else:
+            out.append((list(r), None))
+    return out
 
 
-def render_frame_row(frame, colwidths):
-    """Render the frame's first row with the selector bits injected: fn3 and
-    opcode5 always shown as bits; a discrete g/h/i opcode cell overwritten with
-    its bit; spanned-immediate cells left as-is (the ⚠ report covers clashes)."""
-    w = word_chars(frame)
-    o5 = " ".join(w[0:5])
+def _tokens(cells, w):
+    """Per operand-column cell: (display_text, span, pos, body) with the
+    selector bits injected — fn3 as its 3 bits, a discrete g/h/i cell as its
+    bit, everything else as its span-stripped label."""
     fn3 = " ".join(w[5:8])
     g_char, h_char = w[8], w[9]
-    cells, tag = first_row(frame["spec"])
-
-    disp, pos = [], 0
+    out, pos = [], 0
     for cell in cells:
         body, span = _cell(cell)
-        if span == 1 and body == "fn3":
-            disp.append(fn3)
+        if body == "fn3":
+            text = fn3
         elif span == 1 and pos == COL_G and body in ("g", "i"):
-            disp.append(g_char)
+            text = g_char
         elif span == 1 and pos == COL_H and body == "h":
-            disp.append(h_char)
+            text = h_char
         else:
-            disp.append(cell)
+            text = body
+        out.append((text, span, pos, body))
         pos += span
+    return out
 
+
+_FIXED = re.compile(r"[01 ]+$")
+
+
+def _shared_cell(body, pos):
+    """A cell that belongs to the joint packet, not to one slot: the opcode
+    bits (fn3), the g/h/i extension bits, and any fixed bit pattern (incl. the
+    prologue/epilogue/jump sentinel)."""
+    if body == "fn3":
+        return True
+    if pos == COL_G and body in ("g", "i"):
+        return True
+    if pos == COL_H and body == "h":
+        return True
+    return bool(_FIXED.match(body))
+
+
+def render_line(tokens, o5, colwidths, keep=None):
+    """Render one encoding line. `keep(base)` decides whether a slot-owned
+    field is shown; when None every field shows (the plain form). Shared cells
+    and the opcode5/marker tail always show; erased cells render blank."""
     rendered, pos = [], 0
-    for token in disp + [o5, MARKER]:
+    for text, span, cpos, body in tokens:
+        width = _spanned(colwidths, pos, span)
+        if keep is None or _shared_cell(body, cpos):
+            show = True
+        else:
+            base = body.split("*")[0].split("[")[0]
+            show = keep(base)
+        rendered.append(_center(text if show else "", width))
+        pos += span
+    for token in [o5, MARKER]:                      # opcode5 + marker: shared
         text, span = _cell(token)
         rendered.append(_center(text, _spanned(colwidths, pos, span)))
         pos += span
-    line = "│" + "│".join(rendered) + "│"
-    if tag:
-        line += f" ({tag})"
-    return line
+    return "│" + "│".join(rendered) + "│"
+
+
+# --- template <-> row matching --------------------------------------------
+def line_ops(line):
+    """Encoded operand names an asm line uses (implicit regs dropped)."""
+    _, _, rest = line.partition(" ")
+    return set(_OPERAND.findall(rest)) - _IMPLICIT
+
+
+def matches(row_cells, tag, a_ops, b_ops, sp_template, has_sp_rows):
+    """A row realises a template when every field the row encodes is an operand
+    of the template, and (for frames that distinguish them) its SP-relative
+    variant agrees."""
+    if not row_operands(row_cells) <= (a_ops | b_ops):
+        return False
+    if has_sp_rows and sp_template != (tag == "SP-relative"):
+        return False
+    return True
+
+
+def render_frame_body(frame, colwidths, header):
+    """Print the frame's plain form, then, per template, the encoding twice —
+    once keeping only the A-slot's fields and once only the B-slot's — with the
+    asm instruction on the right. Fields used by both slots survive both copies,
+    exposing the shared operands."""
+    spec = frame["spec"]
+    w = word_chars(frame)
+    o5 = " ".join(w[0:5])
+    rows = frame_rows(spec)
+    has_sp = any(tag == "SP-relative" for _, tag in rows)
+
+    print("\n".join(header))
+    for cells, tag in rows:                         # the form as it stands
+        line = render_line(_tokens(cells, w), o5, colwidths)
+        print(line + (f" ({tag})" if tag else ""))
+
+    for pair in spec["templates"]:
+        a_line, b_line = pair[0].strip(), pair[1].strip()
+        a_ops, b_ops = line_ops(pair[0]), line_ops(pair[1])
+        sp_t = any("(sp)" in ln for ln in pair)
+        hits = [(c, t) for c, t in rows
+                if matches(c, t, a_ops, b_ops, sp_t, has_sp)]
+        approx = False
+        if not hits:
+            # Contorted frames (e.g. dual-mem) reuse one encoding row across
+            # several asm forms, so no row's fields are a strict subset of this
+            # template's operands. Fall back to the single best-overlap row.
+            cand = [(c, t) for c, t in rows
+                    if not (has_sp and sp_t != (t == "SP-relative"))]
+            cand.sort(key=lambda ct: -len(row_operands(ct[0]) & (a_ops | b_ops)))
+            if cand and row_operands(cand[0][0]) & (a_ops | b_ops):
+                hits, approx = [cand[0]], True
+        print()
+        if not hits:
+            print(f"    (no row realises: {a_line} ; {b_line})")
+            continue
+        if approx:
+            print("    (closest-fit encoding — this frame shares rows across forms)")
+        for cells, tag in hits:
+            toks = _tokens(cells, w)
+            a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
+            b = render_line(toks, o5, colwidths, keep=lambda base: base in b_ops)
+            print(f"{a}   {a_line}")
+            print(f"{b}   {b_line}")
 
 
 def main():
@@ -305,6 +404,9 @@ def main():
     print(f"Namespace used: {used}/{1<<WBITS} codepoints "
           f"({100*used/(1<<WBITS):.0f}%).  "
           f"{sum(f['promoted'] for f in frames)} frame(s) promoted to keep g/h free.\n")
+    print("Each frame prints its form, then per template the encoding twice — the\n"
+          "A instruction then the B — with the fields that slot does NOT use erased.\n"
+          "A field kept in both copies is shared by both instructions.\n")
 
     conflicts, freed = [], []
     for f in order:
@@ -332,8 +434,7 @@ def main():
               f"identifier {idl} bit(s) = {f['id_val']:0{idl}b}; "
               f"total word depth {depth}/{WBITS}")
         print()
-        print("\n".join(header))
-        print(render_frame_row(f, widths))
+        render_frame_body(f, widths, header)
         print()
 
     print("─" * 72)
