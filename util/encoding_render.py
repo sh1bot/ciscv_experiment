@@ -23,18 +23,18 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The header block is invariant across every frame; emit it verbatim.
-HEADER = [
-    "┌─┬─────────┬─┬─────────┬─────────┬──────┬─────────┬──────────┐",
-    "│h│ funct5  │g│  rs2    │  rs1    │funct3│   rd    │  opcode  │",
-    "└─┴─────────┴─┴─────────┴─────────┴──────┴─────────┴──────────┘",
-]
-OPCODE_TAIL = "opcode5│10"          # appended (with a leading │) to every data row
+# Every data row carries these two invariant tail fields after rd:
+#   opcode5 (5-bit opcode) and the 2-bit packet marker "10", shown as bits.
+TAIL_CELLS = ["opcode5", "1 0"]
+
+# Header labels for the seven variable columns + the merged opcode field
+# (opcode = opcode5 + marker). funct3's label is shown as "fn3" because a
+# 3-bit box (2*3-1 = 5 cols) can't hold "funct3".
+HEADER_LABELS = ["h", "funct5", "g", "rs2", "rs1", "fn3", "rd", "opcode"]
 
 
 def _center(text, w):
-    """Center with any odd extra space on the RIGHT (matches encoding.md's
-    convention; Python's str.center biases the other way on odd widths)."""
+    """Center with any odd extra space on the RIGHT."""
     pad = max(0, w - len(text))
     left = pad // 2
     return " " * left + text + " " * (pad - left)
@@ -49,16 +49,31 @@ def _cell(text):
     return text, 1
 
 
-def render_row(cells, widths, tag=None):
+def _spanned(widths, pos, span):
+    """Display width of a cell spanning `span` columns from `pos`
+    (sum of the column widths plus the internal separators they absorb)."""
+    return sum(widths[pos:pos + span]) + (span - 1)
+
+
+def header_lines(colwidths):
+    """The boxed 3-line header, sized from the column display widths.
+    opcode5 and the marker are merged into a single 'opcode' box."""
+    hw = list(colwidths[:7]) + [_spanned(colwidths, 7, 2)]   # merge opcode5+marker
+    top = "┌" + "┬".join("─" * w for w in hw) + "┐"
+    mid = "│" + "│".join(_center(l, w) for l, w in zip(HEADER_LABELS, hw)) + "│"
+    bot = "└" + "┴".join("─" * w for w in hw) + "┘"
+    return [top, mid, bot]
+
+
+def render_row(cells, colwidths, tag=None):
     rendered, pos = [], 0
-    for token in cells:
+    for token in list(cells) + TAIL_CELLS:
         text, span = _cell(token)
-        w = sum(widths[pos:pos + span]) + (span - 1)   # absorb internal separators
-        rendered.append(_center(text, w))
+        rendered.append(_center(text, _spanned(colwidths, pos, span)))
         pos += span
-    if pos != len(widths):
-        raise ValueError(f"row spans {pos} columns, expected {len(widths)}: {cells}")
-    line = "│" + "│".join(rendered) + "│" + OPCODE_TAIL + "│"
+    if pos != len(colwidths):
+        raise ValueError(f"row spans {pos} columns, expected {len(colwidths)}: {cells}")
+    line = "│" + "│".join(rendered) + "│"
     if tag:
         line += f" ({tag})"
     return line
@@ -68,7 +83,10 @@ BANNER = "<!-- Generated from encoding.yaml by util/encoding_render.py — do no
 
 
 def render(spec) -> str:
-    widths = spec["grid"]["display"]
+    # column display widths: the seven variable columns, then opcode5(5 bits ->
+    # 9) and the marker(2 bits -> 3), all following width = 2*bits - 1.
+    widths = list(spec["grid"]["display"]) + [9, 3]
+    header = header_lines(widths)
     out: list[str] = [BANNER, ""]
     for node in spec["doc"]:
         if "md" in node:
@@ -84,7 +102,7 @@ def render(spec) -> str:
                 for ln in pair:
                     out.append("    " + ln)
             out.append("")
-            out.extend(HEADER)
+            out.extend(header)
             for row in f["rows"]:
                 if isinstance(row, dict):
                     out.append(render_row(row["c"], widths, row.get("tag")))
@@ -107,7 +125,7 @@ def render(spec) -> str:
 _OPERAND = re.compile(
     r"\b(rs1a|rs2a|rs1b|rs2b|rsda|rsdb|rda|rdb|rbase|imma|immb|imm|tmp)\b")
 _IMPLICIT = {"tmp", "sp", "ra", "zero", "x0", "x31"}
-_NON_OPERAND_CELLS = {"h", "g", "i", "funct3", "opcode5", "10"}
+_NON_OPERAND_CELLS = {"h", "g", "i", "fn3", "opcode5", "10"}
 
 
 def asm_pairs(frame):
