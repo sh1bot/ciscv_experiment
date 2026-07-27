@@ -202,10 +202,13 @@ def lint(spec):
 
 
 # --- opcode-field capacity ------------------------------------------------
-# The opcode5(5)+funct3(3) namespace = 256 base codepoints (x4 via g,h = 1024),
-# shared by all frames as a prefix code. Each frame's declared op-sets demand
-# one codepoint per (opA, opB) it allows.
-OPCODE_NAMESPACE = 256
+# The opcode namespace is opcode5(5) + funct3(3) + g(1) + h(1) = 10 bits =
+# 1024 entries, shared by all frames as a prefix code. g and h double as the
+# immediate-extension bits, so an op that needs a wide immediate takes MULTIPLE
+# entries (one per immediate sub-range: 2 with g, 4 with g+h) rather than one.
+# The (opA, opB) count below is the BASE demand (one entry per op-combo,
+# assuming a base-width immediate); wide-immediate sub-range entries add to it.
+OPCODE_NAMESPACE = 1024
 
 
 def opcode_demand(ops):
@@ -240,15 +243,20 @@ def opcodes(spec):
             shape = f"{len(ops['a'])}×{len(ops['b'])}"
         print(f"{f['name']:44} {shape:>13} {d:10}")
     print("-" * 70)
-    print(f"{'TOTAL declared opcode demand':44} {'':>13} {total:10}")
-    print(f"\nopcode5+funct3 namespace = {OPCODE_NAMESPACE} base codepoints "
-          f"(x4 via g,h = {OPCODE_NAMESPACE*4}).")
-    verdict = ("FITS" if total <= OPCODE_NAMESPACE else
-               f"OVER by {total-OPCODE_NAMESPACE} ({total/OPCODE_NAMESPACE:.1f}x base; "
-               f"{'still <1024' if total <= OPCODE_NAMESPACE*4 else 'OVER 1024 too'})")
-    print(f"Total {total} vs {OPCODE_NAMESPACE}: {verdict}.")
-    print("This is the DECLARED (worst-case) demand -- every allowed (opA,opB).\n"
-          "Real corpus usage is far sparser (see analysis/encoding_verify + budget).")
+    print(f"{'TOTAL base (opA×opB) opcode demand':44} {'':>13} {total:10}")
+    spare = OPCODE_NAMESPACE - total
+    print(f"\nopcode namespace = opcode5(5)+funct3(3)+g(1)+h(1) = {OPCODE_NAMESPACE} entries.")
+    if total <= OPCODE_NAMESPACE:
+        print(f"Base demand {total} FITS with {spare} entries spare.")
+        print(f"Those {spare} spare entries are what wide-immediate ops draw on: each\n"
+              f"immediate sub-range beyond the base field width costs one extra entry\n"
+              f"(x2 via g, x4 via g+h). Whether base+sub-ranges stays <= {OPCODE_NAMESPACE}\n"
+              f"depends on how many wide-immediate variants each frame declares.")
+    else:
+        print(f"Base demand {total} OVER by {total-OPCODE_NAMESPACE} before any "
+              f"immediate sub-range entries.")
+    print("This is DECLARED demand (every allowed op-combo); real corpus usage is\n"
+          "far sparser (see analysis/encoding_verify + encoding_budget).")
     if missing:
         print(f"\nFrames with no ops declared: {missing}")
     return 0
