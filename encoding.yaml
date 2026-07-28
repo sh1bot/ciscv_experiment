@@ -40,6 +40,45 @@ opsets:
   addiw_6s: &addiw_6s {op: addiw, imm: {bits: 6, signed: true}}
   li_6s:    &li_6s    {op: li,    imm: {bits: 6, signed: true}}
 
+# Equivalencies: surface forms the scheduler should accept as matching a frame
+# because they are equivalent to the canonical form the packet encodes. Each
+# entry pairs a `canonical` form (how the frame is written) with a `spelled`
+# surface form seen in code; matching normalises spelled -> canonical. A guard
+# on an immediate uses a named class that also binds a parameter n:
+#     single_bit = 1<<n      low_mask = 2^n - 1      high_mask = -(2^n)
+# `bind` then derives the canonical operands (e.g. a shift amount) from n.
+# `tmp` is the dead intermediate — it matches only tmp, so a value-changing
+# rewrite is licensed structurally, with no separate liveness test. Commutative
+# operand swap is NOT here: the scheduler owns that.
+#
+# STARTING POINT for iteration — nothing consumes this yet. Mirrors the
+# equivalencies rules.py currently codifies implicitly (see yaml_migration.md).
+equivalences:
+  - name: low-mask-zero-test           # E1: test the low n bits are zero
+    canonical: ["slli tmp, rs, s", "beqz/bnez tmp, L"]
+    spelled:   ["andi tmp, rs, m", "beqz/bnez tmp, L"]
+    when: {m: low_mask}                # m == 2^n - 1
+    bind: {s: XLEN - n}
+
+  - name: high-mask-zero-test          # E2: test the high bits are zero
+    canonical: ["srli tmp, rs, n", "beqz/bnez tmp, L"]
+    spelled:   ["andi tmp, rs, m", "beqz/bnez tmp, L"]
+    when: {m: high_mask}               # m == -(2^n)
+    bind: {n: n}
+
+  - name: zero-compare-eq              # E3: beq/bne against x0 is the zero test
+    canonical: ["beqz rd, L"]
+    spelled:   ["beq rd, zero, L"]
+  - name: zero-compare-ne
+    canonical: ["bnez rd, L"]
+    spelled:   ["bne rd, zero, L"]
+
+  - name: single-bit-sign-test         # candidate extension (not in rules.py):
+    canonical: ["slli tmp, rs, s", "blt tmp, zero, L"]   # isolate bit n at the
+    spelled:   ["and tmp, rs, m", "bnez tmp, L"]         # sign, test via blt
+    when: {m: single_bit}              # m == 1<<n
+    bind: {s: XLEN-1 - n}
+
 doc:
   - md: |
       # RISC-V template

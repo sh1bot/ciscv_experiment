@@ -45,10 +45,15 @@ compiler reads the YAML (and the templates) and emits the matcher.
 
 ## Roadmap (priority order)
 
-1. **[NEXT] Inter-immediate relationships.** The arithmetic tying the two
+1. **[IN PROGRESS] Inter-immediate relationships.** The arithmetic tying the two
    instructions' immediates together. The relations are *already in the
    templates* as arithmetic on a shared immediate variable — the work is to
-   parse/interpret them, not to invent syntax:
+   parse/interpret them, not to invent syntax. `analysis/imm_relations.py` now
+   parses the template expressions, derives each frame's relation, and checks it
+   against the corpus. Findings: **prologue 100%**, **mem-pair 100%** (once the
+   check is order-insensitive), **dual-mem 0%** — the contorted frame's offset-0
+   forms don't fit the `b = -a` addi-template relation and need per-form
+   handling (same special-case encoding_assign required).
    - `mem-pair`: `k*imm(rbase)` and `k*imm+k(rbase)` → B offset = A offset + one
      width. (`rules.py:570`, `abs(a.imm-b.imm)==width`)
    - `prologue`: `addi sp, -16*imm` and `store rs1b, 16*imm-k(sp)` → store offset
@@ -61,7 +66,9 @@ compiler reads the YAML (and the templates) and emits the matcher.
 
 2. **Equivalency pairs in the YAML** (list below) + extensions/syntax. Biased
    toward rewrites that reveal a form matching an encoding this document
-   describes.
+   describes. A first-cut `equivalences:` schema now lives in `encoding.yaml`
+   (canonical/spelled forms, named immediate-class guards, the `tmp` dead-
+   intermediate convention) as a starting point — nothing consumes it yet.
 
 3. **Signedness / zero / scale completion** — per-op signedness, the
    arith⇒nonzero deduction above, and the `scale: w` width-scaling semantics.
