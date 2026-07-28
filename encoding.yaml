@@ -33,8 +33,14 @@
 # w×w where w(w+1)/2 would do: the (narrow, wide) and (wide, narrow) spellings
 # of one op-pair are both encoded when a tie-breaker on the range band would
 # need only one. The waste is w(w-1)/2 per such op — 1 codepoint at ext=1, 6 at
-# ext=2 — and it is zero for every op at the base range. dual-indep-pair pays 1
-# of these today (see its budget note).
+# ext=2 — and it is zero for every op at the base range.
+#
+# This is a DON'T-CARE while the frame's count sits inside its block: blocks are
+# powers of two, so a frame at 11 and a frame at 10 reserve the same 16 and the
+# waste costs nothing real. It only becomes a decision if the waste is what
+# pushes a count across a power-of-two boundary and doubles the reservation.
+# dual-indep-pair pays 1 codepoint of it today, at 11 of 16 — five to spare
+# before it would matter.
 #
 # Ordering the two immediates by VALUE (not just by range band) would be more
 # efficient still — a strict ordering makes one of each equal-size pair
@@ -399,10 +405,12 @@ doc:
   - frame:
       name: dual-indep-pair
       # 11 codepoints: the triangle over li, mv, addi4spn_u6, where the last
-      # weighs 2 (a 6-bit range over a 5-bit base field). Note 11 rather than
-      # the ideal 10 — the triangle orders the OPCODES but has no syntax to
-      # order two immediates of the SAME op, so the addi4spn/addi4spn diagonal
-      # pays 2x2 where 2x3/2 would do. See the `ops` note in the header.
+      # weighs 2 (a 6-bit range over a 5-bit base field). That is 11 rather than
+      # the ideal 10 because the triangle orders the OPCODES but has no syntax
+      # to order two immediates of the SAME op, so the addi4spn/addi4spn
+      # diagonal pays 2x2 where 2x3/2 would do. Deliberately left alone: 10 and
+      # 11 both reserve the same 16-codepoint block, so the difference is a
+      # don't-care until the frame grows past 16. See the `ops` header note.
       budget: 16
       level: 1
       templates:
