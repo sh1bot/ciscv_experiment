@@ -2,7 +2,7 @@
 
 RISC-V instruction-pairing workbench: reads RISC-V asm, packs instruction pairs
 into 32-bit packets, emits annotated asm + stats. Design in `GOALS.md` / `PLAN.md`;
-open items in `TODO.md`.
+open items in `TODO.md`; measurement conventions in `ACCOUNTING.md`.
 
 **`encoding.yaml` is the source of truth for the prospective packet ISA** — the
 frames (op clusters + templates + row layout), immediate widths, and codepoint

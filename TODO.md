@@ -232,3 +232,16 @@ broaden the GOALS §2 wording to cover all true register/memory dependencies.
   test (pseudo vs expanded → identical packets).
 - **Extension-coverage scope:** GOALS states no target for which ISA extensions
   are decoded vs. handled by the unknown-opcode heuristic.
+
+## Accounting conventions
+See `ACCOUNTING.md` for the measurement conventions behind every corpus number
+(pairing rate, pack rate, codepoint demand, op-set yield) and its own register of
+open questions.  Two that block frame sizing:
+- **Corpus ISA mismatch:** `testcase0.s` is RV32, `godot.s` is RV64, and they are
+  pooled by instruction count.  `lw`/`sw` counts are 70%/52% RV32-sourced, so the
+  `ld/lw/sd/sw` clusters in `post-inc-pair` / `mem-pair` / `pre-inc-pair` are
+  sized against a blend matching no single target.  (ACCOUNTING §1)
+- **Chain and dual want different op sets:** unary ops (`li`/`mv`/`addi4spn`) are
+  65.4% of independent-pair slot occupancy but only 2.9% of chain.  `chain-alu-pair`
+  and `rsd-alu-pair` share one `*rsd_alu` anchor, so it serves both badly.
+  (ACCOUNTING §5)
