@@ -28,51 +28,7 @@ from analysis.liveness import compute_global_liveness, compute_local_liveness
 from scheduler.pairing import stamp_slot_eligibility
 from scheduler.rules import RULES
 from analysis.encoding_verify import eligible, rule_ok
-
-
-# --- template immediate-expression parser ----------------------------------
-# One immediate per line: [sign] [coeff *] var [ +|- term ], coeff/term ∈ int|k.
-_IMM_RE = re.compile(
-    r"([+-])?\s*(?:(\d+|k)\s*\*\s*)?(imma|immb|imm)\b\s*(?:([+-])\s*(\d+|k))?")
-
-
-def _coeff(sign, tok, default_int):
-    """A coefficient token → (int_part, k_part): value = int_part + k_part*k."""
-    s = -1 if sign == "-" else 1
-    if tok is None:
-        return (s * default_int, 0)
-    if tok == "k":
-        return (0, s)
-    return (s * int(tok), 0)
-
-
-def parse_expr(text):
-    """First immediate in `text` as (var, m, b) with value = m*var + b, or None."""
-    mo = _IMM_RE.search(text)
-    if not mo:
-        return None
-    sign, coeff, var, op, term = mo.groups()
-    m = _coeff(sign, coeff, 1)                 # default coeff is 1 (bare var)
-    b = _coeff(op, term, 0) if op else (0, 0)  # default constant is 0
-    return var, m, b
-
-
-def ev(c, k):
-    return c[0] + c[1] * k
-
-
-def coeff_str(c):
-    i, kc = c
-    if kc == 0:
-        return str(i)
-    kpart = "k" if kc == 1 else ("-k" if kc == -1 else f"{kc}k")
-    return kpart if i == 0 else f"{kpart}{i:+d}"
-
-
-def expr_str(m, b, var):
-    s = f"{coeff_str(m)}*{var}" if m != (1, 0) else var
-    return s if b == (0, 0) else f"{s} {'+' if (b[0] or b[1]) >= 0 else '-'} " \
-                                f"{coeff_str((abs(b[0]), abs(b[1])))}"
+from analysis.imm_expr import parse_expr, ev, expr_str
 
 
 # --- per-frame relations ---------------------------------------------------

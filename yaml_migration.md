@@ -70,8 +70,13 @@ compiler reads the YAML (and the templates) and emits the matcher.
    (canonical/spelled forms, named immediate-class guards, the `tmp` dead-
    intermediate convention) as a starting point — nothing consumes it yet.
 
-3. **Signedness / zero / scale completion** — per-op signedness, the
-   arith⇒nonzero deduction above, and the `scale: w` width-scaling semantics.
+3. **Signedness / zero completion** — per-op signedness and the arith⇒nonzero
+   deduction above. (Scale is DONE: `encoding_verify` now reads the immediate
+   scale from the template coefficient — `analysis/imm_expr.parse_expr` — so all
+   per-frame `imm:` blocks are gone. Only the four un-inferable overrides had
+   remained, and their scale was already written in the template as `k*imma` /
+   `16*imm`; a memory op's own width cross-checks a simple numeric template
+   scale.)
 
 4. **The compiler** — reads the templates for the chain/dead/order structure and
    consumes the data above to emit the matcher.

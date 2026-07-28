@@ -255,8 +255,6 @@ doc:
         - {a: [addi],   b: [ld, sd]}
         - {a: [sh2add], b: [lw, sw]}
         - {a: [add],    b: [slt]}
-      imm:
-        imma: {scale: k}       # addi modifies rsda, a load/store base: width-scaled
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -277,8 +275,6 @@ doc:
         - {a: [ld, lw, lwu, sd, sw], b: [addi]}
         - {a: [ld, sd],             b: [sh3add]}
         - {a: [lw, lwu, sw],        b: [sh2add]}
-      imm:
-        imm: {scale: k}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -378,8 +374,6 @@ doc:
         - ["addi    sp, -16*imm", "store   rs1b, 16*imm-k(sp)"]
       ops:
         - {a: [addi], b: [sw, sd]}
-      imm:
-        imma: {scale: 16}
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
 
@@ -390,8 +384,6 @@ doc:
         - ["addi    sp, 16*imm", "jr      rs1b"]
       ops:
         - {a: [addi], b: [jalr, ret]}
-      imm:
-        imma: {scale: 16}
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
 

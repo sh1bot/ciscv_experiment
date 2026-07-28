@@ -29,6 +29,7 @@ from analysis.liveness import compute_global_liveness, compute_local_liveness
 from scheduler.pairing import stamp_slot_eligibility
 from scheduler.rules import RULES, NotPair
 from analysis.encoding_budget import subform, signed_bits, unsigned_bits, IMM_SIGNED
+from analysis.imm_expr import parse_expr
 
 
 def required_bits(insn, scale, pair_mem_width=None):
@@ -97,20 +98,20 @@ def cap_for(cap, is_sp):
     return cap["base"] or cap["sp"] or None
 
 
-def imm_semantics(frame):
-    """Declared immediate semantics per slot: {'a': {...}, 'b': {...}} with
-    keys scale (1|int|'k') and unbounded (bool). 'imm' (shared) applies to both
-    slots; 'imma'->a, 'immb'->b. Slots with no declared immediate get None."""
-    sem = {"a": None, "b": None}
-    for name, spec in (frame.get("imm") or {}).items():
-        entry = {"scale": spec.get("scale", 1), "unbounded": spec.get("unbounded", False)}
-        if name == "imm":
-            sem["a"] = sem["b"] = entry
-        elif name == "imma":
-            sem["a"] = entry
-        elif name == "immb":
-            sem["b"] = entry
-    return sem
+def slot_exprs(frame):
+    """The immediate expression per slot, from the first imm-bearing template
+    line: {'a': (var, m, b) or None, 'b': ...}. The template coefficient is the
+    scale (single source of truth); a constant term marks a compound, relation-
+    bearing offset. Branch displacements appear here but their corpus immediate
+    is an unresolved label (insn.imm None), so they are skipped downstream."""
+    out = {"a": None, "b": None}
+    for pair in frame.get("templates", []):
+        for side, idx in (("a", 0), ("b", 1)):
+            if out[side] is None:
+                e = parse_expr(pair[idx])
+                if e:
+                    out[side] = e
+    return out
 
 
 def is_sp_mem(insn):
@@ -146,7 +147,7 @@ def main():
             continue
         f = node["frame"]
         caps[f["name"]] = frame_capacities(f)
-        scales[f["name"]] = imm_semantics(f)
+        scales[f["name"]] = slot_exprs(f)
         for rn in [x.strip() for x in f["name"].split(",")]:
             rule2frame[rn] = f["name"]
 
@@ -163,6 +164,7 @@ def main():
     packed  = Counter()
     unframed = Counter()
     worst   = defaultdict(lambda: (0, 0, None))   # frame -> (need, cap, insn desc)
+    xcheck  = {}                                   # frame -> template/width mismatch
 
     for path in paths:
         _b, fns = parse_file(open(path).read())
@@ -187,20 +189,28 @@ def main():
                             break              # no declared layout to verify against
                         claimed[frame] += 1
                         cap = caps[frame]
-                        sem = scales[frame]
+                        exprs = scales[frame]
                         mem_w = next((x.access_width for x in (a, b)
                                       if x.has_mem_operand and x.access_width), None)
                         ok, saw = True, False
                         for insn, side in ((a, "a"), (b, "b")):
-                            s = sem.get(side)
-                            if s is not None and s["unbounded"]:
-                                continue           # declared optimistic (branch disp)
-                            # Declared semantics override; otherwise infer from the
-                            # instruction: a memory op scales by its width (k), any
-                            # other immediate is unscaled. (Branch/jump displacements
-                            # are unresolved labels -> insn.imm is None -> skipped.)
-                            scale = s["scale"] if s is not None else \
-                                ("k" if insn.has_mem_operand else 1)
+                            e = exprs.get(side)
+                            # Scale comes from the template coefficient (single
+                            # source of truth). A memory op is width-scaled (k);
+                            # its own width cross-checks a simple numeric template
+                            # scale. A non-memory op takes the template coefficient
+                            # (k for a base-mod, 16 for sp, 1 for a plain ALU imm).
+                            if insn.has_mem_operand:
+                                scale = "k"
+                                if (e and e[2] == (0, 0) and e[1][1] == 0
+                                        and insn.access_width
+                                        and abs(e[1][0]) not in (1, insn.access_width)):
+                                    xcheck[frame] = (f"{subform(insn)}: template scale "
+                                                     f"{abs(e[1][0])} != width {insn.access_width}")
+                            elif e is not None:
+                                scale = "k" if e[1][1] else abs(e[1][0])
+                            else:
+                                scale = 1
                             need = required_bits(insn, scale, mem_w)
                             if need is None or need == 0:
                                 continue           # no / zero immediate to pack
@@ -241,8 +251,12 @@ def main():
     print(f"\nOf {tot_c} matched pairs, {tot_chk} carried a checkable immediate; "
           f"{tot_pk} of those ({orate}) fit their frame's declared field.")
     print("Branch/jump displacements are unresolved in the corpus and are not checked.")
-    print("Fields are checked AS DRAWN in encoding.yaml; g/h immediate extension\n"
-          "counts only where a row actually widens the slice (e.g. imma[5:0]).")
+    print("Immediate scale is read from the template coefficient (k*imm etc.);\n"
+          "a memory op's own width cross-checks a simple numeric template scale.")
+    if xcheck:
+        print("\nTemplate scale vs instruction width mismatches (encoding bug?):")
+        for fr, msg in xcheck.items():
+            print(f"    {fr:34} {msg}")
     if unframed:
         print("\nRules with NO frame in encoding.yaml (unverifiable — a spec gap):")
         for rn, n in unframed.most_common():
