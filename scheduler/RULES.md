@@ -1,13 +1,25 @@
 # Pairing Rules Reference
 
-This document describes every pairing rule defined in
-[`scheduler/rules.py`](rules.py): what each rule is for, which instructions it
-accepts into the A-slot and B-slot, and — just as importantly — what it
-*rejects* and why.
+This document describes the **scheduler-side enforcement** of the packet frames
+defined in [`encoding.yaml`](../encoding.yaml): what each frame is for, which
+instructions the scheduler accepts into the A-slot and B-slot, and — just as
+importantly — what it *rejects* and why.
 
-It is written to be read alongside the code. Each rule heading names the
-`PairingRule` entry in the `RULES` list and the `check()` function that
-implements it.
+`encoding.yaml` is the source of truth for the encoding itself: op-sets,
+immediate widths, field layout, and the codepoint budget. This document's job is
+the part the yaml deliberately does not model — the **scheduler semantics**:
+liveness and deadness of chain intermediates, producer/consumer chaining,
+commutative operand fitting, order-sensitivity, and slot discipline. Where the
+two disagree about a *number*, the yaml wins and this document is stale.
+
+> **Numeric drift is known and tracked.** Several immediate ranges and op-sets
+> below still restate limits that have since changed in `encoding.yaml` — and in
+> a couple of places in `rules.py` too. See `TODO.md` §A4 for the catalogue and
+> §A1 decision 6 for what should happen to this document.
+
+Each rule heading names the `PairingRule` entry in the `RULES` list and the
+`check()` function that implements it; these are implementation
+cross-references, not the definition of the encoding.
 
 ---
 
@@ -22,11 +34,12 @@ shrinking one instruction into 16 bits, it fuses an ordered pair of
 instructions into one 32-bit packet.
 
 A pairing rule answers one question: *can these two specific instructions share
-one 32-bit packet?* Each rule corresponds to a candidate packet encoding with a
-fixed budget of bits for opcodes, register fields, and immediates. The
-constraints in each rule are exactly the things that budget cannot afford —
-registers that don't fit a narrowed register field, immediates too large for the
-allotted bits, operand relationships the encoding can't express.
+one 32-bit packet?* Each rule enforces a **frame** — a candidate packet encoding
+drawn in `encoding.yaml` with a fixed budget of bits for opcodes, register
+fields, and immediates. The constraints in each rule are exactly the things that
+budget cannot afford — registers that don't fit a narrowed register field,
+immediates too large for the allotted bits, operand relationships the encoding
+can't express. The frame declares what the budget *is*; the rule enforces it.
 
 ### 1.2 A quick RISC-V refresher (the parts these rules lean on)
 

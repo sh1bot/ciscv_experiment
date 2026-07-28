@@ -6,9 +6,16 @@ This tool reads RISC-V assembly source and produces annotated assembly output in
 which instructions have been greedily paired into 32-bit packets.  A packet
 contains either one solo instruction (occupying a full 32-bit word) or two
 instructions sharing a single 32-bit word.  All instruction boundaries remain
-32-bit aligned.  The pairing rules are the primary experimental artefact of the
-project; they are deliberately isolated so that iterating on them requires only
-local edits to one file.
+32-bit aligned.  The prospective packet encoding is the primary experimental
+artefact of the project.  It is defined declaratively in **`encoding.yaml`**,
+the single source of truth and single point of iteration: frames (op clusters +
+immediate templates + 32-bit row layout), immediate widths, and the codepoint
+budget all live there (render with `python3 util/encoding_render.py`).
+`scheduler/rules.py` is the runtime *enforcement* of those frames — derived from
+and conformance-checked against the yaml — not the place where encoding policy
+is authored.  See `yaml_migration.md` for the governing migration plan; this
+document is being reconciled to it (some sections below still describe the older
+rules-as-source model).
 
 **Execution model.**  Within a packet, the A-slot instruction executes first and
 completes before the B-slot instruction begins.  B may freely read registers
@@ -29,7 +36,16 @@ pairing decisions — it is informational only.
 
 ```
 rv_scheduler/
+├── encoding.yaml             # SOURCE OF TRUTH: frames, op clusters, templates,
+│                             #   row layout, immediate widths, codepoint budget
+├── encoding.md               # generated from encoding.yaml (--check must be IDENTICAL)
+├── encoding_budget.md        # generated corpus budget report
+├── yaml_migration.md         # governing plan for the yaml-as-truth migration
 ├── __main__.py
+├── util/
+│   ├── encoding_render.py    # yaml -> encoding.md; --lint, --opcodes, --equiv, --check
+│   ├── encoding_assign.py    # budget-driven prefix-code block allocation
+│   └── biclique_tiling.py    # op-set rectangle selection from co-occurrence tables
 ├── isa/
 │   ├── registers.py          # register indices, ABI names, calling-convention sets
 │   ├── abi.py                # call_liveness_effect() — ABI-implied use/def sets
@@ -50,7 +66,13 @@ rv_scheduler/
 │   ├── cfg.py                # basic-block + function identification, CFG edges
 │   ├── depgraph.py           # per-block RAW/WAR/WAW dependency graph
 │   ├── liveness.py           # iterative liveness dataflow, per-instruction sets
-│   └── annotator.py          # formats annotated assembly output
+│   ├── annotator.py          # formats annotated assembly output
+│   ├── encoding_verify.py    # corpus immediates vs the yaml's declared fields
+│   ├── encoding_budget.py    # per-frame codepoint demand from the corpus
+│   ├── frame_score.py        # frame cost-vs-hit-rate score, log2(hit/cost)
+│   ├── imm_expr.py           # template immediate-expression parser (var, m, b)
+│   ├── imm_traits.py         # per-op immediate signedness / zero-encodability
+│   └── imm_relations.py      # inter-immediate relations implied by templates
 ├── scheduler/
 │   ├── pairing.py            # can_pair(); greedy_pair(); stamp_slot_eligibility()
 │   ├── rules.py              # PairingRule dataclass; RULES; A/B_SLOT_DISQUALIFIERS
@@ -890,8 +912,14 @@ non-`None` string constitutes a rejection of that specific encoding.
 
 ### Example rule — RSD ALU pair
 
-> **The full, current rule set is documented in
-> [`scheduler/RULES.md`](scheduler/RULES.md), which is authoritative.**  As of
+> **The frame set is defined in [`encoding.yaml`](encoding.yaml), which is
+> authoritative** for op-sets, immediate widths, field layout, and the codepoint
+> budget (read it rendered as [`encoding.md`](encoding.md)).
+> [`scheduler/RULES.md`](scheduler/RULES.md) is its companion, describing the
+> scheduler-side semantics each rule enforces — deadness, chaining, operand
+> forms, order-sensitivity — and should be read for *why* a pair is rejected
+> rather than for numeric limits, which it still restates in places and where it
+> has drifted (see `TODO.md`).  As of
 > writing `scheduler/rules.py` defines two dozen rules (`rsd-alu-pair`,
 > `chain-alu-pair`, the load/store-chain rules, the `*-branch` rules, `mem-pair`,
 > `arith-mem-pair`, the `dual-*-pair` family, `pre-inc-pair`, `prologue-pair`,
@@ -945,9 +973,19 @@ rules, not by expanding this one.
 
 ### Adding / removing rules
 
-All of `RULES`, `A_SLOT_DISQUALIFIERS`, and `B_SLOT_DISQUALIFIERS` live in
-`rules.py`.  This is the only file that needs to change when iterating on
-pairing policy.
+Pairing *policy* is iterated in **`encoding.yaml`**: adding or reshaping a frame
+— its op clusters, immediate widths, templates, row layout, and codepoint budget
+— happens there, and the encoding tooling (`--lint`, `--opcodes`,
+`encoding_verify`, `encoding_assign`) checks it before any code moves.
+`scheduler/rules.py` then changes to *enforce* the new frame: `RULES` gains or
+adjusts the corresponding `PairingRule`, whose numeric limits and op-sets should
+match the yaml rather than being chosen independently.
+
+`A_SLOT_DISQUALIFIERS` and `B_SLOT_DISQUALIFIERS` are the exception and remain
+legitimately code-side: they encode *structural* slot eligibility (a branch can
+never occupy the A-slot, unknown opcodes never pair), which is a property of the
+packet execution model rather than of any one frame.  The yaml has no
+disqualifier concept and is not intended to grow one.
 
 ---
 

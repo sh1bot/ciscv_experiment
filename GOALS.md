@@ -19,14 +19,19 @@ patterns actually appear in the output of real compilers on real codebases.
 
 This tool lets a rule author:
 
-1. Express a candidate pairing rule as a small, self-contained function.
+1. Express a candidate pairing rule declaratively as a **frame** in
+   `encoding.yaml` — its op clusters, immediate templates, and 32-bit row
+   layout — which is the single source of truth for the prospective packet ISA
+   and the single point of iteration.  The scheduler enforces those frames at
+   runtime; the yaml keeps the encoding facts (widths, op-sets, codepoint
+   budget).
 2. Run it against a large real-world binary (e.g. a game engine) to measure
    the pairing rate it achieves.
 3. Read the annotated output to understand *why* instructions went solo —
    specifically which constraints were the binding ones — and use that to
-   refine the rule or propose a new one.
-4. Compare pairing rates across rule sets to evaluate tradeoffs between
-   encoding complexity and compression gain.
+   refine the frame or propose a new one.
+4. Compare pairing rates across `encoding.yaml` revisions to evaluate tradeoffs
+   between encoding complexity and compression gain.
 
 The annotation format is therefore not just cosmetic output — it is the primary
 instrument by which rule authors diagnose and improve pairing coverage.  Solo
@@ -52,9 +57,9 @@ would capture it.
 
 The output also includes summary statistics: a per-function block reporting
 instruction count, pair count, pair rate, and RVC-eligibility rate; and a
-file-level block at the end that aggregates these totals and adds a per-rule
+file-level block at the end that aggregates these totals and adds a per-frame
 hit count breakdown.  These statistics are the primary quantitative signal for
-comparing rule sets.
+comparing `encoding.yaml` revisions.
 
 ---
 
@@ -64,11 +69,23 @@ comparing rule sets.
 sequentially: the A-slot instruction completes before the B-slot instruction
 begins.  The B-slot may freely read registers the A-slot wrote; a pair behaves
 exactly like the same two instructions unpaired, differing only in code density.
-Consequently, register data-dependencies *within* a pair are never a pairing
-constraint — they are already honoured by sequential execution and by the
-dependency graph, which orders B after A.  Pairing rules therefore express only
-hardware *structural* constraints (which instruction-type and operand-form
-combinations a packet can physically encode), not register compatibility.
+
+For an **independent pair** — two instructions the frame encodes with full,
+separate register fields — register data-dependencies are never a pairing
+constraint: they are already honoured by sequential execution and by the
+dependency graph, which orders B after A.  Such frames express only hardware
+*structural* constraints (which instruction-type and operand-form combinations a
+packet can physically encode).
+
+Many frames, however, deliberately trade register-field width for opcode space,
+and their *operand form* is then part of the encoding.  A **chain frame** shares
+one register field across the pair (A's result is B's input) and requires the
+intermediate value to be **dead** so no field need name it — a register-liveness
+condition that is a real pairing constraint.  Other frames constrain operand
+form similarly: a shared read-modify-write destination (`rsd`), dual-arith
+shared sources, or `mem-pair`'s same-base adjacent offsets.  These operand-form
+and liveness constraints are exactly what the yaml frames declare; the "never a
+constraint" statement above holds only for independent pairs.
 
 To maximise paired packets the scheduler may reorder instructions within a basic
 block, subject to one hard constraint: **the reordered sequence must preserve
@@ -138,4 +155,39 @@ The RVC-eligibility rate reported alongside the pairing rate serves as a
 ceiling reference: it shows the fraction of instructions that *could* be
 compressed under RVC, independent of pairing constraints.  A large gap between
 the pairing rate and the RVC rate indicates headroom that better rules could
-capture.  A small gap indicates the encoding is near saturation.
+capture.  A small gap indicates the encoding is near saturation.  Note the
+packet format claims the RVC (2-bit `10` marker) encoding quadrant, so packets
+and literal RVC compete for the same space rather than composing — the RVC rate
+is a comparison baseline, not additive headroom.
+
+---
+
+## 7. Encoding budget: the design gate
+
+Pairing rate alone does not tell you whether a frame set is *realisable*.  Every
+frame must fit within a shared, finite encoding: a 1024-codepoint opcode
+namespace and a fixed 32-bit packet skeleton whose row layout gives each frame a
+bounded immediate field.  A frame set is acceptable only if:
+
+- its total **codepoint demand fits the namespace** (each op costs `2^ext`
+  codepoints, where `ext` is the immediate bits it needs above the frame's base
+  range — verified by `util/encoding_render.py --opcodes` and the per-frame
+  `budget`); and
+- its **p95 immediate widths fit the declared fields** (verified by
+  `analysis/encoding_verify.py`).
+
+These are the actual design gates, alongside pairing rate.  A frame that pairs
+well but overflows the namespace, or whose immediates routinely exceed the drawn
+field, is not yet a viable encoding.
+
+Two consequences worth stating explicitly:
+
+- **Acceptance vs encodability.**  The headline pairing rate measures how many
+  pairs the scheduler *accepts*; the verifier separately measures how many of
+  those carry an immediate that actually *fits* the frame as drawn.  The two
+  numbers differ (the second is lower).  Which one is *the* success metric is an
+  open decision (see `TODO.md`).
+- **Cost proportionate to hit rate.**  A frame's codepoint cost should be
+  justified by the share of real pairs it captures.  `analysis/frame_score.py`
+  scores this as `log2(hit_share / cost_share)`; a frame that consumes far more
+  of the namespace than its hit share earns is a candidate for shrinking.

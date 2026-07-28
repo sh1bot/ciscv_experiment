@@ -1,9 +1,15 @@
 # Validation Plan: Testing the Plan Against the Implementation
 
-This document captures techniques for using AI agents to keep PLAN.md and the
-codebase in sync.  The goal is to catch drift early: cases where the code does
-something the plan doesn't describe, or the plan promises something the code
-doesn't implement.
+This document captures techniques for using AI agents to keep the design
+documents, `encoding.yaml`, and the codebase in sync.  The goal is to catch
+drift early: cases where the code does something the plan doesn't describe, or
+the plan promises something the code doesn't implement.
+
+**`encoding.yaml` is the source of truth for the packet encoding**, and that
+changes how one class of finding is triaged.  Where a discrepancy concerns the
+encoding — op-sets, immediate widths, field layout, codepoint budget — it is not
+symmetric: the yaml is right by construction and the other side changes.  See
+the *conformance gap* category below.
 
 ---
 
@@ -25,10 +31,15 @@ code does that the plan doesn't mention.
 - Run multiple models (Opus, Sonnet, Haiku) in parallel on the same prompt.
   Different models catch different things; the union of findings is richer than
   any single pass.
-- Findings fall into two categories that must be triaged separately:
+- Findings fall into three categories that must be triaged separately:
   - *Code bug*: the plan is right and the code is wrong — fix the code.
   - *Plan drift*: the code is right (deliberate design) and the plan is stale —
     update the plan.
+  - *Conformance gap*: `encoding.yaml` specifies X and the code (or PLAN, or
+    RULES.md) does Y.  The direction is predetermined — the code/prose changes.
+    Amending the yaml to match the code instead is a **design change**, not a
+    bug fix, and should be argued on encoding grounds (codepoint budget,
+    immediate fit, corpus yield) rather than slipped in as reconciliation.
 - Avoid acting on findings until triage is complete; some apparent bugs are
   intentional design choices that just weren't documented.
 
@@ -38,6 +49,10 @@ code does that the plan doesn't mention.
 Spawn an agent with access only to PLAN.md.  Ask it to identify internal
 inconsistencies, ambiguities, missing definitions, and sections that are
 underspecified to the point where two reasonable implementations could differ.
+
+This technique should cover **`encoding.yaml` as well as PLAN.md**.  Internal
+contradictions and underspecification in the yaml are now spec bugs at the
+source of truth, and are more damaging than the same defect in prose.
 
 **Prompt sketch:**
 > Read PLAN.md.  Do not look at any source files.  Report:
@@ -98,21 +113,25 @@ independently or combined.  Estimated yield is noted for each.
 ---
 
 
-## Technique 4 — Three-document cross-check (GOALS × PLAN × code)
+## Technique 4 — Four-document cross-check (GOALS × PLAN × encoding.yaml × code)
 
-When all three artefacts exist, run four agents in parallel, each with a
-different blind spot.  The goal is to catch discrepancies that only appear when
-comparing two of the three, and to ensure that each layer is internally
-consistent with the other two.
+Run agents in parallel, each with a different blind spot.  The goal is to catch
+discrepancies that only appear when comparing two of the four, and to ensure
+that each layer is internally consistent with the others.
+
+`encoding.yaml` is a required axis: an agent blind to it cannot adjudicate any
+pairing-rule discrepancy, because the numbers it would be checking against now
+live there.
 
 **Agent layout:**
 
 | Agent | Reads | Blind to | Finds |
 |-------|-------|----------|-------|
-| A | GOALS + PLAN + code | nothing | all three-way discrepancies |
-| B | PLAN + code | GOALS | plan/code gaps regardless of intent |
-| C | GOALS + code | PLAN | goal/code gaps; implementation decisions with no goal backing |
-| D | GOALS + PLAN | code | plan/goals inconsistency; decisions in PLAN not justified by any goal |
+| A | GOALS + PLAN + yaml + code | nothing | all four-way discrepancies |
+| B | PLAN + code | GOALS, yaml | plan/code gaps regardless of intent |
+| C | GOALS + code | PLAN, yaml | goal/code gaps; implementation decisions with no goal backing |
+| D | GOALS + PLAN | yaml, code | plan/goals inconsistency; decisions in PLAN not justified by any goal |
+| E | yaml + code | GOALS, PLAN | **conformance gaps** — code limits that disagree with the drawn frames |
 
 **Prompt sketch for each agent:**
 
@@ -126,6 +145,8 @@ consistent with the other two.
 
 - *Code bug* — PLAN or GOALS says X, code does Y, code should change.
 - *Plan drift* — code is right (deliberate design), plan is stale — update PLAN.
+- *Conformance gap* — `encoding.yaml` says X, code or prose says Y; the yaml
+  wins (see Technique 1).
 - *GOALS gap* — design decision present in PLAN with no corresponding goal —
   either add the goal or question the decision.
 - *Acknowledged* — already noted in PLAN as a known limitation or future work.
@@ -138,6 +159,42 @@ consistent with the other two.
   decisions baked into the code that were never written down anywhere.
 - Collect all findings before acting; some apparent bugs are intentional
   simplifications that just weren't documented.
+
+---
+
+## Technique 5 — Mechanical gates on `encoding.yaml`
+
+Agent review is for judgement; these are the checks that should run every time
+the yaml changes, without a model in the loop.
+
+**Regeneration gates (available today):**
+
+- `python3 util/encoding_render.py --check` must report IDENTICAL.  A yaml edit
+  that does not regenerate `encoding.md` leaves the readable artefact lying.
+- `python3 util/encoding_render.py --lint` must report 0 correspondence problems.
+- `python3 util/encoding_render.py --opcodes` must fit the 1024-codepoint
+  namespace, and every frame must land inside its declared `budget`.
+- `python3 util/encoding_assign.py` must exit 0 — a non-zero exit means the
+  planned budgets do not fit as prefix-code blocks even if the raw codepoint
+  total does.
+- `python3 -m analysis.encoding_verify tests/godot.s tests/testcase0.s` — watch
+  the pack rate for regressions and the "rules with NO frame" list for gaps.
+
+**Gates that do not exist yet** (see `TODO.md`):
+
+- *Schema validation.*  Nothing enforces that grid `bits` sum to 32, that rows
+  span exactly 7 cells net of spans, that every row field name resolves to a
+  grid column or declared operand, that op clusters agree with the templates, or
+  that frame names are unique.
+- *Codepoint budget as a standing gate.*  Adding a frame or widening an op-set
+  should re-run the budget automatically, not on recollection.
+
+**A passing lint is not conformance evidence.**  `--lint` checks only that
+asm-operand names correspond to row-field names.  It does not validate op
+clusters against templates, does not check the reserved-register rule, and has a
+prose escape hatch: it suppresses a missing-operand error when a frame's `notes`
+mention the immediate by name.  Green here means "the drawing is
+self-consistent", not "the design is right".
 
 ---
 

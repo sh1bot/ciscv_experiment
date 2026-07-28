@@ -2,7 +2,16 @@
 
 RISC-V instruction-pairing workbench: reads RISC-V asm, packs instruction pairs
 into 32-bit packets, emits annotated asm + stats. Design in `GOALS.md` / `PLAN.md`;
-pairing rules in `scheduler/RULES.md`; open items in `TODO.md`.
+open items in `TODO.md`.
+
+**`encoding.yaml` is the source of truth for the prospective packet ISA** — the
+frames (op clusters + templates + row layout), immediate widths, and codepoint
+budget live there, and it is the single point of iteration (render with
+`python3 util/encoding_render.py`; see `yaml_migration.md` for the migration).
+`scheduler/rules.py` is the runtime enforcement of those frames and
+`scheduler/RULES.md` documents its scheduler-side semantics (deadness, chaining,
+order-sensitivity); numeric limits are yaml-owned. This migration is in progress,
+so some docs still describe the older rules-as-source model — see `TODO.md`.
 
 ## Measurement caveats — remind the user about these when relevant
 
