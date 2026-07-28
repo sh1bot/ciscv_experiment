@@ -217,12 +217,13 @@ def lint(spec):
 
 
 # --- opcode-field capacity ------------------------------------------------
-# The opcode namespace is opcode5(5) + funct3(3) + g(1) + h(1) = 10 bits =
-# 1024 entries, shared by all frames as a prefix code. g and h double as the
-# immediate-extension bits, so an op that needs a wide immediate takes MULTIPLE
-# entries (one per immediate sub-range: 2 with g, 4 with g+h) rather than one.
-# The (opA, opB) count below is the BASE demand (one entry per op-combo,
-# assuming a base-width immediate); wide-immediate sub-range entries add to it.
+# The opcode namespace is a fixed pool of 1024 codepoints shared by all frames
+# as a prefix code. An op whose immediate range is wider than its frame's base
+# range is distinguished within this namespace rather than by a dedicated field
+# bit, so each extra bit of range doubles the codepoints that op occupies (an
+# extended-range op costs 2, one bit wider again costs 4, ...). The (opA, opB)
+# count below is the BASE demand (one codepoint per combo at the base range);
+# extended-range ops add to it.
 OPCODE_NAMESPACE = 1024
 
 
@@ -249,10 +250,12 @@ def opcode_demand(ops):
 
 
 def imm_field_bits(frame, grid, slot):
-    """(base, full) bit widths of a slot's immediate field, read from the
-    frame's base (non-SP) rows: `full` is the whole slice, `base` is the part
-    outside the g/h columns. slot 'a'→imma, 'b'→immb; a shared `imm` counts for
-    either. The extra g/h bits (full-base) are what a wide immediate borrows."""
+    """(base, full) immediate-range widths for a slot, read from the frame's
+    base (non-SP) rows: `full` is the whole slice the layout holds, `base` is
+    the part in the dedicated field columns (the two low opcode-word columns
+    hold the extension). slot 'a'→imma, 'b'→immb; a shared `imm` counts for
+    either. Range above the base (full-base) is what an op pays for in extra
+    codepoints rather than field bits."""
     cols, bits = grid["columns"], grid["bits"]
     gi, hi = cols.index("g"), cols.index("h")
     names = {"a": {"imma", "imm"}, "b": {"immb", "imm"}}[slot]
@@ -275,8 +278,8 @@ def imm_field_bits(frame, grid, slot):
 
 
 def _slot_weight(op_list, base):
-    """Codepoints a slot's ops occupy: Σ 2^ext, where ext = the g/h bits an op's
-    declared width needs above the base field (0 for a bare/base-width op, so
+    """Codepoints a slot's ops occupy: Σ 2^ext, where ext = the bits of range an
+    op's declared width needs above the base (0 for a bare/base-range op, so
     register-form ops never inflate the count)."""
     w = 0
     for e in op_list:
@@ -287,8 +290,8 @@ def _slot_weight(op_list, base):
 
 def opcode_codepoints(frame, grid):
     """Real codepoint demand: Σ over clusters of weight(a)×weight(b), where each
-    slot weight sums 2^ext per op. Factors per slot because g extends the A
-    immediate and h the B immediate independently."""
+    slot weight sums 2^ext per op. Factors per slot because the A and B
+    immediates extend their range independently."""
     ops = frame.get("ops")
     if not ops:
         return None
@@ -326,15 +329,16 @@ def opcodes(spec):
     spare = OPCODE_NAMESPACE - cp_total
     print(f"\nopcode namespace = opcode5(5)+funct3(3)+g(1)+h(1) = {OPCODE_NAMESPACE} entries.")
     print(f"'base' = Σ a×b combos; 'codepoints' = Σ weight(a)×weight(b) with each\n"
-          f"op weighted 2^ext (ext = g/h bits its immediate borrows above the base\n"
-          f"field). A wide-immediate op costs 2 (via g) or 4 (via g+h); bare and\n"
-          f"register-form ops cost 1, so they never inflate the count.")
+          f"op weighted 2^ext (ext = immediate bits above the frame's base range).\n"
+          f"Each extra bit of range doubles that op's codepoints (extended-range\n"
+          f"op = 2, two bits wider = 4, ...); bare and register-form ops cost 1,\n"
+          f"so they never inflate the count.")
     if cp_total <= OPCODE_NAMESPACE:
         print(f"Codepoint demand {cp_total} FITS with {spare} spare.")
     else:
         print(f"Codepoint demand {cp_total} OVER by {cp_total-OPCODE_NAMESPACE}.")
     if wide:
-        print(f"Frames drawing on g/h for a wide immediate: {', '.join(wide)}")
+        print(f"Frames with extended-range immediates: {', '.join(wide)}")
     print("This is DECLARED demand (every allowed op-combo); real corpus usage is\n"
           "far sparser (see analysis/encoding_verify + encoding_budget).")
     if missing:

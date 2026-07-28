@@ -415,10 +415,12 @@ def main():
     print(f"Selector word = opcode5(5):funct3(3):g:h = {WBITS} bits, "
           f"{1<<WBITS} codepoints, read MSB->LSB.")
     print("'0'/'1' = frame identifier (constant), 'o' = op-select, "
-          "'g'/'h' = free wide-immediate bit (A/B slot), '.' = free/unused.\n")
+          "'g'/'h' = trailing low bit free to hold an extended A/B immediate, "
+          "'.' = free/unused.\n")
     print(f"Namespace used: {used}/{1<<WBITS} codepoints "
           f"({100*used/(1<<WBITS):.0f}%).  "
-          f"{sum(f['promoted'] for f in frames)} frame(s) promoted to keep g/h free.\n")
+          f"{sum(f['promoted'] for f in frames)} frame(s) left room for an "
+          f"extended immediate.\n")
     print("Each frame prints its form, then per template the encoding twice — the\n"
           "A instruction then the B — with the fields that slot does NOT use erased.\n"
           "A field kept in both copies is shared by both instructions.\n")
@@ -433,9 +435,9 @@ def main():
         opc_s = f"opcode[6:2]≈{opc:05b}" if opc is not None else "opcode[6:2]=mixed"
         tags = []
         if f["promoted"]:
-            tags.append("g/h FREE for immediate")
+            tags.append("leaves codepoints for an extended immediate")
         if clash:
-            tags.append("⚠ wants g/h but word consumes them")
+            tags.append("⚠ needs extended-immediate room but its opcode word is too long")
             conflicts.append(f["name"])
         if f.get("conflict_hard"):
             tags.append("⚠ op-list too large to ever free g/h")
@@ -454,17 +456,17 @@ def main():
         print()
 
     print("─" * 72)
-    print(f"g/h kept free for immediates ({len(freed)}): "
+    print(f"leaves codepoints for an extended immediate ({len(freed)}): "
           f"{', '.join(freed) if freed else 'none'}")
-    print(f"\ng/h CLASHES ({len(conflicts)}) — frame wants g/h for a wide "
-          f"immediate but its opcode word occupies them:")
+    print(f"\nextended-immediate CLASHES ({len(conflicts)}) — frame needs codepoints\n"
+          f"below its opcode word for a wider immediate, but the word is too long:")
     for c in conflicts:
         print(f"    {c}")
     print("\nThe two 16×16 ALU frames (chain-alu-pair, rsd-alu-pair) alone claim\n"
-          "512 of the 1024 codepoints, which is what pushes the wide-immediate\n"
-          "frames down to depth 10. Shrinking those op-lists (they are the\n"
-          "over-committers flagged by --opcodes) frees the budget to promote the\n"
-          "clashing frames above g/h.")
+          "512 of the 1024 codepoints, which is what pushes the extended-immediate\n"
+          "frames to the full opcode-word length. Shrinking those op-lists (the\n"
+          "over-committers flagged by --opcodes) frees the budget to shorten the\n"
+          "clashing frames' words and reopen room for their immediates.")
 
 
 if __name__ == "__main__":

@@ -29,12 +29,16 @@ opsets:
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
   mem:      &mem      [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
 
-  # Width-annotated ops: a bare mnemonic takes the frame's base immediate field;
-  # these carry an explicit absolute width, so their extra bit(s) spill into g/h
-  # (each such bit doubles that op's codepoint footprint). On RV64 the shift
-  # amount is 6-bit.
-  slli_6u:  &slli_6u  {op: slli, imm: {bits: 6, signed: false}}
-  srli_6u:  &srli_6u  {op: srli, imm: {bits: 6, signed: false}}
+  # Width-annotated ops: a bare mnemonic takes the frame's base immediate range;
+  # these request an explicit wider range, and each bit of range above the base
+  # doubles that op's opcode-codepoint footprint (an extended-range op costs 2
+  # codepoints, one bit wider again costs 4, ...). On RV64 the shift amount is
+  # 6-bit; these addi-family entries carry a 6-bit signed immediate.
+  slli_6u:  &slli_6u  {op: slli,  imm: {bits: 6, signed: false}}
+  srli_6u:  &srli_6u  {op: srli,  imm: {bits: 6, signed: false}}
+  addi_6s:  &addi_6s  {op: addi,  imm: {bits: 6, signed: true}}
+  addiw_6s: &addiw_6s {op: addiw, imm: {bits: 6, signed: true}}
+  li_6s:    &li_6s    {op: li,    imm: {bits: 6, signed: true}}
 
 doc:
   - md: |
@@ -162,7 +166,7 @@ doc:
       templates:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
       ops:
-        - {a: [li], b: *branches}
+        - {a: [*li_6s], b: *branches}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 4, unbounded: true}
@@ -212,7 +216,7 @@ doc:
       templates:
         - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
       ops:
-        - {a: [addi, addiw], b: *branches}
+        - {a: [*addi_6s, *addiw_6s], b: *branches}
       imm:
         imma: {signed: true, scale: 1}
         immb: {signed: true, scale: 4, unbounded: true}
