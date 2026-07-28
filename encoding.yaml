@@ -459,13 +459,22 @@ doc:
         - ["li      rda, imma", "li      rdb, immb"]
       # Order-insensitive: the two ops are independent, so (x, y) and (y, x)
       # compute the same thing and only ONE needs a codepoint. Written longhand
-      # as a triangle in the canonical order li < mv < addi4spn -- the scheduler
+      # as a triangle in the canonical order mv < li < addi4spn -- the scheduler
       # normalises a pair into that order before encoding. A full cross product
       # here would be the bug it replaced: 3x3 = 9 codepoints to express 6
       # distinct packets. See the `ops` note in the header.
+      #
+      # The canonical order is NOT arbitrary: it must put register-form ops
+      # first. The only row that gives A an immediate (imma[4:0]) also gives B
+      # one, and there is no row pairing imma for A with rs2b for B -- so if A
+      # takes an immediate, B must too. Ordering mv (register) ahead of li and
+      # addi4spn (immediate) makes every cluster below land on a real row:
+      # (mv,mv) row 0, (mv,li) and (mv,addi4spn) row 1, the rest row 2. The
+      # earlier li-first order had it exactly backwards, admitting (li, mv),
+      # which no row can encode, and excluding (mv, li), which row 1 encodes.
       ops:
-        - {a: [li],            b: [li, mv, *addi4spn_u6]}
-        - {a: [mv],            b: [mv, *addi4spn_u6]}
+        - {a: [mv],            b: [mv, li, *addi4spn_u6]}
+        - {a: [li],            b: [li, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
