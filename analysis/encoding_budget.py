@@ -36,8 +36,13 @@ def subform(insn):
     if m == "addi":
         if insn.rs1 == 0:      return "li"
         if insn.imm == 0:      return "mv"
-        if insn.rs1 == 2:      return "addi4spn"
+        # rd == rs1 MUST be tested before the sp check: `addi sp, sp, -32` is a
+        # frame adjust (a read-modify-write of sp, belonging to prologue-pair /
+        # epilogue-pair), not an addi4spn.  Testing rs1 == 2 first swept every
+        # frame adjust into addi4spn -- 24% of that population, and the source
+        # of its apparent negative immediates and its 800-byte "offset cluster".
         if insn.rd == insn.rs1: return "addi_rsd"
+        if insn.rs1 == 2:      return "addi4spn"
         return "addi_other"
     return m
 

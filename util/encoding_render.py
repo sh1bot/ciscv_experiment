@@ -244,6 +244,39 @@ def op_bits(entry):
     return None
 
 
+def op_imm(entry):
+    """The full declared immediate contract of an op entry, or {} for a bare op:
+    {bits, signed, scale}. `scale` is the multiplier the field carries (4 for
+    addi4spn, whose low two bits are structurally zero), and exists for ops whose
+    mnemonic never appears in a template line — a template coefficient is the
+    normal way to declare scale, but an op that is only named in `ops` has no
+    template to carry one. Where BOTH are present they must agree; see
+    analysis/encoding_verify.py, which cross-checks them."""
+    if isinstance(entry, dict):
+        return dict(entry.get("imm") or {})
+    return {}
+
+
+def op_contracts(frame):
+    """{mnemonic: {bits, signed, scale}} for every op in a frame that declares
+    an immediate contract. Ops appear per slot but a mnemonic's contract is a
+    property of the opcode, so a disagreement across slots is an error."""
+    out = {}
+    for cluster in frame.get("ops") or []:
+        for slot in ("a", "b"):
+            for entry in cluster.get(slot, []):
+                c = op_imm(entry)
+                if not c:
+                    continue
+                name = op_name(entry)
+                if name in out and out[name] != c:
+                    raise ValueError(
+                        f"{frame.get('name')}: conflicting immediate contracts "
+                        f"for {name}: {out[name]} vs {c}")
+                out[name] = c
+    return out
+
+
 def opcode_demand(ops):
     """BASE (opA, opB) combos a frame's ops allow: Σ over clusters of a×b.
     Ignores immediate width — see opcode_codepoints for the ext-aware count."""

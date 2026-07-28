@@ -31,9 +31,15 @@ from scheduler.rules import RULES, NotPair
 from analysis.encoding_budget import subform
 from analysis.imm_expr import parse_expr
 from analysis import imm_traits
+from util.encoding_render import op_contracts
+
+# A width no declared field can hold: marks a value the frame cannot encode at
+# all (e.g. a negative into an unsigned field), so it is counted as an overflow
+# rather than silently dropped.
+UNENCODABLE = 99
 
 
-def required_bits(insn, scale, pair_mem_width=None):
+def required_bits(insn, scale, pair_mem_width=None, contract=None):
     """Significant bits of insn's immediate once scaled the way this frame's
     field scales it (scale = 1 | int | 'k'). For 'k' on a non-memory insn (e.g.
     a post-inc addi stride k*imm), the paired memory op's width is used.
@@ -46,12 +52,23 @@ def required_bits(insn, scale, pair_mem_width=None):
         return None
     if v == 0:
         return 0
+    sf = subform(insn)
+    # An op-level contract (encoding.yaml `ops`) overrides the template-derived
+    # scale and signedness. It exists for ops that never appear in a template
+    # line -- addi4spn is named only in `ops`, so it has no template coefficient
+    # to carry its structural x4, and no way to say its field is unsigned.
+    signed = None
+    if contract:
+        if contract.get("scale") is not None:
+            scale = contract["scale"]
+        signed = contract.get("signed")
     # scale is the multiplier: 1, an int (e.g. 16), or 'k' (the data width).
     div = (insn.access_width or pair_mem_width or 1) if scale == "k" else int(scale)
-    sf = subform(insn)
+    if signed is False and v < 0:
+        return UNENCODABLE               # negative value, unsigned field
     if v % div != 0:                             # unaligned -> unencodable
         return imm_traits.required_bits(v, sf)
-    return imm_traits.required_bits(v // div, sf)
+    return imm_traits.required_bits(v // div, sf, signed=signed)
 
 _TOKEN = re.compile(r"^(imm[ab]?)\[(.+)\]$")
 
@@ -143,13 +160,14 @@ def main():
 
     spec = yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
     # map each rule name -> frame display name; and per-frame caps + scale
-    rule2frame, caps, scales = {}, {}, {}
+    rule2frame, caps, scales, contracts = {}, {}, {}, {}
     for node in spec["doc"]:
         if "frame" not in node:
             continue
         f = node["frame"]
         caps[f["name"]] = frame_capacities(f)
         scales[f["name"]] = slot_exprs(f)
+        contracts[f["name"]] = op_contracts(f)
         # A frame may list the scheduler rules it covers (when its display name
         # differs from the rule names); otherwise the name IS the rule list.
         for rn in f.get("rules_py_names") or [x.strip() for x in f["name"].split(",")]:
@@ -194,6 +212,7 @@ def main():
                         claimed[frame] += 1
                         cap = caps[frame]
                         exprs = scales[frame]
+                        con = contracts[frame]
                         mem_w = next((x.access_width for x in (a, b)
                                       if x.has_mem_operand and x.access_width), None)
                         ok, saw = True, False
@@ -215,7 +234,8 @@ def main():
                                 scale = "k" if e[1][1] else abs(e[1][0])
                             else:
                                 scale = 1
-                            need = required_bits(insn, scale, mem_w)
+                            need = required_bits(insn, scale, mem_w,
+                                                 con.get(subform(insn)))
                             if need is None or need == 0:
                                 continue           # no / zero immediate to pack
                             saw = True

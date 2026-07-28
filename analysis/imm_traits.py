@@ -34,12 +34,20 @@ def zero_ok(subform):
     return subform not in NO_ZERO
 
 
-def required_bits(v, subform):
+_signed_default = signed          # the parameter below shadows the function
+
+
+def required_bits(v, subform, signed=None):
     """Significant bits to encode immediate value `v` (already scaled) for this
-    op, honouring signedness and the reclaimed zero codepoint. v must be != 0."""
+    op, honouring signedness and the reclaimed zero codepoint. v must be != 0.
+
+    `signed` overrides the per-op default when encoding.yaml declares one on the
+    op entry -- addi4spn's field is structurally unsigned (storage below sp is
+    not safe to use), which no per-opcode default can know."""
     u = abs(v)
     nz = not zero_ok(subform)
-    if signed(subform):
+    is_signed = _signed_default(subform) if signed is None else signed
+    if is_signed:
         # signed field of n bits holds 2^n values; excluding zero shifts the
         # positive edge from 2^(n-1)-1 up to 2^(n-1).
         return (u - 1).bit_length() + 1 if nz else _signed_bits(v)

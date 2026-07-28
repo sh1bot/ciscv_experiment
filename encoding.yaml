@@ -27,6 +27,21 @@
 # encoder needs anyway, and it keeps the codepoint count a plain sum of cluster
 # products with no special case in the tooling.
 #
+# KNOWN GAP — the same-op diagonal. The triangle orders the OPCODES, but has no
+# syntax to order two immediates of the SAME opcode. When an op has ext > 0 it
+# occupies several codepoints (one per range band), and its diagonal cell pays
+# w×w where w(w+1)/2 would do: the (narrow, wide) and (wide, narrow) spellings
+# of one op-pair are both encoded when a tie-breaker on the range band would
+# need only one. The waste is w(w-1)/2 per such op — 1 codepoint at ext=1, 6 at
+# ext=2 — and it is zero for every op at the base range. dual-indep-pair pays 1
+# of these today (see its budget note).
+#
+# Ordering the two immediates by VALUE (not just by range band) would be more
+# efficient still — a strict ordering makes one of each equal-size pair
+# redundant — but the decoder would have to compare the two immediates and
+# conditionally swap them before use. Deliberately not pursued: the coding gain
+# is small and the decode cost is not.
+#
 # A frame's optional `budget` is a sanity check on its codepoint count (see
 # `python3 util/encoding_render.py --opcodes`): the count must land in
 # (budget/2, budget]. Over the budget means too many ops for the allotted
@@ -57,6 +72,20 @@ opsets:
   addi_6s:  &addi_6s  {op: addi,  imm: {bits: 6, signed: true}}
   addiw_6s: &addiw_6s {op: addiw, imm: {bits: 6, signed: true}}
   li_6s:    &li_6s    {op: li,    imm: {bits: 6, signed: true}}
+
+  # addi4spn carries its scale in its name: the offset is always a multiple of
+  # 4, so the low two bits are structurally zero and encoding them is waste.
+  # The field is UNSIGNED because storage below sp is not safe to address --
+  # an interrupt may clobber it -- so a negative offset is not a thing this op
+  # ever legitimately has. Both are intrinsic properties of the opcode, but
+  # addi4spn is named only in `ops` and never spelled out in a template line,
+  # so there is no template coefficient to carry them; they are declared here
+  # instead. Measured on the corpus: zero genuine addi4spn are negative, and
+  # 99.6% are 4-aligned, so x4 costs nothing and buys ~2 bits of reach.
+  # (Scale 8 reaches further still but strands the 4.5% that are 4- but not
+  # 8-aligned, and over-fits godot's 64-bit pointers; 32-bit targets are the
+  # ones that most need the compression, so x4 it is.)
+  addi4spn_u6: &addi4spn_u6 {op: addi4spn, imm: {bits: 6, signed: false, scale: 4}}
 
 # Equivalencies: surface forms the scheduler should accept as matching a frame
 # because they are equivalent to the canonical form the packet encodes. Each
@@ -369,12 +398,12 @@ doc:
 
   - frame:
       name: dual-indep-pair
-      # 6 codepoints once the triangle stopped double-counting (was 9 under the
-      # cross product, against a 16 reserved for it). Right-sized to 8 rather
-      # than left at 16: growing the frame is a design decision, not a standing
-      # reservation. It probably should grow — corpus analysis says it wants
-      # addi_rsd and a scaled addi4spn immediate — but that is a separate edit.
-      budget: 8
+      # 11 codepoints: the triangle over li, mv, addi4spn_u6, where the last
+      # weighs 2 (a 6-bit range over a 5-bit base field). Note 11 rather than
+      # the ideal 10 — the triangle orders the OPCODES but has no syntax to
+      # order two immediates of the SAME op, so the addi4spn/addi4spn diagonal
+      # pays 2x2 where 2x3/2 would do. See the `ops` note in the header.
+      budget: 16
       level: 1
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
@@ -386,9 +415,9 @@ doc:
       # here would be the bug it replaced: 3x3 = 9 codepoints to express 6
       # distinct packets. See the `ops` note in the header.
       ops:
-        - {a: [li],       b: [li, mv, addi4spn]}
-        - {a: [mv],       b: [mv, addi4spn]}
-        - {a: [addi4spn], b: [addi4spn]}
+        - {a: [li],            b: [li, mv, *addi4spn_u6]}
+        - {a: [mv],            b: [mv, *addi4spn_u6]}
+        - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
         - ["h", "rda", "g", "immb[4:0]", "rs1a",      "fn3", "rdb"]
