@@ -376,7 +376,7 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
 #   store-chain: A = ALU op; B = sp-relative store (8-bit scaled offset) that
 #                writes A's result to the stack.  The result is dead after B.
 
-_SP_LOAD_MN  = frozenset({"lw", "lwu", "ld"})
+_SP_LOAD_MN  = frozenset({"lw", "ld"})   # lwu dropped: see encoding.yaml load-chain-alu-pair
 _SP_STORE_MN = frozenset({"sw", "sd"})
 _ALL_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 _ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})

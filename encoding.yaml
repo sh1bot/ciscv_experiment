@@ -200,13 +200,27 @@ doc:
 
   - frame:
       name: load-chain-alu-pair
-      budget: 128
+      # lwu dropped from the A slot: 2 loads x weight 2 x 16 = 64 codepoints,
+      # down from 96, so the block halves 128 -> 64. That is what clears the
+      # namespace over-reservation (1036 -> 972 of 1024) without touching the
+      # 16x16 ALU lists, which earn their keep.
+      #
+      # lwu rather than lw because lwu does not exist in RV32 -- a frame whose
+      # only 32-bit load is lwu is dead to 32-bit targets, and those are the
+      # ones that most need the compression. Cost is 27 corpus pairs (lwu) vs
+      # 10 (lw); both are noise against ~20k.
+      #
+      # This is not a verdict on lwu. Of 694 lwu-bearing adjacencies in godot
+      # only 56 are claimed by ANY frame -- it is broadly unserved rather than
+      # concentrated here, and deserves a design pass across all frames rather
+      # than a decision anchored on this one's 27 hits. Revisit then.
+      budget: 64
       level: 2
       templates:
         - ["load    tmp, k*imma(rs1a)", "alu     rdb, tmp, rs2b/immb"]
         - ["load    tmp, k*imma(sp)", "alu     rdb, tmp, rs2b/immb"]
       ops:                     # 6-bit load offset via the opcode list, not a g bit
-        - {a: [{op: lw, imm: {bits: 6}}, {op: lwu, imm: {bits: 6}}, {op: ld, imm: {bits: 6}}], b: *rsd_alu}
+        - {a: [{op: lw, imm: {bits: 6}}, {op: ld, imm: {bits: 6}}], b: *rsd_alu}
       rows:
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
