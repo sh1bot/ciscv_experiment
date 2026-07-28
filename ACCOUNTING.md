@@ -239,6 +239,27 @@ these choices define what "fits" means:
 reported demand is what the corpus actually needs, not what the compiler's
 encoding happened to allocate.
 
+**CONVENTION — a 12-bit immediate is UNACHIEVABLE; discount it.** A full 12-bit
+immediate is the whole RISC-V I-type field: an instruction carrying one is
+already as wide as it can be, so half a packet cannot improve on it and no
+frame should be designed around it. Where 12-bit cases dominate a statistic,
+report the achievable remainder (<= 11 bits) instead of the raw total, and say
+how many were discounted. Two live examples:
+
+- `li` + sp-relative store: 539 pairs raw, but 276 need a full 12-bit constant.
+  The achievable population is **263**, and 11 bits covers all of it.
+- chain-alu's immediate demand above the 5-bit base: 223 slots raw, **182**
+  achievable.
+
+Do NOT read the disassembler's `# symbol+offset` comments as evidence that a
+constant is relocation-derived. objdump annotates any value that happens to
+land within a section's address range, so it labels ordinary masks as symbol
+references: `lui a5,0x1000` + `addi a5,a5,-1` computes 2^24-1 and is annotated
+`.Lline_table_start1+0xfb3eaa`. In godot.s `addi ...,-1` occurs 847 times
+(2.75%, less often than `-32`) and none of them are lui-fed. The corpus is
+post-link, so genuine relocations are already resolved and carry no marker at
+all; `imm_expr` only catches pre-link `%hi`/`%lo` syntax.
+
 ---
 
 ## 7. Codepoint cost model
@@ -313,6 +334,8 @@ surface the §1 ISA mismatch instead of averaging over it.
 | 6 | Split the `*rsd_alu` anchor into chain and dual lists | §5 | measured; yaml change pending |
 | 7 | Cross-*program* held-out scoring | §9 | OPEN |
 | 8 | Do ops outside the target ISA subset (`czero.*`, `andn`, `maxu`) belong in op-set searches at all? | — | OPEN |
+| 9 | Zicond (`czero.eqz`/`czero.nez`) looks worth its own frame with its own partner set, not a slot in chain-alu | §6 | OPEN — to explore |
+| 10 | Carve `li` + sp-relative store out of store-chain: 263 achievable pairs for ~2 codepoints | §6 | measured; frame not yet written |
 
 Item 8 note: `czero.eqz`/`czero.nez` appear in optimiser-chosen op sets purely
 because the corpus contains them and nothing excludes them. Whether the target
