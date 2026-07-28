@@ -239,6 +239,28 @@ these choices define what "fits" means:
 reported demand is what the corpus actually needs, not what the compiler's
 encoding happened to allocate.
 
+**CHECK TOP-CONTRIBUTOR CONCENTRATION BEFORE BELIEVING ANY DISTRIBUTION.**
+A single function can be most of a population. Before designing a frame around
+a measured distribution, report how many sites the top contributing function
+owns, per band as well as overall. If one function owns a band, that band is
+not evidence.
+
+The case that produced this rule: "store a materialised constant to memory"
+looked like 1643 sites with a striking step at 12 bits (26.5% of the mass) that
+seemed to justify a 12-bit immediate field. All 443 of those 12-bit sites were
+in ONE function -- `KeyMappingX11::initialize()` -- storing consecutive X11
+keysym literals (ranges like 1025-1036, 1038-1103, 1185-1247) into a table.
+That function owned 100% of the 9-, 10- and 12-bit bands, 98% of the 11-bit
+band, and 55.5% of the entire population.
+
+Excluding it leaves 731 sites where **8 bits covers 99.7% of constants** and the
+binding constraint is the store offset, not the immediate. Every field split
+from imm8 upward captures the same ~56%. A frame designed on the raw numbers
+would have spent 12 of 20 operand bits serving one keyboard-mapping function.
+
+Corollary: a large, sharply-bounded cluster of *consecutive* values is a table
+initialiser, not a distribution. Check for runs.
+
 **CONVENTION — a 12-bit immediate is UNACHIEVABLE; discount it.** A full 12-bit
 immediate is the whole RISC-V I-type field: an instruction carrying one is
 already as wide as it can be, so half a packet cannot improve on it and no
@@ -335,7 +357,8 @@ surface the §1 ISA mismatch instead of averaging over it.
 | 7 | Cross-*program* held-out scoring | §9 | OPEN |
 | 8 | Do ops outside the target ISA subset (`czero.*`, `andn`, `maxu`) belong in op-set searches at all? | — | OPEN |
 | 9 | Zicond (`czero.eqz`/`czero.nez`) looks worth its own frame with its own partner set, not a slot in chain-alu | §6 | OPEN — to explore |
-| 10 | Carve `li` + sp-relative store out of store-chain: 263 achievable pairs for ~2 codepoints | §6 | measured; frame not yet written |
+| 10 | Carve `li` + store out of store-chain: ~410 capturable sites for ~2-4 codepoints, imm8 + base + offset | §6 | measured (outlier-corrected); frame not yet written |
+| 11 | Corpus is one function away from unrepresentative — `KeyMappingX11::initialize()` alone is 55.5% of constant-stores. Worth a standing per-function concentration report, or a third corpus. | §1, §6 | OPEN |
 
 Item 8 note: `czero.eqz`/`czero.nez` appear in optimiser-chosen op sets purely
 because the corpus contains them and nothing excludes them. Whether the target
