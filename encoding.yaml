@@ -29,6 +29,13 @@ opsets:
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
   mem:      &mem      [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
 
+  # Width-annotated ops: a bare mnemonic takes the frame's base immediate field;
+  # these carry an explicit absolute width, so their extra bit(s) spill into g/h
+  # (each such bit doubles that op's codepoint footprint). On RV64 the shift
+  # amount is 6-bit.
+  slli_6u:  &slli_6u  {op: slli, imm: {bits: 6, signed: false}}
+  srli_6u:  &srli_6u  {op: srli, imm: {bits: 6, signed: false}}
+
 doc:
   - md: |
       # RISC-V template
@@ -172,7 +179,7 @@ doc:
         - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
         - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
       ops:
-        - {a: [andi, slli, srli], b: [beqz, bnez, beq, bne]}
+        - {a: [andi, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
       imm:
         imma: {signed: false, scale: 1}
         immb: {signed: true, scale: 4, unbounded: true}

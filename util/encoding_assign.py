@@ -50,7 +50,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from encoding_render import (_center, _cell, _spanned, header_lines,
-                             opcode_demand, row_operands, _OPERAND, _IMPLICIT)
+                             opcode_demand, opcode_codepoints, op_name,
+                             row_operands, _OPERAND, _IMPLICIT)
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
@@ -93,7 +94,7 @@ def a_ops(frame):
     """Every A-slot opcode across the frame's biclique clusters."""
     out = set()
     for c in frame.get("ops") or []:
-        out |= set(c.get("a", []))
+        out |= {op_name(e) for e in c.get("a", [])}
     return out
 
 
@@ -392,13 +393,15 @@ def main():
         if "frame" not in node:
             continue
         f = node["frame"]
-        d = opcode_demand(f.get("ops"))
-        if not d:
+        if not f.get("ops"):
             continue
+        base = opcode_demand(f.get("ops"))          # a×b combos, before ext
+        d = opcode_codepoints(f, spec["grid"])      # real codepoints, ext-aware
         wg, wh = wants_gh(f)
         fmt = a_format(f)
         frames.append({
-            "name": f["name"], "spec": f, "demand": d, "opsel": opsel_bits(d),
+            "name": f["name"], "spec": f, "demand": d, "base": base,
+            "opsel": opsel_bits(d),
             "wg": wg, "wh": wh, "fmt": fmt, "a_rank": _FMT_RANK[fmt],
             "conflict_hard": False,
         })
@@ -440,9 +443,10 @@ def main():
             freed.append(f["name"])
         tagstr = ("   [" + "; ".join(tags) + "]") if tags else ""
 
+        wide = f" ({f['base']} combos ×g/h)" if f["demand"] != f["base"] else ""
         print(f"## {f['name']}{tagstr}")
         print(f"    A-slot: {f['fmt']:7} ({opc_s})   "
-              f"{f['demand']} combos → {opsel} select bit(s); "
+              f"{f['demand']} codepoints{wide} → {opsel} select bit(s); "
               f"identifier {idl} bit(s) = {f['id_val']:0{idl}b}; "
               f"total word depth {depth}/{WBITS}")
         print()

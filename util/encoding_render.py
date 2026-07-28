@@ -168,6 +168,7 @@ def row_operands(cells):
 
 
 def lint(spec):
+    grid = spec["grid"]
     problems = 0
     for node in spec["doc"]:
         if "frame" not in node:
@@ -187,7 +188,16 @@ def lint(spec):
         documented = {m for m in missing
                       if m.startswith("imm") and re.search(rf"\b{m}\b", notes)}
         missing -= documented
-        if bad_pair or missing or spurious:
+        # A declared op width must fit the slot's actual immediate field.
+        overwide = []
+        for slot in ("a", "b"):
+            _, full = imm_field_bits(f, grid, slot)
+            for c in f.get("ops") or []:
+                for e in c.get(slot, []):
+                    b = op_bits(e)
+                    if b and b > full:
+                        overwide.append(f"{op_name(e)}({slot}) wants {b}b > {full}b field")
+        if bad_pair or missing or spurious or overwide:
             problems += 1
             print(f"✗ {f['name']}")
             if bad_pair:
@@ -197,6 +207,8 @@ def lint(spec):
                 print(f"    operands in asm but NOT encoded in any row: {sorted(missing)}")
             if spurious:
                 print(f"    fields in rows but NOT used by any asm line: {sorted(spurious)}")
+            if overwide:
+                print(f"    op immediate wider than its field: {overwide}")
         else:
             extra = f"  [{','.join(sorted(documented))} in g/h per notes]" if documented else ""
             print(f"✓ {f['name']}  ({len(pairs)} pair(s), {len(rows)} row(s)){extra}")
@@ -214,19 +226,83 @@ def lint(spec):
 OPCODE_NAMESPACE = 1024
 
 
+def op_name(entry):
+    """Mnemonic of an op-list entry, which is either a bare string or a
+    {op: name, imm: {...}} mapping (a width-annotated op, usually via anchor)."""
+    return entry if isinstance(entry, str) else entry["op"]
+
+
+def op_bits(entry):
+    """Declared absolute immediate width of an op entry, or None for a bare op
+    (bare = default, which flexes to the frame's base field)."""
+    if isinstance(entry, dict):
+        return (entry.get("imm") or {}).get("bits")
+    return None
+
+
 def opcode_demand(ops):
-    """How many distinct (opA, opB) codepoints a frame's declared ops need.
-    `ops` is a list of {a:[...], b:[...]} bicliques; the demand is the sum of
-    each cluster's cross-product (clusters are disjoint by construction)."""
+    """BASE (opA, opB) combos a frame's ops allow: Σ over clusters of a×b.
+    Ignores immediate width — see opcode_codepoints for the ext-aware count."""
     if not ops:
         return None
     return sum(len(c.get("a", [])) * len(c.get("b", [])) for c in ops)
 
 
+def imm_field_bits(frame, grid, slot):
+    """(base, full) bit widths of a slot's immediate field, read from the
+    frame's base (non-SP) rows: `full` is the whole slice, `base` is the part
+    outside the g/h columns. slot 'a'→imma, 'b'→immb; a shared `imm` counts for
+    either. The extra g/h bits (full-base) are what a wide immediate borrows."""
+    cols, bits = grid["columns"], grid["bits"]
+    gi, hi = cols.index("g"), cols.index("h")
+    names = {"a": {"imma", "imm"}, "b": {"immb", "imm"}}[slot]
+    base = full = 0
+    for row in frame.get("rows", []):
+        tag = row.get("tag") if isinstance(row, dict) else None
+        if tag == "SP-relative":
+            continue
+        cells = row["c"] if isinstance(row, dict) else row
+        pos = 0
+        for cell in cells:
+            body, span = _cell(cell)
+            if body.split("[")[0] in names:
+                cspan = range(pos, pos + span)
+                tot = sum(bits[c] for c in cspan)
+                gh = sum(bits[c] for c in cspan if c in (gi, hi))
+                full, base = max(full, tot), max(base, tot - gh)
+            pos += span
+    return base, full
+
+
+def _slot_weight(op_list, base):
+    """Codepoints a slot's ops occupy: Σ 2^ext, where ext = the g/h bits an op's
+    declared width needs above the base field (0 for a bare/base-width op, so
+    register-form ops never inflate the count)."""
+    w = 0
+    for e in op_list:
+        b = op_bits(e)
+        w += 1 << (max(0, b - base) if b else 0)
+    return w
+
+
+def opcode_codepoints(frame, grid):
+    """Real codepoint demand: Σ over clusters of weight(a)×weight(b), where each
+    slot weight sums 2^ext per op. Factors per slot because g extends the A
+    immediate and h the B immediate independently."""
+    ops = frame.get("ops")
+    if not ops:
+        return None
+    base_a, _ = imm_field_bits(frame, grid, "a")
+    base_b, _ = imm_field_bits(frame, grid, "b")
+    return sum(_slot_weight(c.get("a", []), base_a)
+               * _slot_weight(c.get("b", []), base_b) for c in ops)
+
+
 def opcodes(spec):
-    print(f"{'frame':44} {'shape':>13} {'codepoints':>10}")
-    print("-" * 70)
-    total, missing = 0, []
+    grid = spec["grid"]
+    print(f"{'frame':44} {'shape':>13} {'base':>6} {'codepoints':>10}")
+    print("-" * 78)
+    base_total, cp_total, missing, wide = 0, 0, [], []
     for node in spec["doc"]:
         if "frame" not in node:
             continue
@@ -235,25 +311,30 @@ def opcodes(spec):
         if not ops:
             missing.append(f["name"]); continue
         d = opcode_demand(ops)
-        total += d
+        cp = opcode_codepoints(f, grid)
+        base_total += d; cp_total += cp
         if len(ops) == 1:
             shape = f"{len(ops[0]['a'])}×{len(ops[0]['b'])}"
         else:
             shape = f"{len(ops)} clusters"
-        print(f"{f['name']:44} {shape:>13} {d:10}")
-    print("-" * 70)
-    print(f"{'TOTAL base (opA×opB) opcode demand':44} {'':>13} {total:10}")
-    spare = OPCODE_NAMESPACE - total
+        flag = "  wide-imm" if cp > d else ""
+        if cp > d:
+            wide.append(f["name"])
+        print(f"{f['name']:44} {shape:>13} {d:6} {cp:10}{flag}")
+    print("-" * 78)
+    print(f"{'TOTAL':44} {'':>13} {base_total:6} {cp_total:10}")
+    spare = OPCODE_NAMESPACE - cp_total
     print(f"\nopcode namespace = opcode5(5)+funct3(3)+g(1)+h(1) = {OPCODE_NAMESPACE} entries.")
-    if total <= OPCODE_NAMESPACE:
-        print(f"Base demand {total} FITS with {spare} entries spare.")
-        print(f"Those {spare} spare entries are what wide-immediate ops draw on: each\n"
-              f"immediate sub-range beyond the base field width costs one extra entry\n"
-              f"(x2 via g, x4 via g+h). Whether base+sub-ranges stays <= {OPCODE_NAMESPACE}\n"
-              f"depends on how many wide-immediate variants each frame declares.")
+    print(f"'base' = Σ a×b combos; 'codepoints' = Σ weight(a)×weight(b) with each\n"
+          f"op weighted 2^ext (ext = g/h bits its immediate borrows above the base\n"
+          f"field). A wide-immediate op costs 2 (via g) or 4 (via g+h); bare and\n"
+          f"register-form ops cost 1, so they never inflate the count.")
+    if cp_total <= OPCODE_NAMESPACE:
+        print(f"Codepoint demand {cp_total} FITS with {spare} spare.")
     else:
-        print(f"Base demand {total} OVER by {total-OPCODE_NAMESPACE} before any "
-              f"immediate sub-range entries.")
+        print(f"Codepoint demand {cp_total} OVER by {cp_total-OPCODE_NAMESPACE}.")
+    if wide:
+        print(f"Frames drawing on g/h for a wide immediate: {', '.join(wide)}")
     print("This is DECLARED demand (every allowed op-combo); real corpus usage is\n"
           "far sparser (see analysis/encoding_verify + encoding_budget).")
     if missing:
