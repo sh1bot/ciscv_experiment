@@ -15,6 +15,13 @@
 # disjoint). A cross-product frame is one cluster; a tuple-wise constraint is
 # several; a shared-opcode frame (both slots identical) is a list of singleton
 # {a: [x], b: [x]} clusters.
+#
+# A frame's optional `budget` is a sanity check on its codepoint count (see
+# `python3 util/encoding_render.py --opcodes`): the count must land in
+# (budget/2, budget]. Over the budget means too many ops for the allotted
+# block; under half means the table is not yet filled in (or the budget is too
+# large). Usually a power of two — the size of the prefix-code block the frame
+# is allocated.
 
 grid:
   columns:     [h, funct5, g, rs2, rs1, funct3, rd]
@@ -133,6 +140,7 @@ doc:
 
   - frame:
       name: chain-alu-pair
+      budget: 256
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
@@ -146,6 +154,7 @@ doc:
 
   - frame:
       name: load-chain-alu-pair
+      budget: 64
       level: 2
       templates:
         - ["load    tmp, k*imma(rs1a)", "alu     rdb, tmp, rs2b/immb"]
@@ -160,6 +169,7 @@ doc:
 
   - frame:
       name: store-chain-alu-pair
+      budget: 32
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(rs1b)"]
@@ -174,6 +184,7 @@ doc:
 
   - frame:
       name: "deref-chain-load-pair, base-chain-load-pair"
+      budget: 64
       level: 2
       templates:
         - ["load    tmp, k*imma(rs1a)", "load    rdb, k*immb(tmp)"]
@@ -189,6 +200,7 @@ doc:
 
   - frame:
       name: chain-li-branch
+      budget: 16
       level: 2
       templates:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
@@ -202,6 +214,7 @@ doc:
 
   - frame:
       name: chain-bit-test-branch
+      budget: 32
       level: 2
       templates:
         - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
@@ -216,6 +229,7 @@ doc:
 
   - frame:
       name: "load-sp-branch, load-base-branch"
+      budget: 16
       level: 2
       templates:
         - ["load    rda, k*imma(sp)", "beqz/bnez rda, zero, 4*immb"]
@@ -230,6 +244,7 @@ doc:
 
   - frame:
       name: addi-branch-pair
+      budget: 32
       level: 2
       templates:
         - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
@@ -245,6 +260,7 @@ doc:
 
   - frame:
       name: pre-inc-pair
+      budget: 8
       level: 2
       templates:
         - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
@@ -265,6 +281,7 @@ doc:
 
   - frame:
       name: "dual-mem-addi-pair, dual-mem-shadd-pair"
+      budget: 16
       level: 2
       templates:
         - ["load    rdb, 0(rsda)", "shXadd  rsda, rsda, rs2a"]
@@ -288,6 +305,7 @@ doc:
 
   - frame:
       name: mem-pair
+      budget: 16
       level: 1
       templates:
         - ["load    rda, k*imm(rbase)", "load    rdb, k*imm+k(rbase)"]
@@ -317,6 +335,7 @@ doc:
 
   - frame:
       name: dual-arith2-pair
+      budget: 16
       level: 1
       templates:
         - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
@@ -335,6 +354,7 @@ doc:
 
   - frame:
       name: dual-indep-pair
+      budget: 16
       level: 1
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
@@ -348,6 +368,7 @@ doc:
 
   - frame:
       name: rsd-alu-pair
+      budget: 256
       level: 2
       templates:
         - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
@@ -369,6 +390,7 @@ doc:
 
   - frame:
       name: prologue-pair
+      budget: 2
       level: 2
       templates:
         - ["addi    sp, -16*imm", "store   rs1b, 16*imm-k(sp)"]
@@ -379,6 +401,7 @@ doc:
 
   - frame:
       name: epilogue-pair
+      budget: 2
       level: 2
       templates:
         - ["addi    sp, 16*imm", "jr      rs1b"]
@@ -392,6 +415,7 @@ doc:
 
   - frame:
       name: arith-jump-pair
+      budget: 64
       level: 2
       templates:
         - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
@@ -405,6 +429,7 @@ doc:
 
   - frame:
       name: arith-mem-pair
+      budget: 64
       level: 1
       templates:
         - ["alu     rsda, rsda, rs2a/imma", "load    rdb, k*immb(rs1b)"]

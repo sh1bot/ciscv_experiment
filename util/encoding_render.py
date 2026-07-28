@@ -301,11 +301,24 @@ def opcode_codepoints(frame, grid):
                * _slot_weight(c.get("b", []), base_b) for c in ops)
 
 
+def budget_status(cp, budget):
+    """Assert a frame's codepoints fit its declared budget: (ok, message).
+    Valid when half-full..full — cp in (budget/2, budget]. Over = too many ops
+    for the block; under-half = table not yet filled (or budget too big)."""
+    if budget is None:
+        return True, ""
+    if cp > budget:
+        return False, f"OVER budget {budget} by {cp - budget}"
+    if cp * 2 < budget:
+        return False, f"under half of {budget} (table unfinished?)"
+    return True, f"ok ≤{budget}"
+
+
 def opcodes(spec):
     grid = spec["grid"]
-    print(f"{'frame':44} {'shape':>13} {'base':>6} {'codepoints':>10}")
-    print("-" * 78)
-    base_total, cp_total, missing, wide = 0, 0, [], []
+    print(f"{'frame':40} {'shape':>13} {'base':>6} {'cpts':>5} {'budget':>7}  status")
+    print("-" * 88)
+    base_total, cp_total, missing, wide, viol = 0, 0, [], [], []
     for node in spec["doc"]:
         if "frame" not in node:
             continue
@@ -320,12 +333,17 @@ def opcodes(spec):
             shape = f"{len(ops[0]['a'])}×{len(ops[0]['b'])}"
         else:
             shape = f"{len(ops)} clusters"
-        flag = "  wide-imm" if cp > d else ""
         if cp > d:
             wide.append(f["name"])
-        print(f"{f['name']:44} {shape:>13} {d:6} {cp:10}{flag}")
-    print("-" * 78)
-    print(f"{'TOTAL':44} {'':>13} {base_total:6} {cp_total:10}")
+        budget = f.get("budget")
+        ok, msg = budget_status(cp, budget)
+        if not ok:
+            viol.append(f["name"])
+        wtag = "wide-imm " if cp > d else ""
+        print(f"{f['name']:40} {shape:>13} {d:6} {cp:5} "
+              f"{('-' if budget is None else budget):>7}  {wtag}{msg}")
+    print("-" * 88)
+    print(f"{'TOTAL':40} {'':>13} {base_total:6} {cp_total:5}")
     spare = OPCODE_NAMESPACE - cp_total
     print(f"\nopcode namespace = opcode5(5)+funct3(3)+g(1)+h(1) = {OPCODE_NAMESPACE} entries.")
     print(f"'base' = Σ a×b combos; 'codepoints' = Σ weight(a)×weight(b) with each\n"
@@ -341,8 +359,13 @@ def opcodes(spec):
         print(f"Frames with extended-range immediates: {', '.join(wide)}")
     print("This is DECLARED demand (every allowed op-combo); real corpus usage is\n"
           "far sparser (see analysis/encoding_verify + encoding_budget).")
+    print("A frame's optional `budget` asserts codepoints in (budget/2, budget]:\n"
+          "over = too many ops for the block, under-half = table not yet filled.")
     if missing:
         print(f"\nFrames with no ops declared: {missing}")
+    if viol:
+        print(f"\nBUDGET VIOLATIONS ({len(viol)}): {', '.join(viol)}")
+        return 1
     return 0
 
 
