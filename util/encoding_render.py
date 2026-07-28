@@ -190,17 +190,22 @@ def lint(spec):
         missing -= documented
         # A declared op width may exceed the row's base field: the extra bits
         # ride the opcode list (each doubles the op's codepoints), physically the
-        # reclaimed g/h low bits. Cap the extension at 2 (g and h); beyond that
-        # the frame would have to spend deeper opcode bits.
-        overwide = []
+        # reclaimed g/h low bits. Range beyond base+2 cannot come from g/h at
+        # all and must ride the OPCODE LIST instead, at 2^ext codepoints. That
+        # is a legitimate encoding, not an error -- the cost is already charged
+        # by --opcodes and bounded by the frame's budget -- so it is reported
+        # for visibility rather than counted as a correspondence problem.
+        on_opcode_list = []
         for slot in ("a", "b"):
             base, _ = imm_field_bits(f, grid, slot)
             for c in f.get("ops") or []:
                 for e in c.get(slot, []):
                     b = op_bits(e)
                     if b and b > base + 2:
-                        overwide.append(f"{op_name(e)}({slot}) wants {b}b > base {base}b + 2 (g,h)")
-        if bad_pair or missing or spurious or overwide:
+                        on_opcode_list.append(
+                            f"{op_name(e)}({slot}) {b}b = {base}b field + "
+                            f"{b - base}b via {1 << (b - base)} codepoints")
+        if bad_pair or missing or spurious:
             problems += 1
             print(f"✗ {f['name']}")
             if bad_pair:
@@ -210,11 +215,11 @@ def lint(spec):
                 print(f"    operands in asm but NOT encoded in any row: {sorted(missing)}")
             if spurious:
                 print(f"    fields in rows but NOT used by any asm line: {sorted(spurious)}")
-            if overwide:
-                print(f"    op immediate wider than its field: {overwide}")
         else:
             extra = f"  [{','.join(sorted(documented))} in g/h per notes]" if documented else ""
             print(f"✓ {f['name']}  ({len(pairs)} pair(s), {len(rows)} row(s)){extra}")
+        for msg in on_opcode_list:
+            print(f"    · wide immediate on the opcode list: {msg}")
     print(f"\n{problems} frame(s) with correspondence problems.")
     return problems
 

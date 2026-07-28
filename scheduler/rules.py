@@ -63,10 +63,60 @@ _RSD_ALU_MN = frozenset({
     "mul",  "mulhu",                          # multiply
     })
 _RSD_ALU_REGS = frozenset(range(16))         # x0..x15 (4-bit register field)
+
 _RSD_IMM_MN   = frozenset({"addi", "addiw", "andi"})  # signed nzimm -64..64
 _RSD_SHIFT_MN = frozenset({"slli", "srli", "srai"})   # shift amount 1..32
 _RSD_IMM_LO, _RSD_IMM_HI = -64, 64
 _RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
+
+# The ALU set shared by the three CHAIN frames — encoding.yaml `chain_alu`.
+# Chain slots write `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1 an
+# encoded field, so li/mv/addi4spn are register choices rather than opcodes and
+# fold into `addi`; the set buys immediate WIDTH instead of rare opcodes.
+# rsd-alu-pair and arith-jump-pair keep _RSD_ALU_MN (different population).
+_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "and", "or", "sub",
+                           "slli", "srli"})
+_CHAIN_IMM_BITS = {"addi": 8, "andi": 6}     # signed, per the yaml op contracts
+_CHAIN_SHIFT_MN = frozenset({"slli", "srli"})
+_CHAIN_SHIFT_HI = 31                          # 5-bit unsigned shift amount
+
+
+def _chain_imm_in_range(insn: Instruction) -> None:
+    """Immediate / shift range for a chain-frame ALU op, per encoding.yaml's
+    `chain_alu` op contracts. addi carries a signed 8-bit field (it is also the
+    li/mv form, so zero is encodable); andi a signed 6-bit; shifts an unsigned
+    5-bit amount."""
+    bits = _CHAIN_IMM_BITS.get(insn.mnemonic)
+    if bits is not None:
+        imm = insn.imm
+        if imm is None:
+            raise NotPair("MALFORMED: missing-immediate")
+        if not (-(1 << (bits - 1)) <= imm <= (1 << (bits - 1)) - 1):
+            raise NotPair("big-imm")
+    elif insn.mnemonic in _CHAIN_SHIFT_MN:
+        imm = insn.imm
+        if imm is None:
+            raise NotPair("MALFORMED: missing-shift-amount")
+        if not (0 <= imm <= _CHAIN_SHIFT_HI):
+            raise NotPair("big-imm")
+
+
+def a_chain_imm_ok(func: Callable):
+    """A-slot immediate is in the chain-frame encodable range."""
+    @wraps(func)
+    def check_a_chain_imm(a: Instruction, b: Instruction):
+        _chain_imm_in_range(a)
+        return func(a, b)
+    return check_a_chain_imm
+
+
+def b_chain_imm_ok(func: Callable):
+    """B-slot immediate is in the chain-frame encodable range."""
+    @wraps(func)
+    def check_b_chain_imm(a: Instruction, b: Instruction):
+        _chain_imm_in_range(b)
+        return func(a, b)
+    return check_b_chain_imm
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +395,8 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 @chain_uses_low_regs
 @must_chain
 @no_escape
-@a_imm_ok
-@b_imm_ok
+@a_chain_imm_ok
+@b_chain_imm_ok
 def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A computes a value that B immediately consumes; that value is dead after B.
 
@@ -417,7 +467,7 @@ def b_sp_mem(func: Callable):
 @must_chain
 @no_escape
 @a_sp_mem
-@b_imm_ok
+@b_chain_imm_ok
 def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
     return None
@@ -426,7 +476,7 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
 @chain_uses_low_regs
 @must_chain_stored
 @no_escape
-@a_imm_ok
+@a_chain_imm_ok
 @b_sp_mem
 def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
@@ -1084,19 +1134,19 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="chain-alu-pair",
-        a_mnemonic_set=_RSD_ALU_MN,
-        b_mnemonic_set=_RSD_ALU_MN,
+        a_mnemonic_set=_CHAIN_ALU_MN,
+        b_mnemonic_set=_CHAIN_ALU_MN,
         check=_chain_alu_pair,
     ),
     PairingRule(
         name="load-chain-alu-pair",
         a_mnemonic_set=_SP_LOAD_MN,
-        b_mnemonic_set=_RSD_ALU_MN,
+        b_mnemonic_set=_CHAIN_ALU_MN,
         check=_load_chain_alu_pair,
     ),
     PairingRule(
         name="store-chain-alu-pair",
-        a_mnemonic_set=_RSD_ALU_MN,
+        a_mnemonic_set=_CHAIN_ALU_MN,
         b_mnemonic_set=_SP_STORE_MN,
         check=_store_chain_alu_pair,
     ),

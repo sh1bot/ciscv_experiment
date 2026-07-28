@@ -39,6 +39,15 @@ from util.encoding_render import op_contracts
 UNENCODABLE = 99
 
 
+def contract_for(contracts, insn):
+    """The op contract governing this instruction. Keyed by the most specific
+    name first: encoding.yaml may name a pseudo-op directly (`addi4spn`), or
+    only the base mnemonic (`addi`) when the frame's register fields are what
+    distinguish the subforms -- as every chain frame does, writing
+    `alu tmp, rs1a, ...` so li/mv/addi4spn are register choices, not opcodes."""
+    return contracts.get(subform(insn)) or contracts.get(insn.mnemonic) or {}
+
+
 def required_bits(insn, scale, pair_mem_width=None, contract=None):
     """Significant bits of insn's immediate once scaled the way this frame's
     field scales it (scale = 1 | int | 'k'). For 'k' on a non-memory insn (e.g.
@@ -235,11 +244,18 @@ def main():
                             else:
                                 scale = 1
                             need = required_bits(insn, scale, mem_w,
-                                                 con.get(subform(insn)))
+                                                 contract_for(con, insn))
                             if need is None or need == 0:
                                 continue           # no / zero immediate to pack
                             saw = True
                             c = cap_for(cap, is_sp_mem(insn))
+                            # An op may declare a range wider than the drawn
+                            # field; the surplus rides the opcode list at 2^ext
+                            # codepoints (see encoding.yaml, chain_alu). Its
+                            # declared width is then the real capacity.
+                            decl = contract_for(con, insn).get("bits")
+                            if decl:
+                                c = max(c or 0, decl)
                             if c is None or need > c:
                                 ok = False
                                 if need - (c or 0) > worst[frame][0] - worst[frame][1]:
