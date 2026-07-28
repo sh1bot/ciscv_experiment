@@ -268,37 +268,40 @@ doc:
         - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "store   rs2b, k*immb(rsda)"]
       ops:
-        - {a: [addi],   b: [ld, sd]}
+        - {a: [addi],   b: [ld, lw, sd, sw]}
+        - {a: [sh3add], b: [ld, sd]}
         - {a: [sh2add], b: [lw, sw]}
-        - {a: [add],    b: [slt]}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rdb"]
       notes: |
+         * TODO: Try zero memory offset and all the load/store permutations instead
          * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
 
   - frame:
-      name: "dual-mem-addi-pair, dual-mem-shadd-pair"
+      name: post-inc-pair
       budget: 16
       level: 2
       templates:
-        - ["load    rdb, 0(rsda)", "shXadd  rsda, rsda, rs2a"]
-        - ["store   rs2a, 0(rsda)", "shXadd  rsda, rsda, rs2a"]
-        - ["addi    rsda, rsda, k*imma", "load    rdb, -k*imma(rsda)"]
-        - ["addi    rsda, rsda, k*imma", "store   rs2b, -k*imma(rsda)"]
+        - ["load    rda, k*imma(rsda)", "shXadd  rsda, rsda, rs2b"]
+        - ["store   rs2a, k*imma(rsda)", "shXadd  rsda, rsda, rs2b"]
+        - ["load    rda, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
+        - ["store   rs2a, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
       ops:
-        - {a: [ld, lw, lwu, sd, sw], b: [addi]}
+        - {a: [ld, lw, sd, sw],     b: [addi]}
         - {a: [ld, sd],             b: [sh3add]}
-        - {a: [lw, lwu, sw],        b: [sh2add]}
+        - {a: [lw, sw],             b: [sh2add]}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
-        - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
-        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "imma[4:0]"]
-        - ["h", "imma[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rdb"]
+        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "rda"]
+        - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
+        - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rda"]
       notes: |
-         * Note: somewhat contorted logic for coherent `rd` field usage.
+         * Timing oddity here because reg in `rd` field is written in first cycle not second.
+         * TODO: Try zero memory offset and all the load/store permutations instead
+         * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
 
   - md: |
       # Other stuff
