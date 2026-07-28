@@ -16,10 +16,13 @@ prefix-free constant that names the frame. Any bits BELOW total_depth (toward
 h) are free — a frame whose word stops at or before bit funct3[0] leaves g and
 h free to carry a wide immediate.
 
-Because the total demand is fixed but per-frame op-lists differ wildly (2 combos
-for prologue, 256 for the 16x16 ALU frames), the identifier length is variable:
-big-op frames get short identifiers, small-op frames long ones. This is exactly
-the canonical prefix-code construction DEFLATE uses.
+Each frame reserves a FIXED block sized to its `budget` (not its current fill),
+buddy-allocated largest-first so blocks never overlap and a frame can grow into
+its own unused slots — up to its budget — without moving any other frame. The
+identifier length is therefore variable: big blocks get short identifiers, small
+blocks long ones. The tool asserts the reservations fit (Σ budget ≤ 1024) so the
+planned table cannot overflow even before it is fully populated; it exits
+non-zero on overflow, or if a frame's current fill already exceeds its block.
 
 Two "nice-to-have" biases are applied when they don't cost feasibility:
   * frames are ORDERED for canonical assignment by their A-slot RISC-V format
@@ -151,67 +154,29 @@ def opsel_bits(demand):
     return max(0, math.ceil(math.log2(demand))) if demand and demand > 1 else 0
 
 
-# --- variable-length identifier lengths (Kraft-greedy) ---------------------
-def choose_lengths(frames):
-    """Pick each frame's identifier length. Baseline: the deepest word (t=10),
-    i.e. id_len = 10 - opsel, which claims the fewest codepoints (2**opsel).
-    Then spend the leftover namespace promoting immediate-hungry frames to a
-    shallower word (t<=8 so g&h stay free), cheapest first, until the 1024
-    codepoints run out. Frames that couldn't be promoted keep g/h as opcode
-    bits — a reported conflict."""
-    used = 0
-    for f in frames:
-        f["id_len"] = WBITS - f["opsel"]          # t = 10
-        f["depth"] = WBITS
-        f["promoted"] = False
-        used += 1 << f["opsel"]                    # codepoints at t=10
-
-    def target_depth(f):
-        if f["wg"]:
-            return GH_FREE_DEPTH                   # need g (and thus h) free
-        if f["wh"]:
-            return H_FREE_DEPTH
-        return None
-
-    wanters = []
-    for f in frames:
-        t = target_depth(f)
-        if t is None:
-            continue
-        idl = t - f["opsel"]
-        if idl < 1:                                # op-list too big to ever fit
-            f["conflict_hard"] = True
-            continue
-        cost = (1 << (WBITS - idl)) - (1 << f["opsel"])   # extra codepoints
-        wanters.append((cost, f["a_rank"], f["name"], f, idl, t))
-
-    for cost, _rank, _name, f, idl, t in sorted(wanters):
-        if used + cost <= (1 << WBITS):
-            used += cost
-            f["id_len"] = idl
-            f["depth"] = t
-            f["promoted"] = True
-    return used
-
-
-# --- canonical (DEFLATE) code assignment -----------------------------------
-def assign_codes(frames):
-    """Standard canonical prefix-code construction: codes are handed out by
-    increasing length, and within a length in A-format order, so the leading
-    identifier bits track the RISC-V opcode ordering."""
-    order = sorted(frames, key=lambda f: (f["id_len"], f["a_rank"], f["name"]))
-    bl_count = {}
+# --- budget-driven fixed-block allocation ----------------------------------
+def allocate_blocks(frames):
+    """Reserve each frame a FIXED block of 2^opsel codepoints, where opsel comes
+    from the frame's budget (not its current fill). Blocks are buddy-allocated
+    largest-first, so they never overlap and a frame can grow into its own unused
+    slots — up to its budget — without moving any other frame. All blocks sit at
+    the uniform depth W = ceil(log2(total reserved)); the low WBITS-W bits are
+    then free for every frame to carry an extended immediate whenever the
+    namespace is not full. Returns (order, reserved, W)."""
+    total = sum(1 << f["opsel"] for f in frames)
+    W = max(1, (total - 1).bit_length()) if total > 1 else 1   # ceil(log2 total)
+    order = sorted(frames, key=lambda f: (-f["opsel"], f["a_rank"], f["name"]))
+    cursor = 0
     for f in order:
-        bl_count[f["id_len"]] = bl_count.get(f["id_len"], 0) + 1
-    next_code, code = {}, 0
-    for bits in range(1, WBITS + 1):
-        code = (code + bl_count.get(bits - 1, 0)) << 1
-        next_code[bits] = code
-    for f in order:
-        c = next_code[f["id_len"]]
-        next_code[f["id_len"]] += 1
-        f["id_val"] = c
-    return order
+        blk = 1 << f["opsel"]
+        base = ((cursor + blk - 1) // blk) * blk        # align to block size
+        f["base_cp"] = base
+        f["id_len"] = max(0, W - f["opsel"])
+        f["id_val"] = base >> f["opsel"]
+        f["depth"] = min(W, WBITS)
+        cursor = base + blk
+    order.sort(key=lambda f: f["base_cp"])
+    return order, total, W
 
 
 def word_chars(frame):
@@ -397,17 +362,17 @@ def main():
             continue
         base = opcode_demand(f.get("ops"))          # a×b combos, before ext
         d = opcode_codepoints(f, spec["grid"])      # real codepoints, ext-aware
+        budget = f.get("budget") or d               # reserve current fill if none
         wg, wh = wants_gh(f)
         fmt = a_format(f)
         frames.append({
             "name": f["name"], "spec": f, "demand": d, "base": base,
-            "opsel": opsel_bits(d),
+            "budget": budget, "opsel": opsel_bits(budget),
             "wg": wg, "wh": wh, "fmt": fmt, "a_rank": _FMT_RANK[fmt],
-            "conflict_hard": False,
         })
 
-    used = choose_lengths(frames)
-    order = assign_codes(frames)
+    order, reserved, W = allocate_blocks(frames)
+    overflow = reserved > (1 << WBITS)
     widths = list(spec["grid"]["display"]) + [9, 3]
     header = header_lines(widths)
 
@@ -417,57 +382,47 @@ def main():
     print("'0'/'1' = frame identifier (constant), 'o' = op-select, "
           "'g'/'h' = trailing low bit free to hold an extended A/B immediate, "
           "'.' = free/unused.\n")
-    print(f"Namespace used: {used}/{1<<WBITS} codepoints "
-          f"({100*used/(1<<WBITS):.0f}%).  "
-          f"{sum(f['promoted'] for f in frames)} frame(s) left room for an "
-          f"extended immediate.\n")
+    print(f"Reserved {reserved}/{1<<WBITS} codepoints across {len(frames)} frames "
+          f"({100*reserved/(1<<WBITS):.0f}%), each frame a fixed block sized to its\n"
+          f"budget so it can grow into its own free slots without moving the rest.\n")
     print("Each frame prints its form, then per template the encoding twice — the\n"
           "A instruction then the B — with the fields that slot does NOT use erased.\n"
           "A field kept in both copies is shared by both instructions.\n")
 
-    conflicts, freed = [], []
+    overbudget = []
     for f in order:
-        fr = f["spec"]
         idl, opsel, depth = f["id_len"], f["opsel"], f["depth"]
-        gh_used = depth > GH_FREE_DEPTH
-        clash = (f["wg"] or f["wh"]) and gh_used
+        block = 1 << opsel
+        room = block - f["demand"]
         opc = _FMT_OPC[f["fmt"]]
         opc_s = f"opcode[6:2]≈{opc:05b}" if opc is not None else "opcode[6:2]=mixed"
-        tags = []
-        if f["promoted"]:
-            tags.append("leaves codepoints for an extended immediate")
-        if clash:
-            tags.append("⚠ needs extended-immediate room but its opcode word is too long")
-            conflicts.append(f["name"])
-        if f.get("conflict_hard"):
-            tags.append("⚠ op-list too large to ever free g/h")
-        if f["promoted"] and not clash:
-            freed.append(f["name"])
-        tagstr = ("   [" + "; ".join(tags) + "]") if tags else ""
-
-        wide = f" ({f['base']} combos ×g/h)" if f["demand"] != f["base"] else ""
-        print(f"## {f['name']}{tagstr}")
+        tag = ""
+        if f["demand"] > block:
+            tag = "   [⚠ current fill exceeds its block]"
+            overbudget.append(f["name"])
+        idbits = f"{f['id_val']:0{idl}b}" if idl else "(none)"
+        print(f"## {f['name']}{tag}")
         print(f"    A-slot: {f['fmt']:7} ({opc_s})   "
-              f"{f['demand']} codepoints{wide} → {opsel} select bit(s); "
-              f"identifier {idl} bit(s) = {f['id_val']:0{idl}b}; "
-              f"total word depth {depth}/{WBITS}")
+              f"block {block} (budget {f['budget']}); using {f['demand']}, "
+              f"{room} free to grow; identifier {idl} bit(s) = {idbits}; "
+              f"depth {depth}/{WBITS}")
         print()
         render_frame_body(f, widths, header)
         print()
 
     print("─" * 72)
-    print(f"leaves codepoints for an extended immediate ({len(freed)}): "
-          f"{', '.join(freed) if freed else 'none'}")
-    print(f"\nextended-immediate CLASHES ({len(conflicts)}) — frame needs codepoints\n"
-          f"below its opcode word for a wider immediate, but the word is too long:")
-    for c in conflicts:
-        print(f"    {c}")
-    print("\nThe two 16×16 ALU frames (chain-alu-pair, rsd-alu-pair) alone claim\n"
-          "512 of the 1024 codepoints, which is what pushes the extended-immediate\n"
-          "frames to the full opcode-word length. Shrinking those op-lists (the\n"
-          "over-committers flagged by --opcodes) frees the budget to shorten the\n"
-          "clashing frames' words and reopen room for their immediates.")
+    if overflow:
+        print(f"⚠ OVERFLOW: reserved {reserved} > {1<<WBITS} codepoints — the planned\n"
+              f"  budgets do not fit the namespace. Shrink some budgets or op-lists.")
+    else:
+        print(f"Planned budgets FIT: {reserved}/{1<<WBITS} reserved, "
+              f"{(1<<WBITS)-reserved} spare. Every frame can grow to its full budget\n"
+              f"without overflowing the namespace or perturbing another frame.")
+    if overbudget:
+        print(f"\n⚠ Frames whose current fill already exceeds their block "
+              f"(raise the budget): {', '.join(overbudget)}")
+    return 1 if (overflow or overbudget) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
