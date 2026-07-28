@@ -26,7 +26,7 @@ from analysis.liveness import compute_global_liveness, compute_local_liveness
 from scheduler.pairing import stamp_slot_eligibility
 from scheduler.rules import RULES, NotPair
 
-IMM_SIGNED   = {"addi", "addiw", "andi", "addi_rsd", "addi_other", "li", "slti", "sltiu"}
+from analysis.imm_traits import SIGNED as IMM_SIGNED   # single source of truth
 SHIFT_MN     = {"slli", "srli", "srai", "slliw", "srliw", "sraiw"}
 
 

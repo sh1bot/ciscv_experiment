@@ -28,16 +28,19 @@ from analysis.parser import parse_file
 from analysis.liveness import compute_global_liveness, compute_local_liveness
 from scheduler.pairing import stamp_slot_eligibility
 from scheduler.rules import RULES, NotPair
-from analysis.encoding_budget import subform, signed_bits, unsigned_bits, IMM_SIGNED
+from analysis.encoding_budget import subform
 from analysis.imm_expr import parse_expr
+from analysis import imm_traits
 
 
 def required_bits(insn, scale, pair_mem_width=None):
     """Significant bits of insn's immediate once scaled the way this frame's
     field scales it (scale = 1 | int | 'k'). For 'k' on a non-memory insn (e.g.
-    a dual-mem addi stride k*imm), the paired memory op's width is used.
-    Returns None if there is no immediate, 0 if zero. An unaligned immediate
-    returns its unscaled width, which overflows any field -- flagging it."""
+    a post-inc addi stride k*imm), the paired memory op's width is used.
+    Signedness and zero-encodability are inferred per-opcode (imm_traits): an
+    arithmetic op cannot carry a zero immediate, so its field reclaims the zero
+    codepoint for one more magnitude. Returns None if there is no immediate,
+    0 if zero. An unaligned immediate returns its unscaled width (overflows)."""
     v = insn.imm
     if v is None:
         return None
@@ -45,11 +48,10 @@ def required_bits(insn, scale, pair_mem_width=None):
         return 0
     # scale is the multiplier: 1, an int (e.g. 16), or 'k' (the data width).
     div = (insn.access_width or pair_mem_width or 1) if scale == "k" else int(scale)
-    signed = subform(insn) in IMM_SIGNED         # signedness stays per-opcode
+    sf = subform(insn)
     if v % div != 0:                             # unaligned -> unencodable
-        return signed_bits(v) if signed else unsigned_bits(abs(v))
-    v //= div
-    return signed_bits(v) if signed else unsigned_bits(abs(v))
+        return imm_traits.required_bits(v, sf)
+    return imm_traits.required_bits(v // div, sf)
 
 _TOKEN = re.compile(r"^(imm[ab]?)\[(.+)\]$")
 
