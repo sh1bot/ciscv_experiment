@@ -62,7 +62,7 @@ def load_frames():
             continue
         f = node["frame"]
         rels[f["name"]] = frame_relations(f)
-        for rn in [x.strip() for x in f["name"].split(",")]:
+        for rn in f.get("rules_py_names") or [x.strip() for x in f["name"].split(",")]:
             rule2frame[rn] = f["name"]
     return rule2frame, rels
 

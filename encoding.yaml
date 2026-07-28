@@ -282,6 +282,7 @@ doc:
 
   - frame:
       name: post-inc-pair
+      rules_py_names: [dual-mem-addi-pair, dual-mem-shadd-pair]   # rule names in rules.py this frame covers
       budget: 16
       level: 2
       templates:

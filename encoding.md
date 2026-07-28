@@ -180,31 +180,34 @@ Also chain rules with surviving first result, but also sometimes a second result
 │h│  rs2b   │g│imma[4:0]│  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│immb[4:0]│g│imma[4:0]│  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
 
+* TODO: Try zero memory offset and all the load/store permutations instead
 * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
 
-## dual-mem-addi-pair, dual-mem-shadd-pair
+## post-inc-pair
 
-    load    rdb, 0(rsda)
-    shXadd  rsda, rsda, rs2a
+    load    rda, k*imma(rsda)
+    shXadd  rsda, rsda, rs2b
 
-    store   rs2a, 0(rsda)
-    shXadd  rsda, rsda, rs2a
+    store   rs2a, k*imma(rsda)
+    shXadd  rsda, rsda, rs2b
 
-    addi    rsda, rsda, k*imma
-    load    rdb, -k*imma(rsda)
+    load    rda, k*imma(rsda)
+    addi    rsda, rsda, k*immb
 
-    addi    rsda, rsda, k*imma
-    store   rs2b, -k*imma(rsda)
+    store   rs2a, k*imma(rsda)
+    addi    rsda, rsda, k*immb
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs2b   │g│  rs2a   │  rsda   │ fn3 │imma[4:0]│ opcode5 │1 0│
-│h│imma[4:0]│g│  rs2a   │  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│imma[4:0]│  rsda   │ fn3 │imma[4:0]│ opcode5 │1 0│
-│h│imma[4:0]│g│imma[4:0]│  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│  rs2b   │g│imma[4:0]│  rsda   │ fn3 │   rda   │ opcode5 │1 0│
+│h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │imma[4:0]│ opcode5 │1 0│
+│h│immb[4:0]│g│imma[4:0]│  rsda   │ fn3 │   rda   │ opcode5 │1 0│
 
-* Note: somewhat contorted logic for coherent `rd` field usage.
+* Timing oddity here because reg in `rd` field is written in first cycle not second.
+* TODO: Try zero memory offset and all the load/store permutations instead
+* TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
 
 # Other stuff
 

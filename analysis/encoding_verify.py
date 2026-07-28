@@ -148,7 +148,9 @@ def main():
         f = node["frame"]
         caps[f["name"]] = frame_capacities(f)
         scales[f["name"]] = slot_exprs(f)
-        for rn in [x.strip() for x in f["name"].split(",")]:
+        # A frame may list the scheduler rules it covers (when its display name
+        # differs from the rule names); otherwise the name IS the rule list.
+        for rn in f.get("rules_py_names") or [x.strip() for x in f["name"].split(",")]:
             rule2frame[rn] = f["name"]
 
     known = {r.name for r in RULES}
