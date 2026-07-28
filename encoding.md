@@ -163,13 +163,13 @@ Also chain rules with surviving first result, but also sometimes a second result
     shXadd  rsda, rsda, rs2a
     load    rdb, k*immb(rsda)
 
-    addi    rsda, rsda, imma
+    addi    rsda, rsda, k*imma
     load    rdb, k*immb(rsda)
 
     shXadd  rsda, rsda, rs2a
     store   rs2b, k*immb(rsda)
 
-    addi    rsda, rsda, imma
+    addi    rsda, rsda, k*imma
     store   rs2b, k*immb(rsda)
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐

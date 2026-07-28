@@ -33,7 +33,7 @@ from analysis.encoding_budget import subform, signed_bits, unsigned_bits, IMM_SI
 
 def required_bits(insn, scale, pair_mem_width=None):
     """Significant bits of insn's immediate once scaled the way this frame's
-    field scales it (scale = 1 | int | 'w'). For 'w' on a non-memory insn (e.g.
+    field scales it (scale = 1 | int | 'k'). For 'k' on a non-memory insn (e.g.
     a dual-mem addi stride k*imm), the paired memory op's width is used.
     Returns None if there is no immediate, 0 if zero. An unaligned immediate
     returns its unscaled width, which overflows any field -- flagging it."""
@@ -42,9 +42,8 @@ def required_bits(insn, scale, pair_mem_width=None):
         return None
     if v == 0:
         return 0
-    # scale is the frame's declared multiplier: 1, an int (e.g. 16), or 'w'
-    # (the instruction's data width).
-    div = (insn.access_width or pair_mem_width or 1) if scale == "w" else int(scale)
+    # scale is the multiplier: 1, an int (e.g. 16), or 'k' (the data width).
+    div = (insn.access_width or pair_mem_width or 1) if scale == "k" else int(scale)
     signed = subform(insn) in IMM_SIGNED         # signedness stays per-opcode
     if v % div != 0:                             # unaligned -> unencodable
         return signed_bits(v) if signed else unsigned_bits(abs(v))
@@ -100,7 +99,7 @@ def cap_for(cap, is_sp):
 
 def imm_semantics(frame):
     """Declared immediate semantics per slot: {'a': {...}, 'b': {...}} with
-    keys scale (1|int|'w') and unbounded (bool). 'imm' (shared) applies to both
+    keys scale (1|int|'k') and unbounded (bool). 'imm' (shared) applies to both
     slots; 'imma'->a, 'immb'->b. Slots with no declared immediate get None."""
     sem = {"a": None, "b": None}
     for name, spec in (frame.get("imm") or {}).items():
@@ -194,9 +193,15 @@ def main():
                         ok, saw = True, False
                         for insn, side in ((a, "a"), (b, "b")):
                             s = sem.get(side)
-                            if s is None or s["unbounded"]:
-                                continue           # no declared field / optimistic
-                            need = required_bits(insn, s["scale"], mem_w)
+                            if s is not None and s["unbounded"]:
+                                continue           # declared optimistic (branch disp)
+                            # Declared semantics override; otherwise infer from the
+                            # instruction: a memory op scales by its width (k), any
+                            # other immediate is unscaled. (Branch/jump displacements
+                            # are unresolved labels -> insn.imm is None -> skipped.)
+                            scale = s["scale"] if s is not None else \
+                                ("k" if insn.has_mem_operand else 1)
+                            need = required_bits(insn, scale, mem_w)
                             if need is None or need == 0:
                                 continue           # no / zero immediate to pack
                             saw = True

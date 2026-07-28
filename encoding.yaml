@@ -138,9 +138,6 @@ doc:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
       ops:
         - {a: *rsd_alu, b: *rsd_alu}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
@@ -155,9 +152,6 @@ doc:
         - ["load    tmp, k*imma(sp)", "alu     rdb, tmp, rs2b/immb"]
       ops:
         - {a: [lw, lwu, ld], b: *rsd_alu}
-      imm:
-        imma: {signed: false, scale: w}
-        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rs2b",      "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
         - ["h", "immb[4:0]", "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
@@ -172,9 +166,6 @@ doc:
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(sp)"]
       ops:
         - {a: *rsd_alu, b: [sw, sd]}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: false, scale: w}
       rows:
         - ["h", "rs1b",      "g", "rs2a",      "rs1a", "fn3", "immb[4:0]"]
         - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
@@ -188,9 +179,6 @@ doc:
         - ["load    tmp, k*imma(rs1a)", "load    rdb, k*immb(tmp)"]
       ops:
         - {a: *loads, b: *loads}
-      imm:
-        imma: {signed: false, scale: w}
-        immb: {signed: false, scale: w}
       rows:
         - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
         - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
@@ -206,9 +194,6 @@ doc:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
       ops:
         - {a: [*li_6s], b: *branches}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1b", "fn3", "immb[4:0]"]
       notes: |
@@ -223,9 +208,6 @@ doc:
         - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
       ops:
         - {a: [andi, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
-      imm:
-        imma: {signed: false, scale: 1}
-        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rs1a", "fn3", "immb[4:0]"]
 
@@ -240,9 +222,6 @@ doc:
         - ["load    rda, k*imma(rs1a)", "beqz/bnez rda, zero, 4*immb"]
       ops:
         - {a: *loads, b: [beqz, bnez]}
-      imm:
-        imma: {signed: false, scale: w}
-        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
         - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
@@ -256,9 +235,6 @@ doc:
         - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
       ops:
         - {a: [*addi_6s, *addiw_6s], b: *branches}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: true, scale: 4, unbounded: true}
       rows:
         - ["h", "immb[9:5]", "imma[5:0]*2", "rsda", "fn3", "immb[4:0]"]
 
@@ -272,16 +248,15 @@ doc:
       level: 2
       templates:
         - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
-        - ["addi    rsda, rsda, imma", "load    rdb, k*immb(rsda)"]
+        - ["addi    rsda, rsda, k*imma", "load    rdb, k*immb(rsda)"]
         - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
-        - ["addi    rsda, rsda, imma", "store   rs2b, k*immb(rsda)"]
+        - ["addi    rsda, rsda, k*imma", "store   rs2b, k*immb(rsda)"]
       ops:
         - {a: [addi],   b: [ld, sd]}
         - {a: [sh2add], b: [lw, sw]}
         - {a: [add],    b: [slt]}
       imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: false, scale: w}
+        imma: {scale: k}       # addi modifies rsda, a load/store base: width-scaled
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "immb[4:0]"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -303,7 +278,7 @@ doc:
         - {a: [ld, sd],             b: [sh3add]}
         - {a: [lw, lwu, sw],        b: [sh2add]}
       imm:
-        imm: {signed: false, scale: w, nonzero: remap}
+        imm: {scale: k}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "imma[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
@@ -335,8 +310,6 @@ doc:
         - {a: [sh],  b: [sh]}
         - {a: [sw],  b: [sw]}
         - {a: [sd],  b: [sd]}
-      imm:
-        imm: {signed: false, scale: w}
       rows:
         - ["h", "rda",  "imm[5:0]*2",       "rbase", "fn3", "rdb"]
         - ["h", "rs2b", "i", "rs2a",        "rbase", "fn3", "imm[4:0]"]
@@ -372,9 +345,6 @@ doc:
         - ["li      rda, imma", "li      rdb, immb"]
       ops:
         - {a: [li, mv, addi4spn], b: [li, mv, addi4spn]}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
         - ["h", "rda", "g", "immb[4:0]", "rs1a",      "fn3", "rdb"]
@@ -387,9 +357,6 @@ doc:
         - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
       ops:
         - {a: *rsd_alu, b: *rsd_alu}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: true, scale: 1}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "rsdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "rsdb"]
@@ -412,7 +379,7 @@ doc:
       ops:
         - {a: [addi], b: [sw, sd]}
       imm:
-        imma: {signed: false, scale: 16, nonzero: true, negated: true}
+        imma: {scale: 16}
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
 
@@ -424,7 +391,7 @@ doc:
       ops:
         - {a: [addi], b: [jalr, ret]}
       imm:
-        imma: {signed: false, scale: 16, nonzero: true}
+        imma: {scale: 16}
       rows:
         - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
 
@@ -440,8 +407,6 @@ doc:
         - ["li     rsda, imma", "jr/jalr rs1b"]
       ops:
         - {a: *rsd_alu, b: [ret, jalr, j, jal]}
-      imm:
-        imma: {signed: true, scale: 1}
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 1 0"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 1 0"]
@@ -454,9 +419,6 @@ doc:
         - ["alu     rsda, rsda, rs2a/imma", "store   rs2b, k*immb(rs1b)"]
       ops:
         - {a: [add, sub, and, or, addi], b: *mem}
-      imm:
-        imma: {signed: true, scale: 1}
-        immb: {signed: false, scale: w}
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "rdb"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "rs2b"]
