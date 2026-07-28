@@ -64,8 +64,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │ imma[5:0] │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│immb[4:0]│ imma[5:0] │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│  rs2b   │g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │   rdb   │ opcode5 │1 0│ (SP-relative)
 │h│immb[4:0]│g│   imma[4:0|9:5]   │ fn3 │   rdb   │ opcode5 │1 0│ (SP-relative)
 

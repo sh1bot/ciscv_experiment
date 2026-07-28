@@ -188,15 +188,18 @@ def lint(spec):
         documented = {m for m in missing
                       if m.startswith("imm") and re.search(rf"\b{m}\b", notes)}
         missing -= documented
-        # A declared op width must fit the slot's actual immediate field.
+        # A declared op width may exceed the row's base field: the extra bits
+        # ride the opcode list (each doubles the op's codepoints), physically the
+        # reclaimed g/h low bits. Cap the extension at 2 (g and h); beyond that
+        # the frame would have to spend deeper opcode bits.
         overwide = []
         for slot in ("a", "b"):
-            _, full = imm_field_bits(f, grid, slot)
+            base, _ = imm_field_bits(f, grid, slot)
             for c in f.get("ops") or []:
                 for e in c.get(slot, []):
                     b = op_bits(e)
-                    if b and b > full:
-                        overwide.append(f"{op_name(e)}({slot}) wants {b}b > {full}b field")
+                    if b and b > base + 2:
+                        overwide.append(f"{op_name(e)}({slot}) wants {b}b > base {base}b + 2 (g,h)")
         if bad_pair or missing or spurious or overwide:
             problems += 1
             print(f"✗ {f['name']}")

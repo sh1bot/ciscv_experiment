@@ -154,16 +154,16 @@ doc:
 
   - frame:
       name: load-chain-alu-pair
-      budget: 64
+      budget: 128
       level: 2
       templates:
         - ["load    tmp, k*imma(rs1a)", "alu     rdb, tmp, rs2b/immb"]
         - ["load    tmp, k*imma(sp)", "alu     rdb, tmp, rs2b/immb"]
-      ops:
-        - {a: [lw, lwu, ld], b: *rsd_alu}
+      ops:                     # 6-bit load offset via the opcode list, not a g bit
+        - {a: [{op: lw, imm: {bits: 6}}, {op: lwu, imm: {bits: 6}}, {op: ld, imm: {bits: 6}}], b: *rsd_alu}
       rows:
-        - ["h", "rs2b",      "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
-        - ["h", "immb[4:0]", "imma[5:0]*2",      "rs1a", "fn3", "rdb"]
+        - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
+        - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
         - {c: ["h", "rs2b",      "g", "imma[4:0|9:5]*2", "fn3", "rdb"], tag: SP-relative}
         - {c: ["h", "immb[4:0]", "g", "imma[4:0|9:5]*2", "fn3", "rdb"], tag: SP-relative}
 
