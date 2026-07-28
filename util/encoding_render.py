@@ -167,6 +167,64 @@ def row_operands(cells):
     return ops
 
 
+def template_op_fields(frame):
+    """{slot: {op-name: {field, ...}}} learned from the frame's templates.
+
+    A template line names its op and the operand fields that op uses, with `/`
+    marking aligned alternatives -- "mv/li rdb, rs2b/immb" says mv takes rs2b
+    and li takes immb. Lines whose op is a generic placeholder (`alu`, `load`,
+    `store`, `shXadd`) name no concrete op, so they contribute nothing and the
+    caller simply skips those ops.
+    """
+    out = {"a": {}, "b": {}}
+    for pair in frame.get("templates", []):
+        if len(pair) != 2:
+            continue
+        for slot, line in (("a", pair[0]), ("b", pair[1])):
+            mnem, _, rest = line.strip().partition(" ")
+            alts = mnem.split("/")
+            for i, op in enumerate(alts):
+                # resolve each operand, taking the i-th alternative where the
+                # operand offers alternatives aligned with the op alternatives
+                fields = set()
+                for operand in rest.split(","):
+                    operand = operand.strip()
+                    choices = operand.split("/")
+                    pick = choices[i] if len(choices) == len(alts) else choices[0]
+                    fields |= set(_OPERAND.findall(pick))
+                out[slot].setdefault(op, set()).update(fields - _IMPLICIT)
+    return out
+
+
+def unencodable_clusters(frame):
+    """(opA, opB) combinations `ops` allows for which NO row supplies the fields
+    both sides need. Only pairs whose ops are both named in the templates are
+    judged; a placeholder-templated frame (`alu`, `load`, ...) is skipped.
+
+    This is the check that a per-slot field-name comparison cannot make: each
+    side may be individually encodable while no single row carries both.
+    """
+    tof = template_op_fields(frame)
+    rows = [set(row_operands(r["c"] if isinstance(r, dict) else r))
+            for r in frame.get("rows", [])]
+    bad = []
+    for cluster in frame.get("ops") or []:
+        for ea in cluster.get("a", []):
+            na = op_name(ea)
+            fa = tof["a"].get(na)
+            if fa is None:
+                continue
+            for eb in cluster.get("b", []):
+                nb = op_name(eb)
+                fb = tof["b"].get(nb)
+                if fb is None:
+                    continue
+                if not any(fa <= r and fb <= r for r in rows):
+                    bad.append(f"({na}, {nb}) needs "
+                               f"{sorted(fa)}+{sorted(fb)}, no row has both")
+    return bad
+
+
 def lint(spec):
     grid = spec["grid"]
     problems = 0
@@ -181,6 +239,7 @@ def lint(spec):
 
         notes = f.get("notes", "") or ""
         bad_pair = [p for p in pairs if len(p) != 2]
+        unencodable = unencodable_clusters(f)
         missing = asm_ops - row_ops           # operand in asm, never encoded
         spurious = row_ops - asm_ops          # field in a row, not in any asm
         # A small immediate carried in the g/h bits shows as "g"/"h" cells, not
@@ -205,7 +264,7 @@ def lint(spec):
                         on_opcode_list.append(
                             f"{op_name(e)}({slot}) {b}b = {base}b field + "
                             f"{b - base}b via {1 << (b - base)} codepoints")
-        if bad_pair or missing or spurious:
+        if bad_pair or missing or spurious or unencodable:
             problems += 1
             print(f"✗ {f['name']}")
             if bad_pair:
@@ -215,6 +274,10 @@ def lint(spec):
                 print(f"    operands in asm but NOT encoded in any row: {sorted(missing)}")
             if spurious:
                 print(f"    fields in rows but NOT used by any asm line: {sorted(spurious)}")
+            if unencodable:
+                print(f"    ops combination with no row to encode it:")
+                for u in unencodable:
+                    print(f"        {u}")
         else:
             extra = f"  [{','.join(sorted(documented))} in g/h per notes]" if documented else ""
             print(f"✓ {f['name']}  ({len(pairs)} pair(s), {len(rows)} row(s)){extra}")
