@@ -74,16 +74,17 @@ _RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
 # encoded field, so li/mv/addi4spn are register choices rather than opcodes and
 # fold into `addi` -- which is why only addi earns extra range here.
 # rsd-alu-pair and arith-jump-pair keep _RSD_ALU_MN (different population).
-_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "and", "or", "sub", "xor",
-                           "mul", "maxu", "slli", "srli", "srai", "srliw"})
-_CHAIN_IMM_BITS = {"addi": 7, "andi": 5}     # signed, per the yaml op contracts
-_CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srai", "srliw"})
+_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
+                           "xor", "xori", "maxu", "sltu", "sltiu",
+                           "slli", "srli", "srliw"})
+_CHAIN_IMM_BITS = {"addi": 6, "andi": 5, "xori": 5, "sltiu": 5}   # signed
+_CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
 _CHAIN_SHIFT_HI = 31                          # 5-bit unsigned shift amount
 
 
 def _chain_imm_in_range(insn: Instruction) -> None:
     """Immediate / shift range for a chain-frame ALU op, per encoding.yaml's
-    `chain_alu` op contracts. addi carries a signed 7-bit field (it is also the
+    `chain_alu` op contracts. addi carries a signed 6-bit field (it is also the
     li/mv form, so zero is encodable, and it is where the wide constants are);
     andi the 5-bit base range; shifts an unsigned 5-bit amount."""
     bits = _CHAIN_IMM_BITS.get(insn.mnemonic)
@@ -471,6 +472,48 @@ def b_sp_mem(func: Callable):
 def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
     return None
+
+
+# ---------------------------------------------------------------------------
+# const-store-pair
+# ---------------------------------------------------------------------------
+# encoding.yaml `const-store-pair`: materialise a literal and store it.
+#
+#     A: li tmp, imma          B: store tmp, k*immb(rbase)   (or (sp))
+#
+# The constant has no register input (li is `addi rd, x0, imm`) and tmp is dead
+# at the store, so neither is encoded -- all 20 operand bits go to the constant
+# and the address. Hence a 10-bit constant AND a 10-bit sp offset, which no
+# generic frame could afford. The base-register variant spends five of those
+# bits on rbase and takes a 5-bit offset instead.
+#
+# No register window applies: the frame encodes at most one register, in a full
+# 5-bit field.
+_CONST_STORE_MN = frozenset({"sb", "sh", "sw", "sd"})
+_CONST_STORE_BITS = 10                       # signed constant field
+_CONST_STORE_SP_OFF = 10                     # width-scaled, sp variant
+_CONST_STORE_BASE_OFF = 5                    # width-scaled, base variant
+
+
+def _const_store_pair(a: Instruction, b: Instruction) -> None:
+    """A materialises a literal; B stores it, after which it is dead."""
+    if not a.is_li:
+        raise NotPair("A-is-not-li")
+    if a.imm is None:
+        raise NotPair("MALFORMED: missing-immediate")
+    lo, hi = -(1 << (_CONST_STORE_BITS - 1)), (1 << (_CONST_STORE_BITS - 1)) - 1
+    if not (lo <= a.imm <= hi):
+        raise NotPair("A-big-imm")
+    if a.rd is None or b.rs2 != a.rd:
+        raise NotPair("not-chain")
+    if a.rd in b.live_out:
+        raise NotPair("A-result-escapes")
+    if b.rs1 is None:
+        raise NotPair("MALFORMED: missing register operand")
+    shift = b.access_shift if b.access_shift is not None else 0
+    width = _CONST_STORE_SP_OFF if b.rs1 == 2 else _CONST_STORE_BASE_OFF
+    if not b.uimm_fits(width, shift):
+        raise NotPair("B-big-imm")
 
 
 @chain_uses_low_regs
@@ -1143,6 +1186,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_SP_LOAD_MN,
         b_mnemonic_set=_CHAIN_ALU_MN,
         check=_load_chain_alu_pair,
+    ),
+    PairingRule(
+        name="const-store-pair",
+        a_mnemonic_set=frozenset({"addi"}),
+        b_mnemonic_set=_CONST_STORE_MN,
+        check=_const_store_pair,
     ),
     PairingRule(
         name="store-chain-alu-pair",

@@ -89,20 +89,26 @@ opsets:
   # Only addi earns extra range (7-bit, 4 codepoints) -- it carries li/mv, so it
   # is where the wide constants are. Spending 8 codepoints on an 8-bit addi, as
   # the first attempt did, buys almost nothing and starves the op list.
+  # Re-optimised after const-store-pair was carved out: that frame drains the
+  # `li tmp, K` + store cases from store-chain (869 -> 295 pairs), which were
+  # what justified a 7-bit addi. 6 bits now suffice, freeing 2 slots for two
+  # more opcodes. Capture over the three chain populations 578 -> 639.
   chain_alu: &chain_alu
-    - {op: addi, imm: {bits: 7, signed: true}}     # 4 codepoints; carries li/mv
+    - {op: addi, imm: {bits: 6, signed: true}}     # 2 codepoints; carries li/mv
     - add
+    - addw
     - and
     - andi
     - maxu
-    - mul
     - or
     - slli
-    - srai
+    - sltiu
+    - sltu
     - srli
     - srliw
     - sub
     - xor
+    - xori
   loads:    &loads    [lb, lbu, lh, lhu, lw, lwu, ld]
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
   mem:      &mem      [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
@@ -280,6 +286,43 @@ doc:
         - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
         - {c: ["h", "immb[9:5]", "g", "rs2a",      "rs1a", "fn3", "immb[4:0]"], tag: SP-relative}
         - {c: ["h", "immb[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"], tag: SP-relative}
+
+  - frame:
+      name: const-store-pair
+      # Carved out of store-chain-alu-pair: `li tmp, imma` then store tmp.
+      # The constant has no register input (rs1 = x0) and tmp is dead at the
+      # store, so NEITHER is encoded -- all 20 operand bits go to the constant
+      # and the address. That is why a 10-bit constant plus a 10-bit sp offset
+      # fits where no generic frame could afford it.
+      #
+      # The constant only needs 8 bits: on the corpus 8 covers 99.7% of stored
+      # constants once KeyMappingX11::initialize() is excluded. That function
+      # was 55.5% of the population and 100% of every band above 8 bits -- it
+      # spills several hundred consecutive X11 keysyms to the stack. See
+      # ACCOUNTING.md on top-contributor concentration. The field is drawn at
+      # 10 because rs2+rs1 is the natural 10-bit span in this grid and the two
+      # extra bits are free; 8 would have cost the same.
+      #
+      # A lui-composed constant can never reach this frame: its low half is
+      # `addi rd, rd, lo` with rd == rs1, which is addi_rsd, while li requires
+      # rs1 == x0. The two forms are mutually exclusive.
+      budget: 4
+      level: 2
+      templates:
+        - ["li      tmp, imma", "store   tmp, k*immb(rbase)"]
+        - ["li      tmp, imma", "store   tmp, k*immb(sp)"]
+      ops:
+        - {a: [{op: li, imm: {bits: 10, signed: true}}], b: [sb, sh, sw, sd]}
+      rows:
+        - ["h", "rbase", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"]
+        - {c: ["h", "immb[9:5]", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
+      notes: |
+         * The data width comes from the op list (sb/sh/sw/sd), as in the other
+           memory frames, rather than a width field -- 4 codepoints is cheaper
+           than two bits of layout, and it matches existing convention.
+         * sp gets a 10-bit scaled offset, a base register 5 bits, following the
+           split the other memory frames use. The base variant spends its five
+           spare bits on rbase, which is why its offset is the narrower one.
 
   - frame:
       name: "deref-chain-load-pair, base-chain-load-pair"
