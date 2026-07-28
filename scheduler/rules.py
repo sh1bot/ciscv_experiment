@@ -72,20 +72,20 @@ _RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
 # The ALU set shared by the three CHAIN frames — encoding.yaml `chain_alu`.
 # Chain slots write `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1 an
 # encoded field, so li/mv/addi4spn are register choices rather than opcodes and
-# fold into `addi`; the set buys immediate WIDTH instead of rare opcodes.
+# fold into `addi` -- which is why only addi earns extra range here.
 # rsd-alu-pair and arith-jump-pair keep _RSD_ALU_MN (different population).
-_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "and", "or", "sub",
-                           "slli", "srli"})
-_CHAIN_IMM_BITS = {"addi": 8, "andi": 6}     # signed, per the yaml op contracts
-_CHAIN_SHIFT_MN = frozenset({"slli", "srli"})
+_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "and", "or", "sub", "xor",
+                           "mul", "maxu", "slli", "srli", "srai", "srliw"})
+_CHAIN_IMM_BITS = {"addi": 7, "andi": 5}     # signed, per the yaml op contracts
+_CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srai", "srliw"})
 _CHAIN_SHIFT_HI = 31                          # 5-bit unsigned shift amount
 
 
 def _chain_imm_in_range(insn: Instruction) -> None:
     """Immediate / shift range for a chain-frame ALU op, per encoding.yaml's
-    `chain_alu` op contracts. addi carries a signed 8-bit field (it is also the
-    li/mv form, so zero is encodable); andi a signed 6-bit; shifts an unsigned
-    5-bit amount."""
+    `chain_alu` op contracts. addi carries a signed 7-bit field (it is also the
+    li/mv form, so zero is encodable, and it is where the wide constants are);
+    andi the 5-bit base range; shifts an unsigned 5-bit amount."""
     bits = _CHAIN_IMM_BITS.get(insn.mnemonic)
     if bits is not None:
         imm = insn.imm

@@ -76,21 +76,33 @@ opsets:
   # *rsd_alu, as does arith-jump-pair; both are still to be optimised.)
   #
   # Chosen by biclique search over the three chain populations jointly, priced
-  # in codepoints (W=16 -> 16x16 + 4x16 + 16x2 = 256 + 64 + 32, exactly the
-  # blocks already reserved). Against the old *rsd_alu list at the same cost:
-  # capture 22.7% -> 56.8% of chain-eligible adjacencies. It wins by trading
-  # eight rarely-chained ops (addiw addw andn mul mulhu srai subw xor) for
-  # immediate WIDTH on addi -- store-chain alone carries 1619 li/mv, i.e. wide
-  # constants materialised then stored, which a 5-bit field cannot reach.
+  # in codepoints: W=16 -> 16x16 + 4x16 + 16x2 = 256 + 64 + 32, exactly the
+  # blocks already reserved.
+  #
+  # The search runs over pairs rules.py ACTUALLY accepts -- the rule widened to
+  # a generous op set and an unrestricted immediate, then the real checks run
+  # over the corpus. An earlier attempt optimised a structural population (any
+  # ALU op in a chain position) and cost 93 pairs: it ignored the register
+  # window, no_escape and commutative fitting, so its gains landed on pairs
+  # rules.py rejects anyway while its losses landed on pairs it was accepting.
+  #
+  # Only addi earns extra range (7-bit, 4 codepoints) -- it carries li/mv, so it
+  # is where the wide constants are. Spending 8 codepoints on an 8-bit addi, as
+  # the first attempt did, buys almost nothing and starves the op list.
   chain_alu: &chain_alu
-    - {op: addi, imm: {bits: 8, signed: true}}     # 8 codepoints; carries li/mv
-    - {op: andi, imm: {bits: 6, signed: true}}     # 2 codepoints
+    - {op: addi, imm: {bits: 7, signed: true}}     # 4 codepoints; carries li/mv
     - add
     - and
+    - andi
+    - maxu
+    - mul
     - or
-    - sub
-    - slli                                          # 5-bit covers 98% of shifts
+    - slli
+    - srai
     - srli
+    - srliw
+    - sub
+    - xor
   loads:    &loads    [lb, lbu, lh, lhu, lw, lwu, ld]
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
   mem:      &mem      [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
