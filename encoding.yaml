@@ -16,6 +16,17 @@
 # several; a shared-opcode frame (both slots identical) is a list of singleton
 # {a: [x], b: [x]} clusters.
 #
+# ORDER-INSENSITIVE frames: when the two slots hold independent operations,
+# (x, y) and (y, x) compute the same thing, so only one of them needs a
+# codepoint. Such a frame must be written LONGHAND as a triangle over a stated
+# canonical order — {a:[x], b:[x,y,z]}, {a:[y], b:[y,z]}, {a:[z], b:[z]} — and
+# the scheduler normalises each pair into that order before encoding. Writing
+# the full cross product instead costs n² codepoints to express n(n+1)/2
+# distinct packets, very nearly double. There is deliberately no `unordered:`
+# shorthand: the triangle states the canonical order explicitly, which the
+# encoder needs anyway, and it keeps the codepoint count a plain sum of cluster
+# products with no special case in the tooling.
+#
 # A frame's optional `budget` is a sanity check on its codepoint count (see
 # `python3 util/encoding_render.py --opcodes`): the count must land in
 # (budget/2, budget]. Over the budget means too many ops for the allotted
@@ -358,13 +369,26 @@ doc:
 
   - frame:
       name: dual-indep-pair
-      budget: 16
+      # 6 codepoints once the triangle stopped double-counting (was 9 under the
+      # cross product, against a 16 reserved for it). Right-sized to 8 rather
+      # than left at 16: growing the frame is a design decision, not a standing
+      # reservation. It probably should grow — corpus analysis says it wants
+      # addi_rsd and a scaled addi4spn immediate — but that is a separate edit.
+      budget: 8
       level: 1
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
         - ["li      rda, imma", "li      rdb, immb"]
+      # Order-insensitive: the two ops are independent, so (x, y) and (y, x)
+      # compute the same thing and only ONE needs a codepoint. Written longhand
+      # as a triangle in the canonical order li < mv < addi4spn -- the scheduler
+      # normalises a pair into that order before encoding. A full cross product
+      # here would be the bug it replaced: 3x3 = 9 codepoints to express 6
+      # distinct packets. See the `ops` note in the header.
       ops:
-        - {a: [li, mv, addi4spn], b: [li, mv, addi4spn]}
+        - {a: [li],       b: [li, mv, addi4spn]}
+        - {a: [mv],       b: [mv, addi4spn]}
+        - {a: [addi4spn], b: [addi4spn]}
       rows:
         - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
         - ["h", "rda", "g", "immb[4:0]", "rs1a",      "fn3", "rdb"]
