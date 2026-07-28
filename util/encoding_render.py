@@ -369,6 +369,74 @@ def opcodes(spec):
     return 0
 
 
+# --- equivalences: lint + deduce which frames each one feeds ---------------
+_KNOWN_GUARDS = {"single_bit", "low_mask", "high_mask"}
+
+
+def _head_ops(line):
+    """The mnemonic(s) heading an asm line, splitting an X/Y alternate."""
+    head = line.strip().split()[0] if line.strip() else ""
+    return set(head.split("/"))
+
+
+def _frame_op_sets(frame):
+    a, b = set(), set()
+    for c in frame.get("ops") or []:
+        a |= {op_name(e) for e in c.get("a", [])}
+        b |= {op_name(e) for e in c.get("b", [])}
+    return a, b
+
+
+def equivalences(spec):
+    equivs = spec.get("equivalences") or []
+    frames = [n["frame"] for n in spec["doc"] if "frame" in n]
+    problems = 0
+    print(f"{len(equivs)} equivalence(s). Each `spelled` surface form is accepted "
+          f"as matching the frame(s)\nwhose templates realise the `canonical` form:\n")
+    for eq in equivs:
+        name = eq.get("name", "?")
+        canon = eq.get("canonical") or []
+        spelled = eq.get("spelled") or []
+        when = eq.get("when") or {}
+        bind = eq.get("bind") or {}
+        issues = []
+        if not canon or not spelled:
+            issues.append("missing canonical/spelled")
+        elif len(canon) != len(spelled):
+            issues.append(f"{len(canon)} canonical vs {len(spelled)} spelled lines")
+        for var, cls in when.items():
+            if cls not in _KNOWN_GUARDS:
+                issues.append(f"unknown guard class '{cls}' (known: {sorted(_KNOWN_GUARDS)})")
+        # a named-class guard binds `n`; every bind expression must reference it
+        for tgt, expr in bind.items():
+            if "n" not in re.findall(r"[A-Za-z_]\w*", str(expr)):
+                issues.append(f"bind {tgt}={expr!r} does not reference n")
+        # which frames realise the canonical form? match head opcodes per slot
+        ca = _head_ops(canon[0]) if canon else set()
+        cb = _head_ops(canon[-1]) if len(canon) > 1 else set()
+        hits = []
+        for f in frames:
+            fa, fb = _frame_op_sets(f)
+            if len(canon) > 1:
+                if (ca & fa) and (cb & fb):
+                    hits.append(f["name"])
+            elif ca & (fa | fb):                 # single-line op alias
+                hits.append(f["name"])
+        tgt = ", ".join(hits) if hits else "(no frame yet)"
+        mark = "✗" if issues else "✓"
+        print(f" {mark} {name}")
+        print(f"     {' ; '.join(spelled)}  ⟶  {' ; '.join(canon)}")
+        if when:
+            print(f"     guard {when}   bind {bind or '(none)'}")
+        print(f"     realised by: {tgt}")
+        if issues:
+            problems += 1
+            print(f"     ISSUES: {issues}")
+        print()
+    print(f"{problems} equivalence(s) with problems.")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--yaml", default=os.path.join(ROOT, "encoding.yaml"))
@@ -379,7 +447,13 @@ def main():
                     help="check asm<->row operand correspondence")
     ap.add_argument("--opcodes", action="store_true",
                     help="report per-frame opcode-field demand vs namespace")
+    ap.add_argument("--equiv", action="store_true",
+                    help="lint equivalences and show which frames each feeds")
     args = ap.parse_args()
+
+    if args.equiv:
+        with open(args.yaml) as fh:
+            sys.exit(1 if equivalences(yaml.safe_load(fh)) else 0)
 
     if args.lint:
         with open(args.yaml) as fh:
