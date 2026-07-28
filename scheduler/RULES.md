@@ -564,11 +564,11 @@ statistics stand alone) but all share one mechanism (`dual_family`):
 | Rule | Tuples | Sharing requirement |
 |---|---|---|
 | `dual-arith2-pair` | `add/sub`, `addw/subw`, `min/max`, `minu/maxu`, `mul/mulh`, `mul/mulhu`, `mul/mulhsu`, `div/rem`, `divu/remu`, `divw/remw`, `divuw/remuw` | both R-type; share `rs1` *and* `rs2` positionally |
-| `dual-load-addi-pair` | `ld/addi`, `lw/addi`, `lwu/addi` | load base == addi source; load offset 0; addi imm = nonzero width-scaled `uimm5` (the stride) |
-| `dual-store-addi-pair` | `sd/addi`, `sw/addi` | store base == addi source; store offset 0; addi imm = nonzero width-scaled `uimm5` |
-| `dual-load-shadd-pair` | `ld/sh3add`, `lw/sh2add`, `lwu/sh2add` | load base == shadd source; load offset 0 (register post-increment form) |
-| `dual-store-shadd-pair` | `sd/sh3add`, `sw/sh2add` | store `{base, value}` == shadd's two sources; store offset 0 |
 | `dual-indep-pair` | `addi/addi` | both must be `li` / `mv` / `addi4spn`; `addi4spn` imm must fit `uimm5×4` in `[4,128]` |
+
+> The `mem`+`addi` and `mem`+`shNadd` tuples used to live here as dual-op
+> families.  They are **not** dual-op pairs — see §3.12.
+
 
 Common constraints applied to *every* family (via `dual_family` /
 `_canonical_dual` / `_reject_dependence`):
@@ -589,13 +589,66 @@ mulh a1, a2, a3     ; distinct dest; the classic 64×64→128 idiom
 ```
 
 ```asm
-ld   a0, 0(a1)      ; load_addi: zero load offset, base a1
-addi a1, a1, 8      ; addi imm 8 = 1×8 width-scaled stride; pointer post-increment
+li   a0, 5          ; indep_pair: li + li
+li   a1, 7
+```
+
+---
+
+### 3.12 post-increment family (`dual-mem-addi-pair`, `dual-mem-shadd-pair`)
+
+The `post-inc-pair` frame in `encoding.yaml`.  A accesses memory through a base
+register; B then updates that base **in place**:
+
+```
+A: load  rda,  k*imma(rsda)      B: shXadd rsda, rsda, rs2b
+   store rs2a, k*imma(rsda)         addi   rsda, rsda, k*immb
+```
+
+Despite the rule names this is **not** a dual-op family, and it does not use
+`dual_family`.  Dual-op families pack two *independent* operations; a
+post-increment is dependent by construction — B writes exactly the register A
+reads.  It is also strictly **order-sensitive**: reversing the two gives a
+pre-increment, which is the separate `pre-inc-pair` frame with a different
+offset relationship.  (The rule names still say `dual-` for continuity with
+`results/`; `encoding.yaml` maps both to `post-inc-pair` via `rules_py_names`.)
+
+| Rule | Tuples (strict A, B order) | Requirement |
+|---|---|---|
+| `dual-mem-addi-pair` | `ld/addi`, `lw/addi`, `sd/addi`, `sw/addi` | `addi` stride = nonzero width-scaled `uimm5` |
+| `dual-mem-shadd-pair` | `ld/sh3add`, `sd/sh3add`, `lw/sh2add`, `sw/sh2add` | shift tied to the access width by the tuple; index `rs2b` free |
+
+Constraints applied to both (via `post_inc_family`):
+
+* the tuple must match in **A, B order only** — no reversal;
+* the base is a single encoded field (`rsda`), so **`b.rd == b.rs1 == a.rs1`**;
+* a load must not target the base (`a.rd != a.rs1`) — B would otherwise
+  increment the loaded value instead of the pointer;
+* A's own offset rides the width-scaled `imma[4:0]` field, so it may be nonzero
+  but must be a multiple of the access width and fit 5 bits once scaled.
+
+**Matches**
+
+```asm
+ld   a0, 0(a1)      ; base a1, offset rides imma
+addi a1, a1, 8      ; a1 updated in place; 8 = 1×8 width-scaled stride
 ```
 
 ```asm
-li   a0, 5          ; indep_pair: li + li
-li   a1, 7
+sd   a2, 16(a1)     ; nonzero offset is fine — imma[4:0] is width-scaled
+sh3add a1, a1, a3   ; base updated in place; a3 is the free index field
+```
+
+**Rejections**
+
+```asm
+ld   a0, 0(a1)
+addi a2, a1, 8      ; not an in-place update: a2 != a1 → "base-reg-mismatch"
+```
+
+```asm
+ld   a1, 0(a1)      ; loads into the base → "load-clobbers-base"
+addi a1, a1, 8
 ```
 
 **Does not match**

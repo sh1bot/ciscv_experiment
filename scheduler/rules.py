@@ -537,21 +537,40 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 #
 # Match kinds (per tuple):
 #   "arith2"      both R-type; share rs1, rs2 positionally; two distinct dests.
-#   "mem_addi"    load + addi; share the base register and the (width-scaled)
-#                 immediate offset; two distinct dests.
-#   "mem_shadd"   load/store + shNadd; share the base register only, with the
-#                 load offset forced to zero — a register post-increment form.
-#
-# Width-scaled immediate (mem_addi): the memory op implies a data width; the
-# shared/offset immediate must be a nonzero unsigned 5-bit value with remap,
-# scaled by that width — i.e. a nonzero multiple of the width in
-# [width, 32*width].  This trades granularity for reach.
+#   "indep_pair"  two independent small pseudo-ops (li / mv / addi4spn).
 #
 # Canonical order is (tuple[0], tuple[1]).  The reverse order is accepted only
 # when the two instructions are fully independent (neither destination is a
 # source operand of the pair).  In canonical order the B-slot instruction may
 # write one of the shared source registers (a WAR that resolves correctly
 # because B executes second); the reverse order may not.
+#
+# The former "mem_addi" / "mem_shadd" kinds are NOT dual-op families and have
+# moved to the post-increment family below — see post_inc_family().
+
+# ---------------------------------------------------------------------------
+# post-inc-pair
+# ---------------------------------------------------------------------------
+# The `post-inc-pair` frame in encoding.yaml:
+#
+#     A: load  rda,  k*imma(rsda)      B: shXadd rsda, rsda, rs2b
+#        store rs2a, k*imma(rsda)         addi   rsda, rsda, k*immb
+#
+# A reads memory through a base register; B then updates that base IN PLACE.
+# Both slots name the base in the single `rsda` field, so the encoding requires
+# b.rd == b.rs1 == a.rs1.
+#
+# This is deliberately NOT one of the dual-op families.  Those pack two
+# INDEPENDENT operations; a post-increment is dependent by construction — B
+# writes exactly the register A reads.  It is also strictly ORDER-SENSITIVE:
+# reversing the two gives a pre-increment, which is a different frame
+# (`pre-inc-pair`) with a different offset relationship.
+#
+# Width scaling: the memory op implies a data width k.  A's offset is a
+# width-scaled unsigned 5-bit field (imma[4:0]).  The addi stride is likewise
+# width-scaled, and nonzero — a zero stride is not an increment.  The shXadd
+# shift is tied to the width by the tuple table (sh3add with 8-byte accesses,
+# sh2add with 4-byte).
 
 _MEM_PAIR_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld",
                           "sb", "sh", "sw", "sd"})
@@ -634,20 +653,7 @@ _DUAL_TUPLES: dict = {
     ("divu", "remu"):     "arith2",
     ("divw", "remw"):     "arith2",
     ("divuw", "remuw"):   "arith2",
-    # load + addi — 32/64-bit only; zero load offset; addi imm = width-scaled stride
-    ("ld",  "addi"):      "mem_addi",
-    ("lw",  "addi"):      "mem_addi",
-    ("lwu", "addi"):      "mem_addi",
-    # store + addi — 32/64-bit only; zero store offset; addi imm = width-scaled stride
-    ("sd",  "addi"):      "mem_addi",
-    ("sw",  "addi"):      "mem_addi",
-    # load + shNadd — zero load offset
-    ("ld",  "sh3add"):    "mem_shadd",
-    ("lw",  "sh2add"):    "mem_shadd",
-    ("lwu", "sh2add"):    "mem_shadd",
-    # store + shNadd — zero store offset
-    ("sd",  "sh3add"):    "mem_shadd",
-    ("sw",  "sh2add"):    "mem_shadd",
+    # (post-increment mem+addi / mem+shNadd tuples live in _POST_INC_TUPLES)
     # (adjacent load/store pairs are handled by the dedicated mem-pair rule)
     # independent single-output pairs — no shared operands required
     # ("addi", "addi") is overloaded: it covers three pseudo-ops (li, mv,
@@ -656,14 +662,40 @@ _DUAL_TUPLES: dict = {
     ("addi", "addi"):     "indep_pair",
 }
 
+# post-inc-pair tuples, in strict (memory-op, base-update) order.  The op-sets
+# mirror encoding.yaml's post-inc-pair clusters: addi strides any of the four
+# 32/64-bit accesses, while shXadd's shift is tied to the access width.
+_POST_INC_TUPLES: dict = {
+    ("ld",  "addi"):      "mem_addi",
+    ("lw",  "addi"):      "mem_addi",
+    ("sd",  "addi"):      "mem_addi",
+    ("sw",  "addi"):      "mem_addi",
+    ("ld",  "sh3add"):    "mem_shadd",
+    ("sd",  "sh3add"):    "mem_shadd",
+    ("lw",  "sh2add"):    "mem_shadd",
+    ("sw",  "sh2add"):    "mem_shadd",
+}
+
+
 def _role_tuples(role: str) -> frozenset:
     """The (a.mnemonic, b.mnemonic) tuples belonging to one dual-op family."""
-    return frozenset(k for k, v in _DUAL_TUPLES.items() if v == role)
+    src = _POST_INC_TUPLES if role in ("mem_addi", "mem_shadd") else _DUAL_TUPLES
+    return frozenset(k for k, v in src.items() if v == role)
 
 
 def _role_mnems(role: str) -> frozenset:
-    """The mnemonics appearing in a dual-op family (both slots, order-insensitive)."""
+    """The mnemonics appearing in a family (both slots, order-insensitive)."""
     return frozenset(m for k in _role_tuples(role) for m in k)
+
+
+def _a_slot_mnems(role: str) -> frozenset:
+    """The mnemonics legal in the A slot of an order-sensitive family."""
+    return frozenset(k[0] for k in _role_tuples(role))
+
+
+def _b_slot_mnems(role: str) -> frozenset:
+    """The mnemonics legal in the B slot of an order-sensitive family."""
+    return frozenset(k[1] for k in _role_tuples(role))
 
 
 def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
@@ -728,25 +760,52 @@ def _dual_arith2(a: Instruction, b: Instruction) -> None:
         raise NotPair("source-operand-mismatch")
 
 
-@dual_family("mem_addi")
-def _dual_mem_addi(a: Instruction, b: Instruction) -> None:
-    """Mem + addi pointer stride: base == addi source, zero mem offset, addi
-    immediate a nonzero width-scaled uimm5."""
-    if a.rs1 != b.rs1:
-        raise NotPair("base-reg-mismatch")
-    if a.imm != 0:
-        raise NotPair("nonzero-offset")
+def post_inc_family(role: str):
+    """Turn a per-family base-update check into a full rule check(a, b).
+
+    Shared by every post-increment tuple: strict (memory-op, base-update) order,
+    the base named once in `rsda` (b.rd == b.rs1 == a.rs1), and A's own offset
+    inside the width-scaled imma[4:0] field.  Order-insensitivity and the
+    independence tests of dual_family are deliberately absent — see the header
+    comment above."""
+    tuples = _role_tuples(role)
+
+    def deco(update_ok: Callable):
+        @wraps(update_ok)
+        def check(a: Instruction, b: Instruction):
+            if (a.mnemonic, b.mnemonic) not in tuples:
+                raise NotPair("bad-tuple")
+            if None in (a.rs1, b.rd, b.rs1):
+                raise NotPair("MALFORMED: missing register operand")
+            # The base is a single encoded field, read by A and rewritten by B.
+            if b.rs1 != a.rs1 or b.rd != a.rs1:
+                raise NotPair("base-reg-mismatch")
+            # A load must not land its result in the base register: B would then
+            # increment the loaded value instead of the pointer.
+            if a.rd is not None and a.rd == a.rs1:
+                raise NotPair("load-clobbers-base")
+            # A's offset rides the width-scaled imma[4:0] field.
+            shift = a.access_shift if a.access_shift is not None else 0
+            if not a.uimm_fits(5, shift):
+                raise NotPair("A-big-imm")
+            update_ok(a, b)
+        return check
+    return deco
+
+
+@post_inc_family("mem_addi")
+def _post_inc_addi(a: Instruction, b: Instruction) -> None:
+    """`addi rsda, rsda, k*immb` — stride a nonzero width-scaled uimm5."""
     if not _width_stride_ok(a, b):
         raise NotPair("B-addi-imm-mismatch")
 
 
-@dual_family("mem_shadd")
-def _dual_mem_shadd(a: Instruction, b: Instruction) -> None:
-    """Load + shNadd index: load base == shadd source, zero load offset."""
-    if a.rs1 != b.rs1:
-        raise NotPair("base-reg-mismatch")
-    if a.imm != 0:
-        raise NotPair("nonzero-offset")
+@post_inc_family("mem_shadd")
+def _post_inc_shadd(a: Instruction, b: Instruction) -> None:
+    """`shXadd rsda, rsda, rs2b` — the shift is tied to the access width by the
+    tuple table, so the index register rs2b is otherwise unconstrained."""
+    if b.rs2 is None:
+        raise NotPair("MALFORMED: missing register operand")
 
 
 @dual_family("indep_pair")
@@ -1087,15 +1146,15 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="dual-mem-addi-pair",
-        a_mnemonic_set=_role_mnems("mem_addi"),
-        b_mnemonic_set=_role_mnems("mem_addi"),
-        check=_dual_mem_addi,
+        a_mnemonic_set=_a_slot_mnems("mem_addi"),
+        b_mnemonic_set=_b_slot_mnems("mem_addi"),
+        check=_post_inc_addi,
     ),
     PairingRule(
         name="dual-mem-shadd-pair",
-        a_mnemonic_set=_role_mnems("mem_shadd"),
-        b_mnemonic_set=_role_mnems("mem_shadd"),
-        check=_dual_mem_shadd,
+        a_mnemonic_set=_a_slot_mnems("mem_shadd"),
+        b_mnemonic_set=_b_slot_mnems("mem_shadd"),
+        check=_post_inc_shadd,
     ),
     PairingRule(
         name="dual-indep-pair",

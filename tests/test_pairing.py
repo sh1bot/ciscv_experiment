@@ -13,7 +13,7 @@ from scheduler.pairing import (
     can_pair, greedy_pair, stamp_slot_eligibility, RULES,
     find_b_partners,
 )
-from scheduler.rules import NotPair
+from scheduler.rules import NotPair, _post_inc_addi
 
 
 def make_insn(mnemonic, rd=None, rs1=None, rs2=None, imm=None, branch_target=None):
@@ -300,56 +300,95 @@ class TestDualOpPair:
         # (add, add) is not a tuple; falls to other rules (not rsd here) — no pair
         assert can_pair(a, b) is not None
 
-    # --- load_addi ---
+    # --- post-increment: mem + addi ---
+    #
+    # encoding.yaml `post-inc-pair`:
+    #     A: load rda, k*imma(rsda) / store rs2a, k*imma(rsda)
+    #     B: addi rsda, rsda, k*immb
+    # The base is one encoded field, so B must both read and write it:
+    # b.rd == b.rs1 == a.rs1.  Order is fixed (reversing it is pre-inc-pair).
 
-    def test_load_addi_zero_offset_pairs(self):
-        """Zero load offset + valid stride addi: post-increment load."""
+    def test_load_addi_post_increment_pairs(self):
+        """Load through a base, then bump that base in place."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("addi", rd=11, rs1=12, imm=16)   # stride = 2*8, valid uimm5*8
+        b = make_insn("addi", rd=12, rs1=12, imm=16)   # stride = 2*8, uimm5*8
         assert can_pair(a, b) is None
 
-    def test_load_addi_nonzero_offset_no_pair(self):
-        """Non-zero load offset is not allowed."""
+    def test_load_addi_nonzero_offset_pairs(self):
+        """A's own offset rides the width-scaled imma[4:0] field, so it may be
+        nonzero — the frame draws k*imma, not 0(rsda)."""
         a = make_insn("ld", rd=10, rs1=12, imm=16)
+        b = make_insn("addi", rd=12, rs1=12, imm=16)
+        assert can_pair(a, b) is None
+
+    def test_load_addi_offset_not_width_multiple_no_pair(self):
+        a = make_insn("ld", rd=10, rs1=12, imm=12)     # 12 not a multiple of 8
+        b = make_insn("addi", rd=12, rs1=12, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_load_addi_offset_too_wide_no_pair(self):
+        """imma is 5 bits scaled by the width: 32*8 overflows the field."""
+        a = make_insn("ld", rd=10, rs1=12, imm=32 * 8)
+        b = make_insn("addi", rd=12, rs1=12, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_load_addi_base_not_updated_in_place_no_pair(self):
+        """addi writing some other register is not a base update."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("addi", rd=11, rs1=12, imm=16)
         assert can_pair(a, b) is not None
 
     def test_load_addi_stride_not_width_multiple_no_pair(self):
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("addi", rd=11, rs1=12, imm=12)   # 12 not a multiple of 8
+        b = make_insn("addi", rd=12, rs1=12, imm=12)   # 12 not a multiple of 8
         assert can_pair(a, b) is not None
 
     def test_load_addi_zero_stride_no_pair(self):
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("addi", rd=11, rs1=12, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=0)
         assert can_pair(a, b) is not None
 
     def test_load_addi_base_mismatch_no_pair(self):
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("addi", rd=11, rs1=14, imm=8)
+        b = make_insn("addi", rd=14, rs1=14, imm=8)
+        assert can_pair(a, b) is not None
+
+    def test_load_addi_into_base_no_pair(self):
+        """Loading into the base register would leave B incrementing the loaded
+        value instead of the pointer."""
+        a = make_insn("ld", rd=12, rs1=12, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=8)
         assert can_pair(a, b) is not None
 
     def test_lw_addi_width4(self):
         a = make_insn("lw", rd=10, rs1=12, imm=0)
-        b = make_insn("addi", rd=11, rs1=12, imm=4)    # stride = 1*4
+        b = make_insn("addi", rd=12, rs1=12, imm=4)    # stride = 1*4
         assert can_pair(a, b) is None
 
     def test_lb_addi_no_longer_supported(self):
         """lb+addi is not in the tuple table (only 32/64-bit variants)."""
         a = make_insn("lb", rd=10, rs1=12, imm=0)
-        b = make_insn("addi", rd=11, rs1=12, imm=1)
+        b = make_insn("addi", rd=12, rs1=12, imm=1)
         assert can_pair(a, b) is not None
 
-    def test_load_addi_reversed_pairs(self):
-        """Reversed (addi, ld) is accepted when load offset is zero."""
-        a = make_insn("addi", rd=11, rs1=12, imm=16)
+    def test_lwu_addi_not_supported(self):
+        """encoding.yaml's post-inc-pair lists ld/lw/sd/sw — lwu is not there."""
+        a = make_insn("lwu", rd=10, rs1=12, imm=0)
+        b = make_insn("addi", rd=12, rs1=12, imm=4)
+        assert can_pair(a, b) is not None
+
+    def test_addi_load_reversed_is_pre_inc_not_post_inc(self):
+        """Reversed order is a PRE-increment.  It still pairs — `pre-inc-pair`
+        is a real frame — but post-inc-pair itself must not claim it."""
+        a = make_insn("addi", rd=12, rs1=12, imm=16)
         b = make_insn("ld", rd=10, rs1=12, imm=0)
         assert can_pair(a, b) is None
+        with pytest.raises(NotPair):
+            _post_inc_addi(a, b)
 
-    # --- store_addi ---
+    # --- post-increment: store + addi ---
 
-    def test_store_addi_sd_zero_offset_pairs(self):
-        """sd + addi: post-increment store, zero offset, stride = data width."""
+    def test_store_addi_sd_pairs(self):
         a = make_insn("sd", rs1=12, rs2=13, imm=0)
         b = make_insn("addi", rd=12, rs1=12, imm=8)    # stride = 1*8
         assert can_pair(a, b) is None
@@ -359,10 +398,11 @@ class TestDualOpPair:
         b = make_insn("addi", rd=12, rs1=12, imm=4)    # stride = 1*4
         assert can_pair(a, b) is None
 
-    def test_store_addi_nonzero_offset_no_pair(self):
+    def test_store_addi_nonzero_offset_pairs(self):
+        """The stored value (rs2a) and the offset (imma) are separate fields."""
         a = make_insn("sd", rs1=12, rs2=13, imm=8)
         b = make_insn("addi", rd=12, rs1=12, imm=8)
-        assert can_pair(a, b) is not None
+        assert can_pair(a, b) is None
 
     def test_store_addi_base_mismatch_no_pair(self):
         a = make_insn("sd", rs1=12, rs2=13, imm=0)
@@ -374,73 +414,69 @@ class TestDualOpPair:
         b = make_insn("addi", rd=12, rs1=12, imm=12)   # 12 not a multiple of 8
         assert can_pair(a, b) is not None
 
-    # --- load_shadd ---
+    # --- post-increment: mem + shNadd ---
+    #
+    #     B: shXadd rsda, rsda, rs2b
+    # The shift is tied to the access width by the tuple table (sh3add with
+    # 8-byte accesses, sh2add with 4-byte); rs2b is otherwise free.
 
-    def test_load_shadd_base_match_zero_offset(self):
+    def test_load_shadd_post_increment_pairs(self):
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
-    def test_load_shadd_nonzero_offset_no_pair(self):
+    def test_load_shadd_nonzero_offset_pairs(self):
         a = make_insn("ld", rd=10, rs1=12, imm=8)
+        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
+        assert can_pair(a, b) is None
+
+    def test_load_shadd_base_not_updated_in_place_no_pair(self):
+        """shadd must write the base it reads — rd == rs1 == the load base."""
+        a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_load_shadd_base_mismatch_no_pair(self):
         a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=14, rs2=13)
+        b = make_insn("sh3add", rd=14, rs1=14, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_load_shadd_wrong_width_no_pair(self):
         """lw pairs with sh2add, not sh3add."""
         a = make_insn("lw", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_lw_sh2add_pairs(self):
         a = make_insn("lw", rd=10, rs1=12, imm=0)
-        b = make_insn("sh2add", rd=11, rs1=12, rs2=13)
+        b = make_insn("sh2add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
-    def test_load_shadd_a_feeds_b_no_pair(self):
-        """Load dest == shadd's second source: A feeds B (chain, not dual)."""
-        a = make_insn("ld", rd=13, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+    def test_load_shadd_into_base_no_pair(self):
+        """Loading into the base register clobbers the pointer B updates."""
+        a = make_insn("ld", rd=12, rs1=12, imm=0)
+        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
-    # --- store_shadd ---
-
-    def test_store_shadd_regset_match(self):
-        """sd + sh3add with zero offset: store and compute index from same regs."""
+    def test_store_shadd_post_increment_pairs(self):
         a = make_insn("sd", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
+        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is None
-
-    def test_store_shadd_regset_match_swapped(self):
-        """Store {base,value} vs shadd sources compared as a set."""
-        a = make_insn("sd", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=13, rs2=12)
-        assert can_pair(a, b) is None
-
-    def test_store_shadd_nonzero_offset_no_pair(self):
-        """Non-zero store offset is not allowed."""
-        a = make_insn("sd", rs1=12, rs2=13, imm=8)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_store_shadd_regs_mismatch_no_pair(self):
-        a = make_insn("sd", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=14)
-        assert can_pair(a, b) is not None
 
     def test_sw_sh2add_pairs(self):
         a = make_insn("sw", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh2add", rd=11, rs1=12, rs2=13)
+        b = make_insn("sh2add", rd=12, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
-    def test_store_shadd_shadd_clobbers_store_reg_reversed_no_pair(self):
-        """Reversed (shadd, store): shadd dest is a store source -> corrupts store."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)   # rd == store base
+    def test_store_shadd_index_register_is_free(self):
+        """rs2b has its own encoded field, independent of the stored value."""
+        a = make_insn("sd", rs1=12, rs2=13, imm=0)
+        b = make_insn("sh3add", rd=12, rs1=12, rs2=14)
+        assert can_pair(a, b) is None
+
+    def test_shadd_store_reversed_no_pair(self):
+        """Reversed (shadd, store) is a pre-increment, not this frame."""
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         b = make_insn("sd", rs1=12, rs2=13, imm=0)
         assert can_pair(a, b) is not None
 
