@@ -59,8 +59,10 @@ def main():
         if f.endswith(".s") and not f.endswith("-noalias.s")
         and os.path.exists(os.path.join(TESTS, f[:-2] + "-noalias.s")))
     print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'packets':>9}"
-          f"{'packet %':>10}{'real RVC':>10}{'vs RVC':>9}{'P/(C/2)':>9}")
-    print("-" * 79)
+          f"{'packet %':>10}{'real RVC':>10}{'vs RVC':>9}{'P/(C/2)':>9}"
+          f"{'to parity':>11}")
+    print("-" * 90)
+    to_parity_total = 0
     for name in names:
         s, r = schedule(name), real_rvc(name)
         if not s or not r:
@@ -74,13 +76,24 @@ def main():
         base, pk = 4 * N, 4 * packets
         rvc = 2 * comp + 4 * (n_dis - comp)
         rvc = rvc * N / n_dis          # scale if the two files differ
+        # Break-even: packets cost 4*(N-P), RVC costs 4N-2C, so packets win
+        # exactly when P > C/2. This column is how many more pairs that takes;
+        # negative means already past parity, by that margin.
+        need = round(comp / 2 * N / n_dis) - pairs
+        to_parity_total += need
         print(f"{name:16}{N:>8}{pairs:>8}{packets:>9}"
               f"{100*pk/base:>9.1f}%{100*rvc/base:>9.1f}%"
-              f"{100*pk/rvc:>8.1f}%{100*pairs/(comp/2*N/n_dis):>8.1f}%")
+              f"{100*pk/rvc:>8.1f}%{100*pairs/(comp/2*N/n_dis):>8.1f}%"
+              f"{need:>+11}")
+    print("-" * 90)
+    print(f"{'TOTAL to parity':16}{to_parity_total:>+74}")
     print("\npacket % and real RVC are size against a 4-byte-per-instruction "
           "baseline;\nvs RVC under 100% means packets are smaller. P/(C/2) is "
           "progress toward the\nbreak-even point where pairs exceed half the "
-          "compressed-instruction count.")
+          "compressed-instruction count.\n\n'to parity' is that same gap "
+          "expressed in PAIRS: how many more this corpus\nneeds before packets "
+          "beat real RVC. Negative means already past, by that\nmargin. It is "
+          "the number to watch — every other column is a ratio.")
 
 
 if __name__ == "__main__":
