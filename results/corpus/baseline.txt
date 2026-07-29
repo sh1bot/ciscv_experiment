@@ -1,0 +1,11 @@
+# Scheduled pairs per corpus. Baseline before the manual yaml/rules.py audit.
+# Regenerate: for f in <corpora>; do python3 __main__.py tests/$f.s | grep -oP 'pairs: \K\d+' | tail -1; done
+testcase0      4315
+godot         13229
+cpp-rv32      87429
+cpp-rv64      82551
+musl-rv32     25652
+musl-rv64     21874
+sqlite-rv32   44214
+sqlite-rv64   41631
+TOTAL        320895
