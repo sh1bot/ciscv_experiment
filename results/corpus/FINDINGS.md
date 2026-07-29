@@ -1,4 +1,7 @@
-# Findings from the six-corpus analysis
+# Findings from the corpus analysis
+
+> §1's defence of two frames was later refuted by a second C++ corpus.
+> Read §5 before acting on §1.
 
 Four Fable 5 subagents analysed the corpus set after musl and SQLite landed.
 Numbers below are theirs unless marked VERIFIED, which means reproduced
@@ -41,13 +44,17 @@ Together roughly **100 codepoints**, against 130 currently spare.
   offset-overflow distributions were NOT measured, so "widen the field" is a
   hypothesis, not a finding.
 
-### Godot-flavoured, but legitimately so
+### Godot-flavoured — REFUTED, see §5
 
 `load-sp-branch` (11.0 per 1000 on godot vs 1.1–2.5) and
-`load-chain-alu-pair` (8.3 vs 1.7–2.0) both track C++ register-pressure
-spill/reload. That is corpus *character*, not a tuning accident — any C++
-workload would reproduce it. Keep them; just don't widen them further on
-godot evidence alone.
+`load-chain-alu-pair` (8.3 vs 1.7–2.0) were argued here to track C++
+register-pressure spill/reload — corpus *character* rather than a tuning
+accident, on the reasoning that any C++ workload would reproduce it.
+
+**A second C++ corpus refuted this.** cpp-rv64/cpp-rv32 use
+`load-chain-alu-pair` at 0.29/0.34 per 1000 — less than any other corpus in
+the set — and `load-sp-branch` at 1.54/1.70, squarely in the ordinary band.
+See §5. Both frames' budgets are reclaimable.
 
 `chain-bit-test-branch` is the mirror image: 24.5 per 1000 on **testcase0**
 vs 0.6 on godot, and two anonymous Rust functions own 30% of testcase0's
