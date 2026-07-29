@@ -411,3 +411,63 @@ This makes the call frame more attractive, not less: **28008 of 29983 call
 sites in cpp-rv64 have an addi-family predecessor (93%)**, against 49351
 `c.mv` in the corpus. The idiom RVC spends `c.mv` on is exactly what a
 setup-call frame would absorb.
+
+---
+
+## 6. The call frame is much weaker than §3 claimed — and a better jump target exists
+
+§3 ranked a setup-call frame as the largest opportunity (19663 adjacencies,
+~14k estimated pairs), caveated on "whether the j-optimism extends to calls".
+Measuring the displacements settles it: **it does not.**
+
+Displacement magnitude, from the linked binaries (bits needed, halfword-scaled):
+
+| | ≤8b | ≤10b | ≤12b | ≤16b |
+|---|--:|--:|--:|--:|
+| `j` — already allowed, unchecked (sqlite) | **74.0%** | 82.7% | 89.9% | 98.6% |
+| `j` (musl) | **82.5%** | 92.3% | 95.5% | 98.6% |
+| `jal` — excluded as a call (sqlite) | **3.5%** | 7.4% | 14.5% | 55.0% |
+| `jal` (musl) | **6.3%** | 13.0% | 24.5% | 63.0% |
+
+`j` is intra-function and mostly local; `jal` is inter-function and mostly
+far. Neither is encoded today, but the §8 optimism costs little on `j` and
+would be a fiction on `jal`: **85% of calls need a displacement that fits
+nowhere in the packet.** The `is_call` guard is therefore well founded — not
+because of a 12-bit linker fixup, but because call targets are genuinely
+distant.
+
+The zero-immediate escape does not exist either. `jalr` writing ra — an
+indirect call, target in a register, needing no immediate at all — occurs
+**0 times** in cpp-rv64, sqlite-rv64 and musl-rv64. Every call in the corpus
+is a direct `jal`, including PLT calls. Even C++ virtual dispatch produced
+none, because the vtable load and the call are separated.
+
+So: strike the setup-call frame. Its ~14k pairs were resting on an assumption
+the data refutes.
+
+### What has room: mv/li paired with a direct `j`
+
+A direct jump needs no target register, which frees the `rs1b` field the jump
+frames spend on `jr`. With `A = mv rda, rs1a` (two 5-bit fields) the packet
+has **12 operand bits spare** — enough for a real, checked displacement
+instead of the optimism.
+
+On sqlite-rv64 there are **1791 adjacent (mv|li) + `j` pairs**, and their
+displacements fit:
+
+```
+   <= 8b scaled:  82.6%
+   <=10b scaled:  92.9%
+   <=12b scaled:  96.5%
+```
+
+A 12-bit scaled field captures 96.5% of them with bits already available.
+This is the jump-with-immediate candidate: unlike the call frame it needs no
+new optimism, and unlike the existing jump frames it would be *honest* —
+the displacement checked rather than assumed.
+
+Worth noting the same measurement indicts the current frames mildly:
+`arith-jump-pair` and `mvload-jump-pair` accept `j` with no range check at
+all, and 17–26% of `j` targets exceed 8 bits. Those frames have no spare bits
+in their `jr` rows, so making them honest means either a direct-jump-only row
+or accepting the existing fiction.
