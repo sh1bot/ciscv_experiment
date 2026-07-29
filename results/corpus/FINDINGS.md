@@ -255,3 +255,93 @@ fields at once. 343/968/1117 of the ENC total are "no numeric deficit"
 near-misses (imm==0 exclusions, mask-shape failures) — patch-verified, medium
 confidence. Branch/jump displacement optimism applies to the call frame and
 to load-base-branch.
+
+---
+
+## 4. New frame candidates
+
+Counts are category-1 ceilings (adjacencies a rule would accept) for pairs no
+current rule captures. Observed capture→scheduled realization on these corpora
+is ~0.78–0.81. All shapes passed the §6 concentration check (top function ≤4%).
+
+| # | candidate | total | encodable | codepoints | est. yield |
+|---|---|--:|---|--:|--:|
+| 1 | **setup-call-pair** (`mv/li/addi4spn` + `call`) | 19663 | fits, but see caveat | 4 | ~14k |
+| 2 | **load-chain any-base** | 5052 | **rows already exist** | **0** (lw/ld) | ~1.5k |
+| 3 | **chain-alu-load-pair** (`add/shXadd/addi` → load via tmp) | 3908 | fits | ~24 | ~2.9k |
+| 4 | **czero-select-or** | 2492 | fits | **2** | ~1.9k |
+| 5 | **mem-copy-pair** (`load tmp,imma(ra)` → `store tmp,immb(rb)`) | 1560 | fits exactly, 20 bits | 5–7 | ~1.2k |
+
+Candidates 2–5 total 46 codepoints (110 with byte/half loads added to #2),
+against 130 free. They supply roughly half the break-even gap. Candidate 1,
+if admissible, closes it outright.
+
+### Candidate 2 is free money — VERIFIED
+
+The yaml template for `load-chain-alu-pair` is
+`load tmp, k*imma(rs1a)` with rows 1–2 drawing an explicit `rs1a` base field;
+rows 3–4 are the SP-relative variant with a 10-bit offset. **`rules.py`
+applies `@a_sp_mem` unconditionally**, refusing the any-base form the encoding
+already reserves. `rules_conform` cannot see this — base-register constraints
+are in its explicit NOT-CHECKED list.
+
+Measured by removing the decorator and re-running:
+
+| corpus | before | after | delta |
+|---|--:|--:|--:|
+| musl-rv64 | 21874 | 22111 | **+237** |
+| sqlite-rv64 | 41631 | 42644 | **+1013** |
+
+**Zero codepoints.** This is the first thing to do.
+
+### Zicond: CONFIRMED and stronger than godot
+
+czero counts: musl-rv32 1281, musl-rv64 1017, sqlite-rv32 2319,
+sqlite-rv64 1530 (godot 272, testcase0 0). Forward chain into `or` is
+**97–99%** on the new corpora against godot's 93%; chained *and dead* totals
+2492 (~91%).
+
+`[czero, czero]` exists at scale (~1464 pooled) but is **refuted as a frame**:
+both temps stay live into the following `or`, so it needs five register fields
+against 20 bits. The three-instruction select is served by pairing the
+*second* czero with the `or` — which is candidate 4, at 2 codepoints.
+
+### Candidate 1 caveat — quote it whenever the number is quoted
+
+Its entire yield rests on the existing §8 optimism that jump displacements are
+unbounded and unencoded. `encoding.yaml` *deliberately* excludes calls from
+every jump frame, and a call target genuinely has nowhere to live in the
+packet. It is the largest idiom in the corpus by ~4× and emphatically not an
+artifact (mv+call top function 1.0%, present in 5 of 6 corpora), but it should
+be adopted only if the project decides the `j`-optimism extends to calls.
+Otherwise strike it, and candidates 2–5 deliver about half the gap.
+
+### Rejected
+
+- `auipc+jalr` (7563) — godot/testcase0 only (non-PIC call spelling), needs a
+  20-bit immediate. Artifact *and* unencodable. Same idiom as #1, spelled
+  differently.
+- `auipc/lui + addi/ld` (~19k) — 20-bit upper immediates, unencodable.
+- Independent same-op mem pairs with free offsets (`lw+lw` 10.6k, `sw+sw`
+  5.7k) — two independent offsets need 3 regs + 2×5 bits = 25 bits. The
+  encodable residue (~3.8k, same base, delta one width, offset just out of
+  range) is a mem-pair offset-width question, and there are no spare row bits.
+- `mv+mv`, `addi_rsd+sw`, `lw+beqz` residues — shapes existing frames already
+  own, failing on ordering or escape. Tuning, not frame gaps.
+
+---
+
+## Suggested order of work
+
+1. **Candidate 2** — delete one decorator, +1250 measured on two corpora, zero
+   codepoints. (Then extend `rules_conform` to catch base-register
+   disagreements, which is how this hid.)
+2. **Reclaim ~100 codepoints** from §1 (dual-mem-shadd 0/6, dual-arith2,
+   chain-load A-slot 7→2, store-chain).
+3. **Candidate 4** (zicond) at 2 codepoints for ~1.9k pairs — best ratio in
+   the set.
+4. **Scheduler work** — ~500–1900 pairs, zero encoding cost.
+5. **Decide the call question.** It is the difference between closing the
+   break-even gap and getting halfway.
+6. **Candidates 3 and 5**, funded by step 2.
+7. Targeted width increases from §3's table, cheapest-first.
