@@ -95,9 +95,13 @@ class TestJumpSlotPairs:
         a = make_add(10, 10, 11)
         assert self._rules(a, self._call()) == []       # calls excluded
 
-    def test_out_of_window_reg_not_paired(self):
-        a = make_add(16, 16, 17)                        # a6=x16 outside x0..15
-        assert "arith-jump-pair" not in self._rules(a, self._ret())
+    def test_high_reg_pairs(self):
+        """Registers are a full 5-bit field here: the frame's row spends the
+        four 5-bit columns on operands, so x16..x31 encode fine."""
+        a = make_add(16, 16, 17)
+        assert "arith-jump-pair" in self._rules(a, self._ret())
+        a = make_add(31, 31, 30)
+        assert "arith-jump-pair" in self._rules(a, self._ret())
 
     def test_control_transfer_disqualified_from_a_slot(self):
         # A jump/return can never be the A (first) slot.
@@ -151,12 +155,12 @@ class TestRsdAluPair:
     def test_two_rsd_alu_ops_pair(self):
         """Two rsd-form ALU ops with supported mnemonics should pair."""
         a = make_insn("add", rd=10, rs1=10, rs2=11)   # is_rsd: rd==rs1
-        b = make_insn("sub", rd=12, rs1=12, rs2=13)   # is_rsd: rd==rs1
+        b = make_insn("and", rd=12, rs1=12, rs2=13)   # is_rsd: rd==rs1
         assert can_pair(a, b) is None
 
     def test_all_supported_mnemonics_pair(self):
         """Every mnemonic in the supported set can appear in either slot."""
-        supported = ["add", "sub", "and", "or", "xor", "addw", "subw"]
+        supported = ["add", "and", "or", "xor"]
         for m in supported:
             a = make_insn(m, rd=10, rs1=10, rs2=11)
             b = make_insn(m, rd=12, rs1=12, rs2=13)
@@ -960,11 +964,12 @@ class TestChainAluPair:
         b = make_insn("add", rd=10, rs1=16, rs2=11)   # consumes x16; x16 dead after
         assert can_pair(a, b) is None
 
-    def test_high_encoded_register_still_rejects(self):
-        """A genuinely encoded operand (A's source) out of window still rejects."""
+    def test_high_encoded_register_accepted(self):
+        """Encoded operands are a full 5-bit field: the chain row spends the
+        four 5-bit columns on rs2b/rs2a/rs1a/rdb, so x16..x31 encode fine."""
         a = make_insn("add", rd=8, rs1=16, rs2=9)     # a.rs1 = x16 is encoded
         b = make_insn("add", rd=10, rs1=8, rs2=11)
-        assert can_pair(a, b) is not None
+        assert can_pair(a, b) is None
 
 
 class TestLoadChainAluPair:
@@ -1209,10 +1214,11 @@ class TestAddiBranchPair:
         b.live_out = frozenset({10})                      # counter survives the branch
         assert can_pair(a, b) is None
 
-    def test_out_of_window_register_no_pair(self):
-        a = make_insn("addi", rd=16, rs1=16, imm=1)       # a6 = x16 outside x0..15
+    def test_high_register_pairs(self):
+        """rsda is a full 5-bit column in this frame's row."""
+        a = make_insn("addi", rd=16, rs1=16, imm=1)
         b = make_insn("blt", rs1=16, rs2=11, branch_target="L")
-        assert _rule_reason("addi-branch-pair", a, b) is not None
+        assert _rule_reason("addi-branch-pair", a, b) is None
 
     def test_immediate_over_8bit_no_pair(self):
         a = make_insn("addi", rd=10, rs1=10, imm=200)

@@ -63,7 +63,53 @@ grid:
 # Named opcode sets, referenced from frame `ops` via YAML aliases (*name).
 # Kept here so the large recurring lists are written once.
 opsets:
-  rsd_alu:  &rsd_alu  [addi, addiw, andi, add, addw, sub, subw, and, andn, or, xor, slli, srli, srai, mul, mulhu]
+  # The RSD set, shared by rsd-alu-pair and arith-jump-pair. Both slots write
+  # `alu rsd, rsd, ...` -- rd and rs1 are the SAME field -- so li (rs1=x0) is
+  # NOT reachable by register choice the way it is in a chain slot, and needs
+  # its own codepoint. It is also the single most common op in either frame
+  # (3316 of 5934 slot uses), which is why it earns the wide field.
+  #
+  # Chosen by the same search used for chain_alu: the two rules widened to a
+  # generous op set with unrestricted immediates, the REAL checks run over the
+  # corpus, then a knapsack over the pairs that came back. Priced W^2 + 4W --
+  # rsd-alu-pair is a full cross product (W x W = 256) and arith-jump-pair is
+  # the set against 4 jump ops (W x 4 = 64) -- so W=16 is exactly the 320
+  # codepoints the two frames already reserve.
+  #
+  # Width beats breadth decisively here, and it is addi that wants it: 36% of
+  # addi_rsd sites sit at exactly 6 bits (|imm| 32..63, the stack-adjust and
+  # loop-stride population), so a 5-bit field lands just under the mass and
+  # cuts the frame in half. An all-5-bit set with 16 opcodes scores 1871
+  # against this set's 4273; thirteen extra opcodes recover ~90 pairs while
+  # narrowing addi costs ~1700. Above 7 bits it is flat (8b buys 22 pairs for
+  # four fewer opcodes), so 7 is the knee.
+  rsd_alu:  &rsd_alu
+    - {op: addi, imm: {bits: 7, signed: true}}    # 4 codepoints; the RSD form
+    - {op: li,   imm: {bits: 7, signed: true}}    # 4 codepoints; rd != rs1
+    - add
+    - {op: addiw, imm: {bits: 5, signed: true}}
+    - and
+    - {op: andi,  imm: {bits: 5, signed: true}}
+    - or
+    - {op: slli,  imm: {bits: 5, signed: false}}
+    - {op: srli,  imm: {bits: 5, signed: false}}
+    - xor
+
+  # Same ops for arith-jump-pair, but addi/li capped at the 5 bits its row
+  # actually draws: that frame spends its rd column on a sentinel, leaving only
+  # `imma[4:0]`. Worth 414 candidate pairs if the row is ever widened -- see the
+  # frame's notes. W=10, so 10 x 4 = 40 codepoints inside a budget of 64.
+  rsd_alu_j: &rsd_alu_j
+    - {op: addi, imm: {bits: 5, signed: true}}
+    - {op: li,   imm: {bits: 5, signed: true}}
+    - add
+    - {op: addiw, imm: {bits: 5, signed: true}}
+    - and
+    - {op: andi,  imm: {bits: 5, signed: true}}
+    - or
+    - {op: slli,  imm: {bits: 5, signed: false}}
+    - {op: srli,  imm: {bits: 5, signed: false}}
+    - xor
 
   # The ALU set shared by the three CHAIN frames (chain-alu-pair,
   # load-chain-alu-pair, store-chain-alu-pair). Deliberately NOT *rsd_alu:
@@ -72,8 +118,8 @@ opsets:
   # as an ENCODED FIELD -- so li (rs1=x0), mv (imm=0) and addi4spn (rs1=sp) are
   # all reached by choosing registers, not opcodes, and collapse into the one
   # `addi` codepoint. (rsd-alu-pair cannot do that: there rd and rs1 are the
-  # same field, so li is unreachable and needs its own opcode. It keeps
-  # *rsd_alu, as does arith-jump-pair; both are still to be optimised.)
+  # same field, so li is unreachable and needs its own opcode -- see the
+  # *rsd_alu note above, which is optimised separately over its own population.)
   #
   # Chosen by biclique search over the three chain populations jointly, priced
   # in codepoints: W=16 -> 16x16 + 4x16 + 16x2 = 256 + 64 + 32, exactly the
@@ -555,7 +601,11 @@ doc:
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rsdb"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rsdb"]
       notes: |
-         * TODO: these will probably have to be cut down to 4-bit register fields.
+         * The four register operands occupy the four 5-bit columns -- 20 bits,
+           the whole operand budget -- so registers here are a FULL 5-bit field,
+           x0..x31. An earlier note anticipated cutting them to 4 bits; that is
+           not needed, and scheduler/rules.py enforcing x0..x15 was costing 377
+           pairs across the corpus.
 
   - md: |
       # Function head and tail special cases
@@ -597,7 +647,7 @@ doc:
         - ["mv     rsda, rs2a", "jr/jalr rs1b"]
         - ["li     rsda, imma", "jr/jalr rs1b"]
       ops:
-        - {a: *rsd_alu, b: [ret, jalr, j, jal]}
+        - {a: *rsd_alu_j, b: [ret, jalr, j, jal]}
       rows:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 1 0"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 1 0"]

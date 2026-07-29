@@ -53,21 +53,27 @@ class NotPair(Exception):
 # Shared constants
 # ---------------------------------------------------------------------------
 
+# The RSD set shared by rsd-alu-pair and arith-jump-pair — encoding.yaml
+# `rsd_alu` / `rsd_alu_j`. Both slots write `alu rsd, rsd, ...`, so rd and rs1
+# are the SAME field and li (rs1=x0) is NOT reachable by register choice the way
+# it is in a chain slot: it needs its own codepoint, and being the commonest op
+# in either frame it is what earns the wide immediate. Priced W² + 4W = 320 at
+# W=16, exactly the two frames' reservations.
 _RSD_ALU_MN = frozenset({
-    "addi", "addiw", "andi",                 # immediate forms
-    "add",  "addw",
-    "sub",  "subw",
-    "and",  "andn",
-    "or",   "xor",
-    "slli", "srli", "srai",                  # shift-immediate forms
-    "mul",  "mulhu",                          # multiply
+    "addi", "addiw", "andi",                 # immediate forms (li rides on addi)
+    "add",  "and",  "or",   "xor",
+    "slli", "srli",                          # shift-immediate forms
     })
-_RSD_ALU_REGS = frozenset(range(16))         # x0..x15 (4-bit register field)
+_RSD_ALU_REGS = frozenset(range(32))         # x0..x31 — a FULL 5-bit field
 
-_RSD_IMM_MN   = frozenset({"addi", "addiw", "andi"})  # signed nzimm -64..64
-_RSD_SHIFT_MN = frozenset({"slli", "srli", "srai"})   # shift amount 1..32
-_RSD_IMM_LO, _RSD_IMM_HI = -64, 64
-_RSD_SHIFT_LO, _RSD_SHIFT_HI = 1, 32
+# Signed immediate widths, per the yaml op contracts. rsd-alu-pair's rows put
+# four register operands in the four 5-bit columns and can spare 7 bits for
+# addi/li; arith-jump-pair spends its rd column on a sentinel and draws only
+# imma[4:0], so it caps the same ops at 5.
+_RSD_IMM_BITS   = {"addi": 7, "addiw": 5, "andi": 5}
+_RSD_JUMP_BITS  = {"addi": 5, "addiw": 5, "andi": 5}
+_RSD_SHIFT_MN = frozenset({"slli", "srli"})
+_RSD_SHIFT_LO, _RSD_SHIFT_HI = 0, 31   # unsigned 5-bit field, as chain_alu
 
 # The ALU set shared by the three CHAIN frames — encoding.yaml `chain_alu`.
 # Chain slots write `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1 an
@@ -124,16 +130,21 @@ def b_chain_imm_ok(func: Callable):
 # Shared per-slot helpers (mnemonic already confirmed by rule.mnemonic_set)
 # ---------------------------------------------------------------------------
 
-def _imm_in_range(insn: Instruction) -> None:
+def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS) -> None:
     """Immediate / shift-amount range check for an RSD ALU op (mnemonic already ok).
+
+    `widths` selects the per-frame contract: rsd-alu-pair passes _RSD_IMM_BITS,
+    arith-jump-pair the narrower _RSD_JUMP_BITS its row can actually draw.
 
     Register-range checks are not done here: they belong to the uses_low_regs
     family of decorators, which every caller already applies.
     """
-    if insn.mnemonic in _RSD_IMM_MN:
+    bits = widths.get(insn.mnemonic)
+    if bits is not None:
         imm = insn.imm
         # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
-        if imm is not None and imm != 0 and not (_RSD_IMM_LO <= imm <= _RSD_IMM_HI):
+        lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+        if imm is not None and imm != 0 and not (lo <= imm <= hi):
             raise NotPair("big-imm")
         if imm is None:
             raise NotPair("MALFORMED: missing-immediate")
@@ -353,6 +364,15 @@ def b_imm_ok(func: Callable):
         _imm_in_range(b)
         return func(a, b)
     return check_b_imm_ok
+
+
+def a_jump_imm_ok(func: Callable):
+    """A-slot immediate fits arith-jump-pair's imma[4:0] (see _RSD_JUMP_BITS)."""
+    @wraps(func)
+    def check_a_jump_imm_ok(a: Instruction, b: Instruction):
+        _imm_in_range(a, _RSD_JUMP_BITS)
+        return func(a, b)
+    return check_a_jump_imm_ok
 
 
 def uses_low_regs_here(*these_regs: str):
@@ -1154,7 +1174,7 @@ def _is_small_jump(insn: Instruction) -> bool:
 @a_is_rsd_or_li
 @a_rsd_swappable
 @uses_low_regs_here("a.rd", "a.rs1", "a.rs2")
-@a_imm_ok
+@a_jump_imm_ok
 def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
     if not _is_small_jump(b):

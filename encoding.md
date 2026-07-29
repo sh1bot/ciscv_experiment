@@ -296,7 +296,11 @@ Also chain rules with surviving first result, but also sometimes a second result
 │h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
 │h│immb[4:0]│g│imma[4:0]│  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
 
-* TODO: these will probably have to be cut down to 4-bit register fields.
+* The four register operands occupy the four 5-bit columns -- 20 bits,
+  the whole operand budget -- so registers here are a FULL 5-bit field,
+  x0..x31. An earlier note anticipated cutting them to 4 bits; that is
+  not needed, and scheduler/rules.py enforcing x0..x15 was costing 377
+  pairs across the corpus.
 
 # Function head and tail special cases
 
