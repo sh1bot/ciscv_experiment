@@ -357,12 +357,15 @@ class TestDualOpPair:
         b = make_insn("addi", rd=14, rs1=14, imm=8)
         assert can_pair(a, b) is not None
 
-    def test_load_addi_into_base_no_pair(self):
+    def test_load_addi_into_base_not_a_post_inc(self):
         """Loading into the base register would leave B incrementing the loaded
-        value instead of the pointer."""
+        value instead of the pointer, so this is not a post-increment.
+
+        It is still a legitimate load-chain pair — B consumes the loaded value —
+        and load-chain-alu-pair claims it now that non-sp bases are allowed."""
         a = make_insn("ld", rd=12, rs1=12, imm=0)
         b = make_insn("addi", rd=12, rs1=12, imm=8)
-        assert can_pair(a, b) is not None
+        assert _rule_reason("dual-mem-addi-pair", a, b) is not None
 
     def test_lw_addi_width4(self):
         a = make_insn("lw", rd=10, rs1=12, imm=0)
@@ -1003,14 +1006,22 @@ class TestLoadChainAluPair:
         b = make_add(12, 11, 10)
         assert can_pair(a, b) is None
 
-    def test_non_sp_base_no_pair(self):
+    def test_non_sp_base_pairs(self):
+        """encoding.yaml gives this frame two templates — `load tmp, k*imma(rs1a)`
+        as well as the sp form — and rows 1-2 draw the base register."""
         a = make_ld(10, 12, imm=64)   # base x12, not sp
         b = make_add(10, 10, 11)
-        assert can_pair(a, b) is not None
+        assert _rule_reason("load-chain-alu-pair", a, b) is None
 
-    def test_offset_over_8bit_no_pair(self):
-        # ld scale 8: 8-bit max scaled offset = 255*8 = 2040; 2048 is too big
-        a = make_ld(10, 2, imm=2048)
+    def test_base_reg_offset_over_6bit_no_pair(self):
+        # base-register rows: ld@6s scaled by 8 reaches 63*8 = 504
+        a = make_ld(10, 12, imm=512)
+        b = make_add(10, 10, 11)
+        assert _rule_reason("load-chain-alu-pair", a, b) is not None
+
+    def test_offset_over_10bit_no_pair(self):
+        # SP rows draw imma[4:0|9:5]: 10 bits scaled by 8 reaches 1023*8 = 8184
+        a = make_ld(10, 2, imm=8192)
         b = make_add(10, 10, 11)
         assert can_pair(a, b) is not None
 
@@ -1039,9 +1050,10 @@ class TestStoreChainAluPair:
         b = make_sd(rs1=14, rs2=10, imm=64)  # base x14, not sp
         assert can_pair(a, b) is not None
 
-    def test_offset_over_8bit_no_pair(self):
+    def test_offset_over_10bit_no_pair(self):
+        # SP rows draw immb[9:5]/immb[4:0]: 10 bits scaled by 8 reaches 8184
         a = make_add(10, 11, 12)
-        b = make_sd(rs1=2, rs2=10, imm=2048)
+        b = make_sd(rs1=2, rs2=10, imm=8192)
         assert can_pair(a, b) is not None
 
 

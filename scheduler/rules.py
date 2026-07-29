@@ -455,21 +455,62 @@ ALL_BRANCH_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu", "beqz", "
 
 
 def _sp_mem_check(insn: Instruction) -> None:
-    """sp-relative memory op with a nonnegative 8-bit scaled offset."""
+    """sp-relative memory op with a nonnegative 10-bit scaled offset.
+
+    encoding.yaml draws `imma[4:0|9:5]*2` on the SP-relative rows of
+    load-chain-alu-pair and store-chain-alu-pair -- ten bits, not the eight
+    this used to allow."""
     if insn.rs1 != 2:
         raise NotPair("not-SP-base")
     shift = insn.access_shift or 0
-    if not insn.uimm_fits(8, shift):
+    if not insn.uimm_fits(10, shift):
+        raise NotPair("big-imm")
+
+
+def _chain_mem_check(insn: Instruction, base_bits: int) -> None:
+    """A chain-frame memory op, either SP-relative or against a base register.
+
+    encoding.yaml gives both frames TWO templates: `load tmp, k*imma(rs1a)` and
+    `load tmp, k*imma(sp)`. Rows 1-2 draw the base register `rs1a` explicitly;
+    rows 3-4 drop it for the implicit sp and spend the freed bits on a wider
+    offset. rules.py previously applied the SP-only check unconditionally and
+    refused every base-register form the encoding already reserves."""
+    shift = insn.access_shift or 0
+    if insn.rs1 == 2 and insn.uimm_fits(10, shift):
+        return
+    if not insn.uimm_fits(base_bits, shift):
         raise NotPair("big-imm")
 
 
 def a_sp_mem(func: Callable):
-    """A-slot is an sp-relative memory op with an in-range 8-bit scaled offset."""
+    """A-slot is an sp-relative memory op with an in-range 10-bit scaled offset."""
     @wraps(func)
     def check_a_sp_mem(a: Instruction, b: Instruction):
         _sp_mem_check(a)
         return func(a, b)
     return check_a_sp_mem
+
+
+def a_chain_mem(bits: int):
+    """A-slot memory op: sp with a 10-bit offset, or any base with `bits`."""
+    def dec(func: Callable):
+        @wraps(func)
+        def check(a: Instruction, b: Instruction):
+            _chain_mem_check(a, bits)
+            return func(a, b)
+        return check
+    return dec
+
+
+def b_chain_mem(bits: int):
+    """B-slot memory op: sp with a 10-bit offset, or any base with `bits`."""
+    def dec(func: Callable):
+        @wraps(func)
+        def check(a: Instruction, b: Instruction):
+            _chain_mem_check(b, bits)
+            return func(a, b)
+        return check
+    return dec
 
 
 def b_sp_mem(func: Callable):
@@ -487,7 +528,7 @@ def b_sp_mem(func: Callable):
 @chain_uses_low_regs
 @must_chain
 @no_escape
-@a_sp_mem
+@a_chain_mem(6)
 @b_chain_imm_ok
 def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
