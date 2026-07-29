@@ -1,0 +1,6 @@
+corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)
+-------------------------------------------------------------------------------
+godot            ! -noalias has 97790 instructions, scheduled file has 90172 — not the same build
+godot              90172   13229    76943     85.3%     76.4%   111.6%    62.3%
+musl-rv32         119026   25652    93374     78.4%     74.9%   104.7%    85.9%
+musl-rv64         102040   21874    80166     78.6%     72.7%   108.0%    78.6%

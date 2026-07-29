@@ -1,0 +1,16 @@
+musl-rv64 # --- file totals ---
+musl-rv64 #   instructions: 102040  packets: 80166  pairs: 21874  solos: 58292
+musl-rv64 #   pair rate:    27.3%  (43748/102040 instructions paired)
+musl-rv64 #   RVC-eligible: 55.6%  (56749/102040 instructions)
+musl-rv32 # --- file totals ---
+musl-rv32 #   instructions: 119026  packets: 93374  pairs: 25652  solos: 67722
+musl-rv32 #   pair rate:    27.5%  (51304/119026 instructions paired)
+musl-rv32 #   RVC-eligible: 50.9%  (60528/119026 instructions)
+sqlite-rv64 # --- file totals ---
+sqlite-rv64 #   instructions: 189677  packets: 148046  pairs: 41631  solos: 106415
+sqlite-rv64 #   pair rate:    28.1%  (83262/189677 instructions paired)
+sqlite-rv64 #   RVC-eligible: 59.2%  (112216/189677 instructions)
+sqlite-rv32 # --- file totals ---
+sqlite-rv32 #   instructions: 192768  packets: 148554  pairs: 44214  solos: 104340
+sqlite-rv32 #   pair rate:    29.8%  (88428/192768 instructions paired)
+sqlite-rv32 #   RVC-eligible: 58.8%  (113274/192768 instructions)
