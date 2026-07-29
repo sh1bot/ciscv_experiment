@@ -4,3 +4,10 @@ godot            ! -noalias has 97790 instructions, scheduled file has 90172 —
 godot              90172   13229    76943     85.3%     76.4%   111.6%    62.3%
 musl-rv32         119026   25652    93374     78.4%     74.9%   104.7%    85.9%
 musl-rv64         102040   21874    80166     78.6%     72.7%   108.0%    78.6%
+sqlite-rv32       192768   44214   148554     77.1%     72.1%   106.9%    82.2%
+sqlite-rv64       189677   41631   148046     78.1%     72.1%   108.3%    78.6%
+testcase0          21876    4315    17561     80.3%     81.6%    98.3%   107.4%
+
+packet % and real RVC are size against a 4-byte-per-instruction baseline;
+vs RVC under 100% means packets are smaller. P/(C/2) is progress toward the
+break-even point where pairs exceed half the compressed-instruction count.
