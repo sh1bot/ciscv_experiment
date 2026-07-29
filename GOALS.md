@@ -6,6 +6,16 @@ represent a change in what the tool is for, not just how it works.
 
 ---
 
+## -1. Purpose
+
+The intent here is to facilitate development of an instruction coding based on
+the principle of compressing RISC-V instruction streams by packing pairs of
+instructions into a single 32-bit word, so that the compressed instruction
+stream remains 32-bit aligned, and redundancies between adjacent instructions
+can be exploited to aid in compression.  Since this objective is contradictory
+to the design of RVC, it is not intended to coexist with it and uses
+overlapping instruction encoding space.
+
 ## 0. Primary goal: a workbench for exploring pairing rules
 
 The primary purpose of this tool is to provide a fast feedback loop for
