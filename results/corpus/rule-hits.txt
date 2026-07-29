@@ -10,8 +10,8 @@ testcase0	base-chain-load-pair: 0
 testcase0	mem-pair: 897
 testcase0	arith-mem-pair: 110
 testcase0	dual-arith2-pair: 13
-testcase0	dual-mem-addi-pair: 50
-testcase0	dual-mem-shadd-pair: 0
+testcase0	post-inc-addi-pair: 50
+testcase0	post-inc-shadd-pair: 0
 testcase0	dual-indep-pair: 651
 testcase0	chain-li-branch: 91
 testcase0	addi-branch-pair: 92
@@ -33,8 +33,8 @@ godot	base-chain-load-pair: 203
 godot	mem-pair: 2676
 godot	arith-mem-pair: 120
 godot	dual-arith2-pair: 1
-godot	dual-mem-addi-pair: 354
-godot	dual-mem-shadd-pair: 0
+godot	post-inc-addi-pair: 354
+godot	post-inc-shadd-pair: 0
 godot	dual-indep-pair: 2489
 godot	chain-li-branch: 542
 godot	addi-branch-pair: 71
@@ -56,8 +56,8 @@ musl-rv32	base-chain-load-pair: 14
 musl-rv32	mem-pair: 9026
 musl-rv32	arith-mem-pair: 592
 musl-rv32	dual-arith2-pair: 30
-musl-rv32	dual-mem-addi-pair: 583
-musl-rv32	dual-mem-shadd-pair: 0
+musl-rv32	post-inc-addi-pair: 583
+musl-rv32	post-inc-shadd-pair: 0
 musl-rv32	dual-indep-pair: 3691
 musl-rv32	chain-li-branch: 841
 musl-rv32	addi-branch-pair: 173
@@ -79,8 +79,8 @@ musl-rv64	base-chain-load-pair: 17
 musl-rv64	mem-pair: 4883
 musl-rv64	arith-mem-pair: 507
 musl-rv64	dual-arith2-pair: 0
-musl-rv64	dual-mem-addi-pair: 806
-musl-rv64	dual-mem-shadd-pair: 0
+musl-rv64	post-inc-addi-pair: 806
+musl-rv64	post-inc-shadd-pair: 0
 musl-rv64	dual-indep-pair: 4918
 musl-rv64	chain-li-branch: 849
 musl-rv64	addi-branch-pair: 184
@@ -102,8 +102,8 @@ sqlite-rv32	base-chain-load-pair: 606
 sqlite-rv32	mem-pair: 9740
 sqlite-rv32	arith-mem-pair: 1678
 sqlite-rv32	dual-arith2-pair: 89
-sqlite-rv32	dual-mem-addi-pair: 670
-sqlite-rv32	dual-mem-shadd-pair: 0
+sqlite-rv32	post-inc-addi-pair: 670
+sqlite-rv32	post-inc-shadd-pair: 0
 sqlite-rv32	dual-indep-pair: 7037
 sqlite-rv32	chain-li-branch: 1124
 sqlite-rv32	addi-branch-pair: 264
@@ -125,8 +125,8 @@ sqlite-rv64	base-chain-load-pair: 609
 sqlite-rv64	mem-pair: 8242
 sqlite-rv64	arith-mem-pair: 1623
 sqlite-rv64	dual-arith2-pair: 0
-sqlite-rv64	dual-mem-addi-pair: 688
-sqlite-rv64	dual-mem-shadd-pair: 0
+sqlite-rv64	post-inc-addi-pair: 688
+sqlite-rv64	post-inc-shadd-pair: 0
 sqlite-rv64	dual-indep-pair: 6858
 sqlite-rv64	chain-li-branch: 1146
 sqlite-rv64	addi-branch-pair: 266

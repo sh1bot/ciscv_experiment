@@ -9,7 +9,7 @@ chain-alu-pair                      389          310         1504          962  
 arith-mem-pair                      110          120          592          507         1678         1623
 chain-li-branch                      91          542          841          849         1124         1146
 prologue-pair                       129          584          972         1048          901          894
-dual-mem-addi-pair                   50          354          583          806          670          688
+post-inc-addi-pair                   50          354          583          806          670          688
 chain-bit-test-branch               535           56          261          257          919          905
 addi-store-pair                     325          354          299          246          860          835
 epilogue-pair                        64          293          579          457          467          440
@@ -21,4 +21,4 @@ addi-branch-pair                     92           71          173          184  
 deref-chain-load-pair                 0           41           24           24          251          270
 store-chain-alu-pair                  0           10           96           62           44           58
 dual-arith2-pair                     13            1           30            0           89            0
-dual-mem-shadd-pair                   0            0            0            0            0            0
+post-inc-shadd-pair                   0            0            0            0            0            0

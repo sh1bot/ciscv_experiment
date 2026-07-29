@@ -365,7 +365,7 @@ class TestDualOpPair:
         and load-chain-alu-pair claims it now that non-sp bases are allowed."""
         a = make_insn("ld", rd=12, rs1=12, imm=0)
         b = make_insn("addi", rd=12, rs1=12, imm=8)
-        assert _rule_reason("dual-mem-addi-pair", a, b) is not None
+        assert _rule_reason("post-inc-addi-pair", a, b) is not None
 
     def test_lw_addi_width4(self):
         a = make_insn("lw", rd=10, rs1=12, imm=0)
@@ -555,11 +555,20 @@ class TestDualOpPair:
         b = make_insn("ld", rd=11, rs1=2, imm=1472)
         assert can_pair(a, b) is None
 
-    def test_mem_pair_non_sp_5bit_limit(self):
-        """Non-sp base uses 5-bit limit; offset beyond that fails."""
-        # scaled offset 32 > 31, so fails 5-bit; rs1=12 (not sp)
-        a = make_insn("ld", rd=10, rs1=12, imm=256)
+    def test_mem_pair_non_sp_load_6bit_limit(self):
+        """The base-register LOAD row draws imm[5:0]*2 — six bits, so a scaled
+        offset of 32 fits and 64 does not."""
+        a = make_insn("ld", rd=10, rs1=12, imm=256)      # 256/8 = 32, fits 6b
         b = make_insn("ld", rd=11, rs1=12, imm=264)
+        assert can_pair(a, b) is None
+        a = make_insn("ld", rd=10, rs1=12, imm=512)      # 512/8 = 64, over 6b
+        b = make_insn("ld", rd=11, rs1=12, imm=520)
+        assert can_pair(a, b) is not None
+
+    def test_mem_pair_non_sp_store_5bit_limit(self):
+        """The base-register STORE row draws only imm[4:0] — five bits."""
+        a = make_insn("sd", rs1=12, rs2=10, imm=256)     # 32, over 5b
+        b = make_insn("sd", rs1=12, rs2=11, imm=264)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_non_sp_5bit_in_range_pairs(self):
@@ -759,11 +768,17 @@ class TestPreIncPair:
         with pytest.raises(NotPair):
             pre_inc.check(a, b)
 
-    def test_addi_ld_nonzero_offset_no_pair(self):
-        """B memory offset must be zero."""
+    def test_addi_ld_nonzero_offset_pairs(self):
+        """B's offset rides the width-scaled immb[4:0] field every pre-inc row
+        draws; it need not be zero."""
         a = make_insn("addi", rd=12, rs1=12, imm=8)
         b = make_insn("ld", rd=10, rs1=12, imm=8)
-        assert can_pair(a, b) is not None
+        assert _rule_reason("pre-inc-pair", a, b) is None
+
+    def test_addi_ld_offset_over_5bit_no_pair(self):
+        a = make_insn("addi", rd=12, rs1=12, imm=8)
+        b = make_insn("ld", rd=10, rs1=12, imm=256)      # 256/8 = 32, over 5b
+        assert _rule_reason("pre-inc-pair", a, b) is not None
 
     def test_addi_ld_same_rd_no_pair(self):
         """A and B must not write the same register."""
@@ -1045,10 +1060,12 @@ class TestStoreChainAluPair:
         b = make_sd(rs1=2, rs2=13, imm=64)   # stores x13, not x10
         assert can_pair(a, b) is not None
 
-    def test_non_sp_base_no_pair(self):
+    def test_non_sp_base_pairs(self):
+        """encoding.yaml gives this frame two templates — `store tmp, k*immb(rs1b)`
+        as well as the sp form — and rows 1-2 draw the base register."""
         a = make_add(10, 11, 12)
-        b = make_sd(rs1=14, rs2=10, imm=64)  # base x14, not sp
-        assert can_pair(a, b) is not None
+        b = make_sd(rs1=14, rs2=10, imm=64)  # base x14: 64/8 = 8, fits immb[4:0]
+        assert _rule_reason("store-chain-alu-pair", a, b) is None
 
     def test_offset_over_10bit_no_pair(self):
         # SP rows draw immb[9:5]/immb[4:0]: 10 bits scaled by 8 reaches 8184
@@ -1298,10 +1315,14 @@ class TestProloguePair:
         b = make_insn("sd", rs1=2, rs2=1, imm=0)          # 0+8-16 != 0
         assert _rule_reason("prologue-pair", a, b) == "B-bad-delta"
 
-    def test_not_ra_source_no_pair(self):
+    def test_not_ra_source_no_prologue(self):
+        """prologue-pair is for saving ra; storing a0 is not one.
+
+        pre-inc-pair does claim it — adjusting sp then storing at an offset
+        from the new sp is a genuine pre-increment — so assert on this frame."""
         a = make_insn("addi", rd=2, rs1=2, imm=-16)
         b = make_insn("sd", rs1=2, rs2=10, imm=8)         # stores a0, not ra
-        assert can_pair(a, b) is not None
+        assert _rule_reason("prologue-pair", a, b) is not None
 
     def test_positive_adjust_no_pair(self):
         a = make_insn("addi", rd=2, rs1=2, imm=16)        # positive → not a prologue

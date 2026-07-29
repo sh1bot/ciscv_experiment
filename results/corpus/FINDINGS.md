@@ -25,7 +25,7 @@ representative binary.
 
 | frame | budget | evidence |
 |---|---|---|
-| `dual-mem-shadd-pair` | 4 of post-inc's 16 | **0 hits on all six corpora.** Not because Zba is missing — `sh2add`/`sh3add` occur up to 2687 times and `pre-inc-pair` does consume them. Compilers form the address *before* the access; a post-access shXadd base update is an idiom nothing emits. |
+| `post-inc-shadd-pair` | 4 of post-inc's 16 | **0 hits on all six corpora.** Not because Zba is missing — `sh2add`/`sh3add` occur up to 2687 times and `pre-inc-pair` does consume them. Compilers form the address *before* the access; a post-access shXadd base update is an idiom nothing emits. |
 | `dual-arith2-pair` | 11 used of 16 | Raw hits 1 / 13 / 30 / **0** / 89 / **0**. Only the `mul`/`mulh*` clusters ever fire; add/sub, addw/subw, min/max and every div/rem tuple are zero on all six. Keeping just `{mul}×{mulh,mulhu,mulhsu}` is 3 codepoints and frees the 16-block. |
 | chain-load A-slot | 49 → 14 | The A slot of `deref-chain` and `base-chain` is **100.0% lw/ld across all six**; lb/lbu/lh/lhu/lwu never appear. 7×7 → 2×7 drops the 64-block to 16. |
 | `store-chain-alu-pair` | 32 | ≤0.8 per 1000 everywhere, max 96 raw pairs. `addi-store-pair` drained it, and that is now confirmed out-of-sample. |

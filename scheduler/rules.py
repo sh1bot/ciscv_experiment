@@ -583,7 +583,7 @@ def _addi_store_pair(a: Instruction, b: Instruction) -> None:
 @must_chain_stored
 @no_escape
 @a_chain_imm_ok
-@b_sp_mem
+@b_chain_mem(5)
 def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
     return None
@@ -745,7 +745,14 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     if abs(a.imm - b.imm) != width:
         raise NotPair(f"bad-delta")
     shift = a.access_shift or 0
-    imm_bits = 8 if a.is_local else 5
+    # encoding.yaml mem-pair rows: SP-relative rows draw imm[4:0|9:5] (10 bits);
+    # the base-register load row draws imm[5:0]*2 (6); the store row imm[4:0] (5).
+    if a.rbase == 2:
+        imm_bits = 10
+    elif a.reads_memory:
+        imm_bits = 6
+    else:
+        imm_bits = 5
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
@@ -970,8 +977,11 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
     for insn in (a, b):
         if not _is_li_mv_addi4spn(insn):
             raise NotPair("is-not-li_mv_addi4spn")
-        if insn.is_addi4spn and not insn.uimm_fits(5, 2, nonzero='remap'):
-            raise NotPair(f"addi4spn immediate {insn.imm} out of range [4,128]")
+        if insn.is_addi4spn and not insn.uimm_fits(6, 2, nonzero='remap'):
+            raise NotPair(f"addi4spn immediate {insn.imm} out of range")
+        # The rows draw imma[4:0] / immb[4:0] for the li form.
+        if insn.is_li and (insn.imm is None or not (-16 <= insn.imm <= 15)):
+            raise NotPair("li-big-imm")
     # A→B independence is enforced by _reject_dependence; also require B↛A
     # (reversed_order is never set for this symmetric tuple).
     if b.rd is not None and b.rd in a.uses_regs:
@@ -1142,9 +1152,10 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
         raise NotPair("bad-tuple")
-    # TOOD: check immediate range?
-    if b.has_mem_operand and b.imm != 0:
-        raise NotPair("B-nonzero-immediate")
+    # B's offset rides the width-scaled immb[4:0] field every row draws; it is
+    # not required to be zero (rules.py used to demand that).
+    if b.has_mem_operand and not b.uimm_fits(5, b.access_shift or 0):
+        raise NotPair("B-big-imm")
     return None
 
 
@@ -1336,13 +1347,13 @@ RULES: list[PairingRule] = [
         check=_dual_arith2,
     ),
     PairingRule(
-        name="dual-mem-addi-pair",
+        name="post-inc-addi-pair",
         a_mnemonic_set=_a_slot_mnems("mem_addi"),
         b_mnemonic_set=_b_slot_mnems("mem_addi"),
         check=_post_inc_addi,
     ),
     PairingRule(
-        name="dual-mem-shadd-pair",
+        name="post-inc-shadd-pair",
         a_mnemonic_set=_a_slot_mnems("mem_shadd"),
         b_mnemonic_set=_b_slot_mnems("mem_shadd"),
         check=_post_inc_shadd,

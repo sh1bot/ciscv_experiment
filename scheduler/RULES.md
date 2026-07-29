@@ -595,7 +595,7 @@ li   a1, 7
 
 ---
 
-### 3.12 post-increment family (`dual-mem-addi-pair`, `dual-mem-shadd-pair`)
+### 3.12 post-increment family (`post-inc-addi-pair`, `post-inc-shadd-pair`)
 
 The `post-inc-pair` frame in `encoding.yaml`.  A accesses memory through a base
 register; B then updates that base **in place**:
@@ -615,8 +615,8 @@ offset relationship.  (The rule names still say `dual-` for continuity with
 
 | Rule | Tuples (strict A, B order) | Requirement |
 |---|---|---|
-| `dual-mem-addi-pair` | `ld/addi`, `lw/addi`, `sd/addi`, `sw/addi` | `addi` stride = nonzero width-scaled `uimm5` |
-| `dual-mem-shadd-pair` | `ld/sh3add`, `sd/sh3add`, `lw/sh2add`, `sw/sh2add` | shift tied to the access width by the tuple; index `rs2b` free |
+| `post-inc-addi-pair` | `ld/addi`, `lw/addi`, `sd/addi`, `sw/addi` | `addi` stride = nonzero width-scaled `uimm5` |
+| `post-inc-shadd-pair` | `ld/sh3add`, `sd/sh3add`, `lw/sh2add`, `sw/sh2add` | shift tied to the access width by the tuple; index `rs2b` free |
 
 Constraints applied to both (via `post_inc_family`):
 
