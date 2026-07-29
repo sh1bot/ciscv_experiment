@@ -342,6 +342,27 @@ patterns as possible to tamp down the cost.
 │h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 │h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
+## mvload-jump-pair
+
+    mv      rda, rs1a
+    jr      rs1b
+
+    load    rda, k*imma(rs1a)
+    jr      rs1b
+
+    li      rda, imma
+    jr      rs1b
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│  rs1b   │g│imma[4:0]│  rs1a   │ fn3 │   rda   │ opcode5 │1 0│
+│h│  rs1b   │g│   imma[4:0|9:5]   │ fn3 │   rda   │ opcode5 │1 0│
+
+* `j` covers `jal x0`; a jal with a real destination is a call and is
+  excluded from every jump frame. Jump displacements are unbounded and
+  not encoded in these fields.
+
 # arith-mem-pair
 
     alu     rsda, rsda, rs2a/imma

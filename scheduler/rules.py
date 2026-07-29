@@ -1121,7 +1121,8 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # advantage on real code, and offset-independent (unlike its memory rules).
 #
 #   arith-jump-pair:   A = RSD ALU op (or li), x0..x15, imm in range
-#   mvload-jump-pair:  A = mv / li, or a load with a small (0..3×width) offset
+#   mvload-jump-pair:  A = mv, li (10-bit signed), or lbu/lw/ld with a
+#                          non-negative offset fitting a 5-bit scaled field
 #   B (both):          ret / jr / indirect jalr (imm 0) / direct j / jal x0
 #
 # Calls (which save a link register) are excluded from the B slot.  Direct jumps
@@ -1130,7 +1131,9 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # no offset field and are always encodable.
 
 _SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
-_MVLOAD_JUMP_A_MN = frozenset({"addi"}) | _ALL_LOAD_MN
+_MVLOAD_JUMP_A_MN = frozenset({"addi", "lbu", "lw", "ld"})
+_MVLOAD_JUMP_LI_BITS = 10        # imma[4:0|9:5] spans rs2+rs1 on the li row
+_MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
 
 
 def _is_small_jump(insn: Instruction) -> bool:
@@ -1162,10 +1165,19 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
     """mv / li, or a small-offset load, followed by a small control transfer."""
     if not _is_small_jump(b):
         raise NotPair("B-not-small-jump")
-    if a.is_mv or a.is_li:
+    if a.is_mv:
+        return None
+    if a.is_li:
+        lim = 1 << (_MVLOAD_JUMP_LI_BITS - 1)
+        if a.imm is None or not (-lim <= a.imm < lim):
+            raise NotPair("A-big-imm")
         return None
     if a.reads_memory:
-        if not _arith_mem_small_offset_ok(a):
+        # imma[4:0] scaled by the access width: 0, 1×w, ... 31×w.
+        off, width = a.imm, a.access_width
+        if off is None or off < 0 or not width:
+            raise NotPair("A-big-imm")
+        if off % width or off > ((1 << _MVLOAD_JUMP_OFF_BITS) - 1) * width:
             raise NotPair("A-big-imm")
         return None
     raise NotPair("A is not mv/li or a small-offset load")

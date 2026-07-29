@@ -88,7 +88,7 @@ class TestJumpSlotPairs:
         assert "mvload-jump-pair" in self._rules(a, self._jr())
 
     def test_large_offset_load_not_paired(self):
-        a = make_insn("lw", rd=10, rs1=11, imm=64)      # 64 > 3*4
+        a = make_insn("lw", rd=10, rs1=11, imm=128)     # 128 > 31*4, the field max
         assert "mvload-jump-pair" not in self._rules(a, self._ret())
 
     def test_call_not_a_jump_slot(self):

@@ -603,6 +603,45 @@ doc:
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 1 0"]
 
   - frame:
+      name: mvload-jump-pair
+      # Set up a value, then transfer control. The counterpart to
+      # arith-jump-pair: that frame's A slot is RSD (rd == rs1), so its rd field
+      # is free for the sentinel. Here A's destination and source are DISTINCT
+      # registers -- `mv a0, a5` before a tail call -- which needs two register
+      # fields and so cannot fit there.
+      #
+      # 936 pairs across 742 functions, top contributor 3.2%: the argument-setup
+      # idiom before a tail call or return. By A form: mv 599, li 191, load 146.
+      # The mv destination is an ABI argument register 92% of the time (a0 60%)
+      # and the jump NEVER reads it -- this is argument setup, not a chain.
+      #
+      # mv and the loads share one row: `mv rda, rs1a` is the load row with the
+      # offset field ignored, which the opcode already distinguishes. li takes
+      # its own row because its 10-bit immediate spans rs2+rs1.
+      #
+      # Load offsets are effectively always zero here (98.2% of the chained
+      # cases, measured without the current rule's 2-bit filter), so imma[4:0]
+      # is generous. That figure is one corpus idiom though -- 54 of 55 are the
+      # same frame-pointer spill in RV32 -- so it is sized for a real vtable
+      # dispatch that this corpus happens not to contain.
+      budget: 16
+      level: 2
+      templates:
+        - ["mv      rda, rs1a", "jr      rs1b"]
+        - ["load    rda, k*imma(rs1a)", "jr      rs1b"]
+        - ["li      rda, imma", "jr      rs1b"]
+      ops:
+        - {a: [mv, lbu, lw, ld], b: [ret, jalr, j]}
+        - {a: [li], b: [ret, jalr, j]}
+      rows:
+        - ["h", "rs1b", "g", "imma[4:0]", "rs1a", "fn3", "rda"]
+        - ["h", "rs1b", "g", "imma[4:0|9:5]*2", "fn3", "rda"]
+      notes: |
+         * `j` covers `jal x0`; a jal with a real destination is a call and is
+           excluded from every jump frame. Jump displacements are unbounded and
+           not encoded in these fields.
+
+  - frame:
       name: arith-mem-pair
       budget: 64
       level: 1
