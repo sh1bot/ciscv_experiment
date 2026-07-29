@@ -288,41 +288,46 @@ doc:
         - {c: ["h", "immb[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"], tag: SP-relative}
 
   - frame:
-      name: const-store-pair
-      # Carved out of store-chain-alu-pair: `li tmp, imma` then store tmp.
-      # The constant has no register input (rs1 = x0) and tmp is dead at the
-      # store, so NEITHER is encoded -- all 20 operand bits go to the constant
-      # and the address. That is why a 10-bit constant plus a 10-bit sp offset
-      # fits where no generic frame could afford it.
+      name: addi-store-pair
+      # Carved out of store-chain-alu-pair: compute an addi, then store it.
       #
-      # The constant only needs 8 bits: on the corpus 8 covers 99.7% of stored
-      # constants once KeyMappingX11::initialize() is excluded. That function
-      # was 55.5% of the population and 100% of every band above 8 bits -- it
-      # spills several hundred consecutive X11 keysyms to the stack. See
-      # ACCOUNTING.md on top-contributor concentration. The field is drawn at
-      # 10 because rs2+rs1 is the natural 10-bit span in this grid and the two
-      # extra bits are free; 8 would have cost the same.
+      #     A: addi tmp, rs1a, imma      B: store tmp, k*immb(sp)  or  0(rbase)
       #
-      # A lui-composed constant can never reach this frame: its low half is
-      # `addi rd, rd, lo` with rd == rs1, which is addi_rsd, while li requires
-      # rs1 == x0. The two forms are mutually exclusive.
+      # tmp is dead at the store so it is never encoded, which frees the space
+      # for a 10-bit immediate alongside a full 5-bit rs1a. That is the whole
+      # point of the carve-out: chain_alu cannot afford a wide immediate,
+      # because widening its addi costs chain-alu codepoints quadratically,
+      # whereas here there is no second register field competing for room.
+      #
+      # Measured: an all-5-bit version of this frame is worth only +81 pairs,
+      # against +525 for this one. So ~85% of the frame's value is the wide
+      # immediate, not the pairing shape -- which is also why store-chain,
+      # capped at addi@6b, claims only 23 of the 1178 candidate sites.
+      #
+      # Address split: sp takes a 5-bit width-scaled offset, a base register
+      # takes zero offset. Measured against the alternative (imm8 + a 2-bit
+      # base offset, which scores marginally higher raw): on the base side the
+      # two differ by 5 pairs, and after discounting what a base-capable
+      # store-chain would reach anyway it is 1 versus 1. The wider immediate is
+      # free, so it wins on the tie.
       budget: 4
       level: 2
       templates:
-        - ["li      tmp, imma", "store   tmp, k*immb(rbase)"]
-        - ["li      tmp, imma", "store   tmp, k*immb(sp)"]
+        - ["addi    tmp, rs1a, imma", "store   tmp, 0(rbase)"]
+        - ["addi    tmp, rs1a, imma", "store   tmp, k*immb(sp)"]
       ops:
-        - {a: [{op: li, imm: {bits: 10, signed: true}}], b: [sb, sh, sw, sd]}
+        - {a: [{op: addi, imm: {bits: 10, signed: true}}], b: [sb, sh, sw, sd]}
       rows:
-        - ["h", "rbase", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"]
-        - {c: ["h", "immb[9:5]", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
+        - ["h", "rs1a", "g", "imma[4:0|9:5]*2", "fn3", "rbase"]
+        - {c: ["h", "rs1a", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
       notes: |
          * The data width comes from the op list (sb/sh/sw/sd), as in the other
            memory frames, rather than a width field -- 4 codepoints is cheaper
-           than two bits of layout, and it matches existing convention.
-         * sp gets a 10-bit scaled offset, a base register 5 bits, following the
-           split the other memory frames use. The base variant spends its five
-           spare bits on rbase, which is why its offset is the narrower one.
+           than two bits of layout, and it matches existing convention. sh
+           captures nothing on this corpus but only 3 sites carry it, which is
+           too thin to conclude it never would.
+         * A covers li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) as
+           register/immediate choices, so they need no opcodes of their own.
 
   - frame:
       name: "deref-chain-load-pair, base-chain-load-pair"

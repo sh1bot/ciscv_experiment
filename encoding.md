@@ -85,26 +85,27 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│immb[9:5]│g│  rs2a   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
 │h│immb[9:5]│g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
 
-## const-store-pair
+## addi-store-pair
 
-    li      tmp, imma
-    store   tmp, k*immb(rbase)
+    addi    tmp, rs1a, imma
+    store   tmp, 0(rbase)
 
-    li      tmp, imma
+    addi    tmp, rs1a, imma
     store   tmp, k*immb(sp)
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rbase  │g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│
-│h│immb[9:5]│g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
+│h│  rs1a   │g│   imma[4:0|9:5]   │ fn3 │  rbase  │ opcode5 │1 0│
+│h│  rs1a   │g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
 
 * The data width comes from the op list (sb/sh/sw/sd), as in the other
   memory frames, rather than a width field -- 4 codepoints is cheaper
-  than two bits of layout, and it matches existing convention.
-* sp gets a 10-bit scaled offset, a base register 5 bits, following the
-  split the other memory frames use. The base variant spends its five
-  spare bits on rbase, which is why its offset is the narrower one.
+  than two bits of layout, and it matches existing convention. sh
+  captures nothing on this corpus but only 3 sites carry it, which is
+  too thin to conclude it never would.
+* A covers li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) as
+  register/immediate choices, so they need no opcodes of their own.
 
 ## deref-chain-load-pair, base-chain-load-pair
 

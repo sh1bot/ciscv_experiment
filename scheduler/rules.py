@@ -475,33 +475,33 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# const-store-pair
+# addi-store-pair
 # ---------------------------------------------------------------------------
-# encoding.yaml `const-store-pair`: materialise a literal and store it.
+# encoding.yaml `addi-store-pair`: compute an addi, then store the result.
 #
-#     A: li tmp, imma          B: store tmp, k*immb(rbase)   (or (sp))
+#     A: addi tmp, rs1a, imma      B: store tmp, k*immb(sp)  or  0(rbase)
 #
-# The constant has no register input (li is `addi rd, x0, imm`) and tmp is dead
-# at the store, so neither is encoded -- all 20 operand bits go to the constant
-# and the address. Hence a 10-bit constant AND a 10-bit sp offset, which no
-# generic frame could afford. The base-register variant spends five of those
-# bits on rbase and takes a 5-bit offset instead.
+# tmp is dead at the store, so it is never encoded -- which is what frees room
+# for a 10-bit immediate alongside a full 5-bit rs1a. chain_alu cannot match
+# that: widening its addi costs chain-alu codepoints quadratically, while here
+# no second register field competes for the space.
 #
-# No register window applies: the frame encodes at most one register, in a full
-# 5-bit field.
-_CONST_STORE_MN = frozenset({"sb", "sh", "sw", "sd"})
-_CONST_STORE_BITS = 10                       # signed constant field
-_CONST_STORE_SP_OFF = 10                     # width-scaled, sp variant
-_CONST_STORE_BASE_OFF = 5                    # width-scaled, base variant
+# A subsumes li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) -- those are
+# register/immediate choices, not separate opcodes.
+#
+# No register window applies: the frame encodes at most two registers, each in
+# a full 5-bit field.
+_ADDI_STORE_MN = frozenset({"sb", "sh", "sw", "sd"})
+_ADDI_STORE_BITS = 10                        # signed immediate field
+_ADDI_STORE_SP_OFF = 5                       # width-scaled, sp variant
+# the base-register variant spends its remaining bits on rbase: zero offset only
 
 
-def _const_store_pair(a: Instruction, b: Instruction) -> None:
-    """A materialises a literal; B stores it, after which it is dead."""
-    if not a.is_li:
-        raise NotPair("A-is-not-li")
+def _addi_store_pair(a: Instruction, b: Instruction) -> None:
+    """A computes an addi; B stores the result, after which it is dead."""
     if a.imm is None:
         raise NotPair("MALFORMED: missing-immediate")
-    lo, hi = -(1 << (_CONST_STORE_BITS - 1)), (1 << (_CONST_STORE_BITS - 1)) - 1
+    lo, hi = -(1 << (_ADDI_STORE_BITS - 1)), (1 << (_ADDI_STORE_BITS - 1)) - 1
     if not (lo <= a.imm <= hi):
         raise NotPair("A-big-imm")
     if a.rd is None or b.rs2 != a.rd:
@@ -510,10 +510,12 @@ def _const_store_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-result-escapes")
     if b.rs1 is None:
         raise NotPair("MALFORMED: missing register operand")
-    shift = b.access_shift if b.access_shift is not None else 0
-    width = _CONST_STORE_SP_OFF if b.rs1 == 2 else _CONST_STORE_BASE_OFF
-    if not b.uimm_fits(width, shift):
-        raise NotPair("B-big-imm")
+    if b.rs1 == 2:
+        shift = b.access_shift if b.access_shift is not None else 0
+        if not b.uimm_fits(_ADDI_STORE_SP_OFF, shift):
+            raise NotPair("B-big-imm")
+    elif b.imm:
+        raise NotPair("B-big-imm")           # base variant encodes no offset
 
 
 @chain_uses_low_regs
@@ -1188,10 +1190,10 @@ RULES: list[PairingRule] = [
         check=_load_chain_alu_pair,
     ),
     PairingRule(
-        name="const-store-pair",
+        name="addi-store-pair",
         a_mnemonic_set=frozenset({"addi"}),
-        b_mnemonic_set=_CONST_STORE_MN,
-        check=_const_store_pair,
+        b_mnemonic_set=_ADDI_STORE_MN,
+        check=_addi_store_pair,
     ),
     PairingRule(
         name="store-chain-alu-pair",
