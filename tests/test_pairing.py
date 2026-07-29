@@ -478,11 +478,12 @@ class TestDualOpPair:
         b = make_insn("sh3add", rd=12, rs1=12, rs2=14)
         assert can_pair(a, b) is None
 
-    def test_shadd_store_reversed_no_pair(self):
+    def test_shadd_store_reversed_is_pre_inc(self):
         """Reversed (shadd, store) is a pre-increment, not this frame."""
         a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         b = make_insn("sd", rs1=12, rs2=13, imm=0)
-        assert can_pair(a, b) is not None
+        assert can_pair(a, b) is None
+        assert _rule_reason("pre-inc-pair", a, b) is None
 
     # --- mem_pair ---
 
@@ -711,17 +712,32 @@ class TestPreIncPair:
         b = make_insn("lw", rd=10, rs1=12, imm=0)
         assert can_pair(a, b) is None
 
-    def test_add_slt_rsd_pairs(self):
-        """add in RSD form; slt uses the result as left operand."""
+    def test_shadd_load_pairs(self):
+        """sh3add in RSD form scales an index; the qword load reads it."""
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
+        b = make_insn("ld", rd=10, rs1=12, imm=0)
+        assert _rule_reason("pre-inc-pair", a, b) is None
+
+    def test_addi_word_forms_pair(self):
+        """addi pairs with all four widths, not just the qword ones."""
+        for mem in ("lw", "sw", "ld", "sd"):
+            a = make_insn("addi", rd=12, rs1=12, imm=8)
+            b = (make_insn(mem, rd=10, rs1=12, imm=0) if mem[0] == "l"
+                 else make_insn(mem, rs1=12, rs2=13, imm=0))
+            assert _rule_reason("pre-inc-pair", a, b) is None, mem
+
+    def test_add_slt_not_a_pre_inc(self):
+        """(add, slt) is not in the frame: encoding.yaml pairs each A with the
+        load/store whose width its scale matches, and slt is not a store."""
         a = make_insn("add", rd=12, rs1=12, rs2=13)
         b = make_insn("slt", rd=10, rs1=12, rs2=14)
-        assert can_pair(a, b) is None
+        assert _rule_reason("pre-inc-pair", a, b) is not None
 
-    def test_add_commutative_rsd_pairs(self):
-        """add is commutative: rd==rs2 is also RSD form."""
-        a = make_insn("add", rd=13, rs1=12, rs2=13)   # rd==rs2
-        b = make_insn("slt", rd=10, rs1=13, rs2=14)
-        assert can_pair(a, b) is None
+    def test_shadd_width_must_match_scale(self):
+        """sh2add scales by 4, so it pairs with word ops, not qword ones."""
+        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
+        assert _rule_reason("pre-inc-pair", a, make_insn("lw", rd=10, rs1=12, imm=0)) is None
+        assert _rule_reason("pre-inc-pair", a, make_insn("ld", rd=10, rs1=12, imm=0)) is not None
 
     def test_addi_ld_not_rsd_no_pair(self):
         """A does not update its own source: not RSD form."""

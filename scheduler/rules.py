@@ -974,7 +974,7 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
 # place (RSD form), then a comparison branch uses that register as one of its
 # two operands, after which the register is dead.
 #
-# A slot: addi/addiw  rd, rd, imm8   (RSD form, rd in x0..x15, imm fits 8-bit)
+# A slot: addi/addiw  rd, rd, imm6   (RSD form, signed 6-bit imma)
 # B slot: beq/bne/blt/bge/bltu/bgeu  rd, rs, label
 #      or beq/bne/blt/bge/bltu/bgeu  rs, rd, label
 
@@ -989,8 +989,8 @@ def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-is-not-rsd")
     if a.rd not in _RSD_ALU_REGS:
         raise NotPair("A-big-reg")
-    if not a.imm_fits(8):
-        raise NotPair("B-big-imm")
+    if a.imm is None or not (-32 <= a.imm <= 31):   # imma[5:0], signed
+        raise NotPair("A-big-imm")
     return None
 
 
@@ -1009,6 +1009,7 @@ def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
 
 _BIT_BRANCH_A_MN = frozenset({"andi", "slli", "srli"})
 _BIT_BRANCH_B_MN = frozenset({"beqz", "bnez", "beq", "bne"})
+_BIT_BRANCH_IMM_HI = 63          # imma[5:0], unsigned — encoding.yaml slli_6u
 
 
 def _is_pow2_imm(v) -> bool:
@@ -1047,9 +1048,20 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
     if b.mnemonic in ("beq", "bne") and b.rs2 != 0:
         raise NotPair("beq/bne B slot requires rs2==zero")
     if a.mnemonic == "andi":
-        if not _is_pow2_imm(a.imm) and _shift_for_zero_test(a.imm) is None:
+        rewrite = _shift_for_zero_test(a.imm)
+        if _is_pow2_imm(a.imm):
+            # Encoded as the MASK VALUE, so imma[5:0] reaches bit 5 only.
+            if a.imm > _BIT_BRANCH_IMM_HI:
+                raise NotPair("A-big-imm")
+        elif rewrite is not None:
+            # Rewritten to a shift at emit time; the shift amount is what the
+            # field carries.
+            if rewrite[1] > _BIT_BRANCH_IMM_HI:
+                raise NotPair("A-big-imm")
+        else:
             raise NotPair(f"andi immediate {a.imm} not pow2 or shift-expressible")
-    # slli/srli: any shift amount is accepted
+    elif a.imm is None or not (0 <= a.imm <= _BIT_BRANCH_IMM_HI):
+        raise NotPair("A-big-imm")
     return None
 
 
@@ -1065,12 +1077,17 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
 # reversed.  A's rd must not be destroyed by B (B.rd != A.rd) since
 # the updated pointer or value typically survives the pair.
 
+# encoding.yaml pre-inc-pair `ops`: addi against all four widths, and each
+# shXadd against the width its scale matches. 8 tuples, budget 8.
 _PRE_INC_TUPLES: frozenset = frozenset({
-    ("addi",   "ld"),   # pre-increment pointer (8-byte stride) then load qword
-    ("addi",   "sd"),   # pre-increment pointer then store qword
-    ("sh2add", "lw"),   # scaled-index update then load word
-    ("sh2add", "sw"),   # scaled-index update then store word
-    ("add",    "slt"),  # accumulate then compare
+    ("addi",   "ld"),   # pre-increment pointer then load/store, any width
+    ("addi",   "lw"),
+    ("addi",   "sd"),
+    ("addi",   "sw"),
+    ("sh3add", "ld"),   # scaled-index update (8-byte stride) then load/store qword
+    ("sh3add", "sd"),
+    ("sh2add", "lw"),   # scaled-index update (4-byte stride) then load/store word
+    ("sh2add", "sw"),
 })
 
 _PRE_INC_A_MN = frozenset(a for a, _ in _PRE_INC_TUPLES)
