@@ -345,3 +345,62 @@ Otherwise strike it, and candidates 2–5 deliver about half the gap.
    break-even gap and getting halfway.
 6. **Candidates 3 and 5**, funded by step 2.
 7. Targeted width increases from §3's table, cheapest-first.
+
+---
+
+## 5. UPDATE — a second C++ corpus refutes §1's "corpus character" defence
+
+`cpp-rv32` / `cpp-rv64` (leveldb + protobuf, two independent codebases, ~415k
+instructions each, matched musl toolchain) settle the question §1 left open.
+
+**godot is an outlier binary, not representative C++.** It pairs at 29.3%;
+the two C++ corpora pair at **40.1% and 41.5%** — 11 points better, in line
+with everything else in the set.
+
+### Both "C++ character" frames are refuted
+
+Normalised hits per 1000 instructions:
+
+| frame | godot | cpp-rv64 | cpp-rv32 | musl-rv64 | sqlite-rv64 |
+|---|--:|--:|--:|--:|--:|
+| `load-chain-alu-pair` | **8.27** | **0.29** | **0.34** | 1.71 | 1.86 |
+| `load-sp-branch` | **11.01** | **1.54** | **1.70** | 1.30 | 2.53 |
+
+§1 argued these two track C++ register-pressure spill/reload and that "any
+C++ workload would reproduce it". It does not. The C++ corpora use
+`load-chain-alu-pair` **less than any other corpus in the set** — 0.29 against
+musl's 1.71 — and `load-sp-branch` sits in the ordinary 1.3–2.5 band.
+
+godot's rates are a property of that one binary. `load-chain-alu-pair`'s
+64-codepoint block and `load-sp-branch`'s dedicated 10-bit sp row are
+justified by nothing but godot, which adds to the ~100 codepoints §1 already
+identified.
+
+### The other two disputed frames hold up
+
+| frame | godot | cpp-rv64 | cpp-rv32 | sqlite-rv64 |
+|---|--:|--:|--:|--:|
+| `load-base-branch` | 7.76 | 11.22 | 11.66 | 18.47 |
+| `mvload-jump-pair` | 7.52 | 14.87 | 14.28 | 34.53 |
+
+Both are strong everywhere and weakest on godot — §1's "sized for godot,
+strong elsewhere" reading is confirmed, now on five corpora.
+
+### C++ still loses worst, for a different reason
+
+`vsRVC` 111.4–112.0%, essentially tied with godot's 111.8% — **despite
+pairing 11 points better**. The cause is on the RVC side: C++ compresses
+better than anything else in the set (71.1–71.4% of baseline). And it does so
+through the quadrant packets claim:
+
+```
+cpp-rv64   c.mv:49351  c.ldsp:32254  c.sdsp:31139  c.ld:19677  c.j:15626
+```
+
+`c.mv` + `c.ldsp` + `c.sdsp` alone are 47% of its compressed instructions, all
+C2. C++ leans on the third of RVC that packets destroy far harder than C does.
+
+This makes the call frame more attractive, not less: **28008 of 29983 call
+sites in cpp-rv64 have an addi-family predecessor (93%)**, against 49351
+`c.mv` in the corpus. The idiom RVC spends `c.mv` on is exactly what a
+setup-call frame would absorb.

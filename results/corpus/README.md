@@ -10,20 +10,22 @@ RVC figures are REAL, taken from the `-noalias` disassembly, not the
 `rvc_eligible` estimator (which is a ceiling — see CLAUDE.md).
 
 ```
-corpus          insns  pairs  pair%  packet% realRVC%   vsRVC  P/(C/2)
-----------------------------------------------------------------------
-testcase0       21876   4315  39.4%    80.3%    81.6%   98.3%   107.4%
-godot           90172  13229  29.3%    85.3%    76.4%  111.6%    62.3%
-musl-rv32      119026  25652  43.1%    78.4%    74.9%  104.7%    85.9%
-musl-rv64      102040  21874  42.9%    78.6%    72.7%  108.0%    78.6%
-sqlite-rv32    192768  44214  45.9%    77.1%    72.1%  106.9%    82.2%
-sqlite-rv64    189677  41631  43.9%    78.1%    72.1%  108.3%    78.6%
-----------------------------------------------------------------------
-COMBINED       715559 150915  42.2%    78.9%    73.5%  107.4%
+corpus       lang           insns  pair%  packet%  realRVC%   vsRVC  P/(C/2)
+----------------------------------------------------------------------------
+testcase0    Rust/C rv32    21876  39.4%    80.3%     81.6%   98.3%   107.4%
+godot        C++ rv64       90172  29.3%    85.3%     76.3%  111.8%    61.9%
+cpp-rv32     C++ rv32      420866  41.5%    79.2%     71.1%  111.4%    72.0%
+cpp-rv64     C++ rv64      411687  40.1%    79.9%     71.4%  112.0%    70.0%
+musl-rv32    C rv32        119026  43.1%    78.4%     74.9%  104.7%    85.9%
+musl-rv64    C rv64        102040  42.9%    78.6%     72.7%  108.0%    78.6%
+sqlite-rv32  C rv32        192768  45.9%    77.1%     72.1%  106.9%    82.2%
+sqlite-rv64  C rv64        189677  43.9%    78.1%     72.1%  108.3%    78.6%
+----------------------------------------------------------------------------
+COMBINED                  1548112  41.5%    79.3%     72.3%  109.7%
 ```
 
-CAVEAT: `godot-noalias.s` has 97790 instructions against `godot.s`'s 90172 --
-it predates the KeyMappingX11 deletion, so godot's RVC figure is scaled and
-indicative only. The other five are exact.
+All RVC figures are now MEASURED from the `-noalias` disassemblies; godot's
+former mismatch (its -noalias twin still carried the deleted KeyMappingX11
+function) is fixed, so no figure here is scaled.
 
 `scheduler-runs.txt` holds the raw scheduler output for the four new corpora.
