@@ -6,17 +6,35 @@ anything: it reports, per frame, where the two disagree on the facts the yaml
 owns. Deliberately narrow — it checks only what can be compared mechanically
 today, and says plainly what it is not checking.
 
+READ THE COVERAGE LINE, NOT JUST THE VERDICT. "0 frames disagree" does NOT
+mean rules.py implements encoding.yaml. It means nothing was found among the
+narrow set of facts this tool can mechanically compare, on the subset of them
+its probe can actually reach. Today that is about a fifth of the declared
+immediate contracts and none of the structural constraints.
+
 CHECKED
   * mnemonic sets      — the ops a frame's `ops` clusters allow per slot, vs the
                          rule's a_mnemonic_set / b_mnemonic_set;
   * immediate widths   — a declared `imm: {bits}` op contract vs the range the
-                         rule's own check actually accepts, probed by binary
-                         search over synthetic instructions;
+                         rule's own check actually accepts, probed with
+                         synthetic instructions. The probe builds ONE pair
+                         shape (a chain, distinct-but-fixed registers, sp not
+                         used as a base). A rule whose other constraints reject
+                         that shape — exclusive_rd, a jump in the B slot, an
+                         sp-relative base — never accepts anything, so its
+                         width is reported as unverifiable rather than correct.
   * frame coverage     — rules with no frame, frames with no rule.
 
 NOT CHECKED (scheduler-owned, see scheduler/RULES.md and yaml_migration.md)
   deadness and chaining, operand-form constraints, register-class windows,
   order sensitivity, commutative operand fitting, relocation policy.
+
+A REAL BUG THIS MISSED, as a warning about the above: encoding.yaml's
+load-chain-alu-pair draws rows 1-2 with an explicit `rs1a` base field and rows
+3-4 as the SP-relative variant, while rules.py applied @a_sp_mem
+unconditionally and refused every non-sp base. That is a register-class
+constraint, so it sits in the NOT CHECKED list, and the frame's widths are
+unverifiable on top — the tool reported it clean. It cost ~1250 pairs.
 
 Usage:  python3 util/rules_conform.py [--verbose]
 Exit status is 1 if any disagreement is found, so it can gate a commit.
@@ -114,6 +132,8 @@ def main():
             print(f"✗ yaml frame names rule '{rn}', absent from RULES")
             problems += 1
 
+    reached = unreachable = 0
+    unverified: list = []
     for rn, rule in rules.items():
         frame = frames.get(rn)
         if frame is None:
@@ -154,10 +174,13 @@ def main():
                 want = bits_to_range(bits, c.get("signed", True))
                 got = accepted_range(rule, base, slot)
                 if got is None:
+                    unreachable += 1
+                    unverified.append(f"{rn} {slot}:{base}")
                     if verbose:
                         notes.append(f"{slot}: {base} never accepted by the probe "
                                      f"(other constraints may gate it)")
                     continue
+                reached += 1
                 if got != want:
                     notes.append(f"{slot}: {base} yaml {bits}b = {want}, "
                                  f"rules.py accepts {got}")
@@ -172,10 +195,22 @@ def main():
         elif verbose:
             print(f"✓ {rn}")
 
+    total = reached + unreachable
     print(f"\n{problems} frame(s) disagree with encoding.yaml.")
-    print("Only mnemonic sets and immediate widths are compared; deadness, "
-          "chaining,\noperand form, register classes and ordering stay "
-          "scheduler-owned.")
+    if total:
+        print(f"COVERAGE: {reached} of {total} declared immediate contracts were "
+              f"actually verified ({100 * reached // total}%); {unreachable} could "
+              f"not be\nreached — the probe's pair shape is rejected by those "
+              f"rules' other constraints, so\ntheir widths are UNCHECKED, not "
+              f"confirmed.")
+        if unverified and not verbose:
+            print("  unverified: " + ", ".join(sorted(unverified)[:6])
+                  + (f", +{len(unverified) - 6} more (--verbose)"
+                     if len(unverified) > 6 else ""))
+    print("Structural facts — deadness, chaining, operand form, register classes\n"
+          "(including which base register a slot may use), ordering — are not "
+          "compared\nat all. A clean verdict here is not evidence that rules.py "
+          "implements the yaml.")
     return 1 if problems else 0
 
 
