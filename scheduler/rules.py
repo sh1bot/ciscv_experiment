@@ -1385,13 +1385,6 @@ RULES: list[PairingRule] = [
         check=_chain_bit_test_branch,
     ),
     PairingRule(
-        name="pre-inc-pair",
-        a_mnemonic_set=_PRE_INC_A_MN,
-        b_mnemonic_set=_PRE_INC_B_MN,
-        a_prerequisites=["is_rsd"],
-        check=_pre_inc_pair,
-    ),
-    PairingRule(
         name="prologue-pair",
         a_mnemonic_set=frozenset({"addi"}),
         b_mnemonic_set=frozenset({"sw", "sd"}),
@@ -1402,6 +1395,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_EPILOGUE_A_MN,
         b_mnemonic_set=_EPILOGUE_B_MN,
         check=_epilogue_pair,
+    ),
+    PairingRule(
+        name="pre-inc-pair",
+        a_mnemonic_set=_PRE_INC_A_MN,
+        b_mnemonic_set=_PRE_INC_B_MN,
+        a_prerequisites=["is_rsd"],
+        check=_pre_inc_pair,
     ),
     PairingRule(
         name="arith-jump-pair",
