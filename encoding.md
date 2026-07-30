@@ -85,6 +85,16 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│immb[9:5]│g│  rs2a   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
 │h│immb[9:5]│g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
 
+## czero-select-pair
+
+    czero.X tmp, rs1a, rs2a
+    or      rdb, tmp, rs2b
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│  rs2b   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+
 ## addi-store-pair
 
     addi    tmp, rs1a, imma

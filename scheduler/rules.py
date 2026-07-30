@@ -1117,6 +1117,29 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
+# czero-select-pair
+# ---------------------------------------------------------------------------
+# The second half of a zicond select:
+#     czero.eqz t1, x, c
+#     czero.nez t2, y, c     <- A
+#     or        r,  t1, t2   <- B
+# A's result is the chain temporary, so only four registers are encoded and the
+# shape is exactly chain-alu-pair's row. czero is not in *chain_alu because
+# adding it there would take that 16x16 cross product to 18x18.
+#
+# 97-99% of czero's forward chains go to `or` on the four newer corpora.
+
+_CZERO_MN = frozenset({"czero.eqz", "czero.nez"})
+
+
+@must_chain
+@no_escape
+def _czero_select_pair(a: Instruction, b: Instruction) -> None:
+    """Conditional-zero feeding the merge of a select; the arm is then dead."""
+    return None
+
+
+# ---------------------------------------------------------------------------
 # index-chain-mem-pair
 # ---------------------------------------------------------------------------
 # RISC-V has no register+register addressing, so `array[i]` costs two
@@ -1440,6 +1463,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_EPILOGUE_A_MN,
         b_mnemonic_set=_EPILOGUE_B_MN,
         check=_epilogue_pair,
+    ),
+    PairingRule(
+        name="czero-select-pair",
+        a_mnemonic_set=_CZERO_MN,
+        b_mnemonic_set=frozenset({"or"}),
+        check=_czero_select_pair,
     ),
     PairingRule(
         name="index-chain-mem-pair",

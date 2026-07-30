@@ -338,6 +338,39 @@ doc:
         - {c: ["h", "immb[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"], tag: SP-relative}
 
   - frame:
+      name: czero-select-pair
+      # The second half of a zicond select:
+      #     czero.eqz t1, x, c
+      #     czero.nez t2, y, c     <- A
+      #     or        r,  t1, t2   <- B
+      # A's result is the chain temporary, so only four registers are encoded:
+      # rs1a (the value), rs2a (the condition), rs2b (the other arm) and rdb.
+      # That is exactly chain-alu-pair's row, which is why this needs no new
+      # layout -- only its own frame, since adding czero to *chain_alu would
+      # take that cross product from 16x16 to 18x18 and overflow its 256.
+      #
+      # The forward chain is overwhelmingly concentrated: of czero -> successor
+      # adjacencies, 97-99% go to `or` on the four new corpora (963/975 on
+      # sqlite-rv32, 639/640 on sqlite-rv64, 566/569 musl-rv32, 447/448
+      # musl-rv64) against godot's 93%. Chained AND dead totals ~2492.
+      #
+      # The [czero, czero] shape is deliberately absent: both temporaries stay
+      # live into the `or`, so it needs five register fields against 20 bits.
+      # The backward directions were measured too and are not worth frames --
+      # the condition is shared by the second arm so it is live 100% of the
+      # time at the first, and the value-feed slice splits into small-immediate
+      # `li` and wide-immediate `addi rd,rd,imm` populations that no single
+      # field width serves.
+      budget: 2
+      level: 2
+      templates:
+        - ["czero.X tmp, rs1a, rs2a", "or      rdb, tmp, rs2b"]
+      ops:
+        - {a: [czero.eqz, czero.nez], b: [or]}
+      rows:
+        - ["h", "rs2b", "g", "rs2a", "rs1a", "fn3", "rdb"]
+
+  - frame:
       name: addi-store-pair
       # Carved out of store-chain-alu-pair: compute an addi, then store it.
       #
