@@ -313,6 +313,16 @@ both temps stay live into the following `or`, so it needs five register fields
 against 20 bits. The three-instruction select is served by pairing the
 *second* czero with the `or` — which is candidate 4, at 2 codepoints.
 
+> **Superseded in part — see `results/zicond.md`**, which measures this through
+> the scheduler over all eight corpora. Candidate 4 is reproduced (+2002 pairs
+> on these six corpora, +7050 with the two cpp corpora, which this section did
+> not have). Two corrections: the five-field argument above does not hold for
+> the 37.4% of sites where both czeros are RSD form (three fields there) — the
+> frame fails instead because it wins no packet the `(czero, or)` pair does not
+> already win; and the *front* half of the select, `(setup, czero)`, is worth
+> only +796 for ~14 codepoints, well behind pairing the czero with the
+> instruction that materialises the value it masks (+3652).
+
 ### Candidate 1 caveat — quote it whenever the number is quoted
 
 Its entire yield rests on the existing §8 optimism that jump displacements are

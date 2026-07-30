@@ -28,6 +28,10 @@ leaves open.
 4. **Is the chain temp architecturally x31, or any dead register?**  The yaml
    says "x31 becomes undefined"; `yaml_migration.md` says `tmp` is the
    compiler's own register, required dead.  These differ for code using x31.
+   A measured stake in this: `results/zicond.md` §3 — a *cross-packet* fixed
+   temp is the only thing that would make the Zicond condition-setup frame
+   affordable, and it would reach at most the 32.6% of selects whose condition
+   dies with them.
 5. **Wide `li`.**  This is `dual-indep-pair`'s 34.4% pack rate — dedicated
    frame, lui-split, or accepted loss?
 6. **`scheduler/RULES.md`'s future** — regenerated from the yaml, reduced to

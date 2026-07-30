@@ -356,7 +356,7 @@ surface the §1 ISA mismatch instead of averaging over it.
 | 6 | Split the `*rsd_alu` anchor into chain and dual lists | §5 | measured; yaml change pending |
 | 7 | Cross-*program* held-out scoring | §9 | OPEN |
 | 8 | Do ops outside the target ISA subset (`czero.*`, `andn`, `maxu`) belong in op-set searches at all? | — | OPEN |
-| 9 | Zicond (`czero.eqz`/`czero.nez`) looks worth its own frame with its own partner set, not a slot in chain-alu | §6 | OPEN — to explore |
+| 9 | Zicond (`czero.eqz`/`czero.nez`) looks worth its own frame with its own partner set, not a slot in chain-alu | §6 | MEASURED — `results/zicond.md`: back half confirmed, front half thin, arm chain worth more |
 | 10 | Carve `li` + store out of store-chain: ~410 capturable sites for ~2-4 codepoints, imm8 + base + offset | §6 | measured (outlier-corrected); frame not yet written |
 | 11 | Corpus is one function away from unrepresentative — `KeyMappingX11::initialize()` alone is 55.5% of constant-stores. Worth a standing per-function concentration report, or a third corpus. | §1, §6 | OPEN |
 
