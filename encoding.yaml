@@ -505,9 +505,34 @@ doc:
       # populations and no single width serves both, so this frame takes only
       # the li form and gives it room.
       #
-      # Only the cases where the constant DIES at the czero are encodable here
-      # (78/87/45 on sqlite-rv64/sqlite-rv32/musl-rv64); where it survives it
-      # needs its own field and the immediate would fall back to five bits.
+      # The constant is nearly always gone immediately: of the li -> czero
+      # adjacencies, the czero OVERWRITES its register 59%/47% of the time
+      # (`li a1,K; czero.nez a1,a1,c`) and it dies unreused a further 25%/28%
+      # -- 84%/75% dead in total on sqlite-rv64/musl-rv64. Nothing is being
+      # kept: of the 16%/25% that do survive, 39 of 48 and 39 of 40 have no use
+      # within seven instructions, so they are crossing a branch rather than
+      # feeding a second arm. A variant that encodes the surviving constant and
+      # drops to a 5-bit immediate would be aimed at that minority; not built.
+      #
+      # (An earlier note here claimed only 26% were dead. That tested
+      # `rd in live_out`, which counts the register as live when the czero is
+      # itself what redefines it -- the same a.rd != b.rd subtlety that halved
+      # index-chain-mem-pair. @no_escape gets it right, which is why this frame
+      # scored 107/116/53 against a population estimated at 78/87/45.)
+      #
+      # Immediate width, over the frame's actual scheduled hits:
+      #                  <=5b   <=6b   <=7b   <=8b   <=10b
+      #   sqlite-rv64     64%    70%    78%    92%    100%
+      #   musl-rv64       58%    75%    81%    85%    100%
+      #   sqlite-rv32     57%    63%    71%    91%    100%
+      # Ten bits is free -- the row draws the field and the op declaring ten has
+      # ext 0, so the frame is 2 codepoints at any width. Narrowing to five
+      # would forfeit ~40% of the hits for nothing.
+      #
+      # The `addi rsd,rsd,imm` form was costed at the widths this shape could
+      # afford (3 registers leaves 5 bits, 7 with g/h): ~7 adjacencies at 6 bits
+      # and ~15 at 7, of 155 on sqlite-rv64. Its addends are wide because they
+      # are offsets into a running value, not constants. Not viable.
       #
       # NOTE this frame and czero-select-pair overlap on any czero that has BOTH
       # a feeding li and a consuming or. Measured both RULES orders: the split
