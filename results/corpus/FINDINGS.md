@@ -471,3 +471,54 @@ Worth noting the same measurement indicts the current frames mildly:
 all, and 17–26% of `j` targets exceed 8 bits. Those frames have no spare bits
 in their `jr` rows, so making them honest means either a direct-jump-only row
 or accepting the existing fiction.
+
+---
+
+## 7. Build-flag variants: the RVC register tax is real but small
+
+Four extra musl builds, same source and toolchain, varying only the flags.
+
+```
+variant                 insns  pairs  pair%  packet%  realRVC%   vsRVC
+musl-rv64  -O2 +C      102040  21973  43.1%    78.5%     72.7%  107.9%
+musl-os-rv64  -Os +C    93289  20442  43.8%    78.1%     72.5%  107.7%
+musl-norvc-rv64 -O2    101828  22198  43.6%    78.2%    100.0%   78.2%
+musl-rv32  -O2 +C      119026  27481  46.2%    76.9%     74.9%  102.7%
+musl-os-rv32  -Os +C   109880  25906  47.2%    76.4%     74.7%  102.3%
+musl-norvc-rv32 -O2    118755  27856  46.9%    76.5%    100.0%   76.5%
+```
+
+### Compiling for RVC costs us register-allocation freedom — measured
+
+RVC's register fields are 3 bits, so codegen targeting it biases allocation
+into x8..x15. Our packet rows draw FULL 5-bit fields, so that clustering is
+pure loss to us: we inherit a constraint imposed for a compression scheme we
+do not use. (This is the same axis as opening `_RSD_ALU_REGS` from x0..x15 to
+x0..x31 earlier, which was worth 377 pairs.)
+
+Directly measured on musl-rv64: **68.5% of register references fall in x8..x15
+with `c`, 63.9% without** — a 4.6pp redistribution, so the bias is real.
+
+But it is worth only **+0.5pp** of pair rate on rv64 and **+0.7pp** on rv32.
+The instruction counts barely move (102040 vs 101828), which says clang's RVC
+targeting is mostly encoding *selection* rather than code reshaping. Roughly
+half a point of the ~8pp gap to parity.
+
+CAVEAT: the no-C build is not perfectly matched (101828 vs 102040
+instructions), so a little of the pair delta may be instruction selection
+rather than allocation. The 68.5/63.9 register split is the direct evidence
+and is unconfounded.
+
+### Read the no-RVC vsRVC column with care
+
+100.0% "real RVC" there just means we told the compiler not to emit any
+compressed instructions, so vsRVC collapses to packet%. It is not a win. The
+meaningful comparison for one source is between DEPLOYMENTS: an RVC build at
+72.7% of baseline, or a no-RVC build packed at 78.2%. That is still 107.6% --
+unchanged, because freeing the registers only bought half a point.
+
+### -Os is a mild positive and competitively neutral
+
+8.6%/7.7% fewer instructions, pair rate up 0.7-1.0pp, vsRVC flat (107.9->107.7,
+102.7->102.3). Smaller code pairs slightly better and RVC compresses it
+slightly worse; the two nearly cancel.
