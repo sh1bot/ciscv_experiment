@@ -42,21 +42,35 @@ musl build       insns  uncompressed    as RVC  as packets
 rv64 -O2 +C     102040       408160B   296898B     320268B
 rv64 -Os +C      93289       373156B   270490B     291388B
 rv64 -O2 noC    101828       407312B   407312B     318520B
+rv64 -Os noC     93159       372636B   372636B     291020B   <- best packets
 rv32 -O2 +C     119026       476104B   356620B     366180B
 rv32 -Os +C     109880       439520B   328296B     335896B
 rv32 -O2 noC    118755       475020B   475020B     363596B
+rv32 -Os noC    109664       438656B   438656B     335348B   <- best packets
 ```
 
-Enabling C costs +212 instructions on rv64 (+0.21%) and +271 on rv32 (+0.23%).
+Best of each scheme, each on the build made for it:
+
+    rv64   RVC 270490B (-Os +C)   packets 291020B (-Os noC)   107.6%
+    rv32   RVC 328296B (-Os +C)   packets 335348B (-Os noC)   102.1%
+
+Enabling C costs +212 instructions on rv64 (+0.21%) and +271 on rv32 (+0.23%)
+at -O2; at -Os it is +130 and +216.
 
 Each scheme should be measured on a build made FOR it -- packets have full
 5-bit register fields and gain nothing from RVC's x8-x15 clustering, which
 codegen imposes at 68.5% of register references against 63.9% without C:
 
-    rv64  packets from the +C build   320268B  107.9% of RVC
-          packets from the noC build  318520B  107.3%
-    rv32  packets from the +C build   366180B  102.7% of RVC
-          packets from the noC build  363596B  102.0%
+    rv64 -O2  packets from +C 320268B (107.9%)  from noC 318520B (107.3%)
+    rv64 -Os  packets from +C 291388B            from noC 291020B
+    rv32 -O2  packets from +C 366180B (102.7%)   from noC 363596B (102.0%)
+    rv32 -Os  packets from +C 335896B            from noC 335348B
+
+The register-freedom gain nearly vanishes at -Os: 1748 bytes at -O2, 368 at
+-Os (rv64). At -Os the compiler is already trading register-allocation freedom
+for size, so there is less RVC-shaped choice left to undo. The tax is real --
+it was wrong to measure past it -- but corrected it is worth 0.1-0.6 points,
+not several.
 
 -Os is worth ~9% to BOTH schemes, far more than the packets-vs-RVC question
 turns on, and it moves the ratio barely at all.
