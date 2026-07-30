@@ -1117,6 +1117,51 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
+# index-chain-mem-pair
+# ---------------------------------------------------------------------------
+# RISC-V has no register+register addressing, so `array[i]` costs two
+# instructions: scale the index onto the base, then access through the result.
+# That result is a pure temporary — it is the chain register, is dead after B,
+# and is NOT encoded, which is what lets three register operands fit.
+#
+# A slot: add / sh1add / sh2add / sh3add  tmp, index, base
+# B slot: a load or store through tmp whose width MATCHES the shift
+#         (add=1, sh1add=2, sh2add=4, sh3add=8), offset a 5-bit scaled field.
+#
+# addi is deliberately excluded: with the sum as a temporary its addend is just
+# the access's own offset, so `addi t,b,k; ld d,0(t)` folds to `ld d,k(b)`.
+# The surviving-sum form (the pointer walk) belongs to pre-inc-pair, which is
+# ordered after this rule.
+
+_INDEX_MEM_TUPLES: frozenset = frozenset({
+    ("add",    "lbu"), ("add",    "sb"),     # scale 1 — byte indexing, the bulk
+    ("sh1add", "lhu"), ("sh1add", "sh"),     # scale 2
+    ("sh2add", "lw"),  ("sh2add", "sw"),     # scale 4
+    ("sh3add", "ld"),  ("sh3add", "sd"),     # scale 8
+})
+_INDEX_MEM_A_MN = frozenset(a for a, _ in _INDEX_MEM_TUPLES)
+_INDEX_MEM_B_MN = frozenset(b for _, b in _INDEX_MEM_TUPLES)
+_INDEX_MEM_OFF_BITS = 5
+
+
+@must_chain_base
+@no_escape
+def _index_chain_mem_pair(a: Instruction, b: Instruction) -> None:
+    """A forms a scaled-index address into a temporary; B accesses through it."""
+    if (a.mnemonic, b.mnemonic) not in _INDEX_MEM_TUPLES:
+        raise NotPair("bad-tuple")
+    # The address is the chain temporary and must not survive the pair.
+    # @no_escape already enforces that, and correctly permits the very common
+    # `add t,b,i; lbu t,0(t)` — B redefining the temporary also ends its life.
+    # Both shXadd operands are encoded, so neither may be the temporary.
+    if a.rd == a.rs1 or a.rd == a.rs2:
+        raise NotPair("A-is-rsd")          # pre-inc-pair's shape, not this one
+    if not b.uimm_fits(_INDEX_MEM_OFF_BITS, b.access_shift or 0):
+        raise NotPair("B-big-imm")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # pre-inc-pair
 # ---------------------------------------------------------------------------
 # A is in RSD form: rd == rs1 (or commutative: rd == rs2).  A writes its
@@ -1395,6 +1440,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_EPILOGUE_A_MN,
         b_mnemonic_set=_EPILOGUE_B_MN,
         check=_epilogue_pair,
+    ),
+    PairingRule(
+        name="index-chain-mem-pair",
+        a_mnemonic_set=_INDEX_MEM_A_MN,
+        b_mnemonic_set=_INDEX_MEM_B_MN,
+        check=_index_chain_mem_pair,
     ),
     PairingRule(
         name="pre-inc-pair",

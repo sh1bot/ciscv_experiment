@@ -176,6 +176,26 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│immb[9:5]│ imma[5:0] │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
+# Scaled-index addressing
+
+RISC-V has no register+register addressing mode, so `array[i]` costs two
+instructions: form the address, then access it. The address is a pure
+temporary — it exists only because the ISA has that hole.
+
+## index-chain-mem-pair
+
+    shXadd  tmp, rs1a, rs2a
+    load    rdb, k*immb(tmp)
+
+    shXadd  tmp, rs1a, rs2a
+    store   rs2b, k*immb(tmp)
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│  rs2a   │g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│  rs2a   │g│  rs2b   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+
 # pre/post increment addressing
 
 Also chain rules with surviving first result, but also sometimes a second result.
