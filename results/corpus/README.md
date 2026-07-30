@@ -29,3 +29,34 @@ former mismatch (its -noalias twin still carried the deleted KeyMappingX11
 function) is fixed, so no figure here is scaled.
 
 `scheduler-runs.txt` holds the raw scheduler output for the four new corpora.
+
+## Flag variants (musl), and why absolute bytes matter
+
+Normalising each build against its own instruction count HIDES the fact that
+enabling C costs instructions before any compression happens: the constrained
+register set and operand ranges force extra moves. Compare absolute bytes for
+the same program instead.
+
+```
+musl build       insns  uncompressed    as RVC  as packets
+rv64 -O2 +C     102040       408160B   296898B     320268B
+rv64 -Os +C      93289       373156B   270490B     291388B
+rv64 -O2 noC    101828       407312B   407312B     318520B
+rv32 -O2 +C     119026       476104B   356620B     366180B
+rv32 -Os +C     109880       439520B   328296B     335896B
+rv32 -O2 noC    118755       475020B   475020B     363596B
+```
+
+Enabling C costs +212 instructions on rv64 (+0.21%) and +271 on rv32 (+0.23%).
+
+Each scheme should be measured on a build made FOR it -- packets have full
+5-bit register fields and gain nothing from RVC's x8-x15 clustering, which
+codegen imposes at 68.5% of register references against 63.9% without C:
+
+    rv64  packets from the +C build   320268B  107.9% of RVC
+          packets from the noC build  318520B  107.3%
+    rv32  packets from the +C build   366180B  102.7% of RVC
+          packets from the noC build  363596B  102.0%
+
+-Os is worth ~9% to BOTH schemes, far more than the packets-vs-RVC question
+turns on, and it moves the ratio barely at all.
