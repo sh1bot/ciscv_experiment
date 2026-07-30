@@ -520,11 +520,16 @@ doc:
       #     czero.eqz t1, x, c ; czero.nez t2, y, c ; or r, t1, t2
       # and both czeros could in principle be fused with the merge: two
       # temporaries, four encoded operands (x, y, c, r), which fits the 20-bit
-      # budget comfortably and is a perfectly sound induction. It is excluded
-      # only because a packet holds exactly TWO instructions -- the pairwise
-      # contract, not a field shortage. If that contract is ever revisited this
-      # is the first candidate, since it would take a 4-instruction select to a
-      # single packet rather than the two this frame and czero-select achieve.
+      # budget comfortably. That is a perfectly sound INSTRUCTION -- a
+      # three-operand conditional select, `r = c ? x : y`, of the kind most
+      # ISAs with predication provide outright, and the thing zicond's two
+      # czeros plus an or are emulating in the first place.
+      #
+      # It is excluded solely by the pairwise contract -- a packet holds exactly
+      # two instructions -- not by any field shortage. If that contract is ever
+      # revisited this is the first candidate: it would take a 4-instruction
+      # select to ONE packet, where this frame and czero-select-pair together
+      # still need two.
       budget: 2
       level: 2
       templates:
