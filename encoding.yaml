@@ -491,6 +491,50 @@ doc:
       temporary — it exists only because the ISA has that hole.
 
   - frame:
+      name: li-czero-pair
+      # The other half of a zicond select: materialise one arm's constant, then
+      # conditionally zero it. `li` is the chain temporary, so only two
+      # registers are encoded (the condition and the destination), which leaves
+      # ten bits for the immediate -- and because the row DRAWS ten, the op
+      # declaring ten costs no extra codepoints.
+      #
+      # Sizing, from addi -> czero.rs1 (the VALUE operand) adjacencies:
+      # `li` is 50-64% of them and its constants are small (60-81% fit 6 bits,
+      # 87-93% fit 8), while the `addi rd,rd,imm` form is 33-42% and its
+      # addends are almost all wide (only 3-16% fit 6 bits). They are two
+      # populations and no single width serves both, so this frame takes only
+      # the li form and gives it room.
+      #
+      # Only the cases where the constant DIES at the czero are encodable here
+      # (78/87/45 on sqlite-rv64/sqlite-rv32/musl-rv64); where it survives it
+      # needs its own field and the immediate would fall back to five bits.
+      #
+      # NOTE this frame and czero-select-pair overlap on any czero that has BOTH
+      # a feeding li and a consuming or. Measured both RULES orders: the split
+      # is identical either way (107 / 603 on sqlite-rv64), because the greedy
+      # left-to-right pairer reaches the contested czero from the same side
+      # regardless of rule priority. czero-select-pair is ordered first anyway,
+      # so that if the population ever shifts the larger frame keeps the tie.
+      #
+      # THE THREE-WAY FUSION IS OUT OF SCOPE. A full select is
+      #     czero.eqz t1, x, c ; czero.nez t2, y, c ; or r, t1, t2
+      # and both czeros could in principle be fused with the merge: two
+      # temporaries, four encoded operands (x, y, c, r), which fits the 20-bit
+      # budget comfortably and is a perfectly sound induction. It is excluded
+      # only because a packet holds exactly TWO instructions -- the pairwise
+      # contract, not a field shortage. If that contract is ever revisited this
+      # is the first candidate, since it would take a 4-instruction select to a
+      # single packet rather than the two this frame and czero-select achieve.
+      budget: 2
+      level: 2
+      templates:
+        - ["li      tmp, imma", "czero.X rdb, tmp, rs2b"]
+      ops:
+        - {a: [{op: li, imm: {bits: 10, signed: true}}], b: [czero.eqz, czero.nez]}
+      rows:
+        - ["h", "rs2b", "g", "imma[4:0|9:5]*2", "fn3", "rdb"]
+
+  - frame:
       name: index-chain-mem-pair
       # A scales an index and adds it to a base; B accesses through the result,
       # which is then dead. The computed address is the CHAIN TEMPORARY and is

@@ -192,6 +192,16 @@ RISC-V has no register+register addressing mode, so `array[i]` costs two
 instructions: form the address, then access it. The address is a pure
 temporary — it exists only because the ISA has that hole.
 
+## li-czero-pair
+
+    li      tmp, imma
+    czero.X rdb, tmp, rs2b
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │   rdb   │ opcode5 │1 0│
+
 ## index-chain-mem-pair
 
     shXadd  tmp, rs1a, rs2a

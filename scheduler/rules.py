@@ -1130,6 +1130,18 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
 # 97-99% of czero's forward chains go to `or` on the four newer corpora.
 
 _CZERO_MN = frozenset({"czero.eqz", "czero.nez"})
+_LI_CZERO_BITS = 10          # the row draws imma[4:0|9:5]
+
+
+@must_chain
+@no_escape
+def _li_czero_pair(a: Instruction, b: Instruction) -> None:
+    """A materialises one arm's constant; B conditionally zeroes it."""
+    if not a.is_li:
+        raise NotPair("A-is-not-li")
+    lim = 1 << (_LI_CZERO_BITS - 1)
+    if a.imm is None or not (-lim <= a.imm < lim):
+        raise NotPair("A-big-imm")
 
 
 @must_chain
@@ -1469,6 +1481,13 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_CZERO_MN,
         b_mnemonic_set=frozenset({"or"}),
         check=_czero_select_pair,
+    ),
+    PairingRule(
+        name="li-czero-pair",
+        a_mnemonic_set=frozenset({"addi"}),
+        b_mnemonic_set=_CZERO_MN,
+        a_prerequisites=["is_li"],
+        check=_li_czero_pair,
     ),
     PairingRule(
         name="index-chain-mem-pair",
