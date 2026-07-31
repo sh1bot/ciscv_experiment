@@ -1247,6 +1247,17 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     # not required to be zero (rules.py used to demand that).
     if b.has_mem_operand and not b.uimm_fits(5, b.access_shift or 0):
         raise NotPair("B-big-imm")
+    # A's stride rides imma[4:0], scaled by the access width — `addi rsda, rsda,
+    # k*imma` in the template.  This was UNCHECKED, which is why
+    # encoding_verify put the frame at 35.1% encodable with a 12-bit example:
+    # the field is five bits and nothing was holding A to it.
+    if a.mnemonic == "addi":
+        shift = b.access_shift or 0
+        if a.imm is None or not a.imm_multiple(shift):
+            raise NotPair("A-stride-not-width-multiple")
+        v = a.imm >> shift if a.imm >= 0 else -((-a.imm) >> shift)
+        if not (-16 <= v <= 15):
+            raise NotPair("A-big-imm")
     return None
 
 
