@@ -74,3 +74,62 @@ not several.
 
 -Os is worth ~9% to BOTH schemes, far more than the packets-vs-RVC question
 turns on, and it moves the ratio barely at all.
+
+## Cross-build parity: each scheme on the build made for it
+
+The tables above ask how many pairs a build needs to beat the RVC in that SAME
+build, which quietly charges packets for RVC's register-clustering tax:
+enabling `c` changes codegen before any compression happens, and packets have
+full 5-bit register fields and gain nothing from x8-x15 clustering. The
+question a chip designer actually faces is which toolchain to ship, so RVC
+bytes should be measured on the `+C` build and packet bytes on the no-C one:
+
+    RVC bytes    = 4*N_c - 2*C
+    packet bytes = 4*(N_n - P)
+    parity  <=>  P >= N_n - N_c + C/2
+
+`util/cross_parity.py`, on every program where we have a matched pair (same
+source, same flags, `c` in one `-march` and not the other):
+
+```
+program           RVC bytes  pkt bytes   vs RVC  same-build  cross-build   delta
+musl-rv64            296898     318520   107.3%       +5525        +5406    -119
+musl-rv32            356620     363596   102.0%       +1975        +1744    -231
+musl-os-rv64         270490     291020   107.6%       +5224        +5132     -92
+musl-os-rv32         328296     335348   102.1%       +1900        +1763    -137
+musl-gcc-rv64        301810     328144   108.7%       +6532        +6583     +51
+musl-gcc-rv32        345122     373756   108.3%       +7112        +7159     +47
+sqlitem-rv64         579850     624220   107.7%      +11377       +11092    -285
+```
+
+This is the right question, and it is worth very little: **−285 to +51 pairs**,
+under 3% of any gap. Two reasons the correction is so small.
+
+First, the goalposts move by `N_n - N_c`, and that difference is tiny — and
+its SIGN depends on the compiler:
+
+```
+                    +C build   no-C build   difference
+musl-rv64  clang      102040       101828         -212
+sqlitem-rv64 clang    201905       201465         -440
+musl-gcc-rv64 gcc     103442       103503          +61
+musl-gcc-rv32 gcc     119956       120034          +78
+```
+
+clang emits slightly fewer instructions without `c`; **GCC emits slightly
+more**. So "the starting position is a tax we don't have to pay" is a clang
+fact, not a general one — on GCC the cross-build target is marginally *harder*.
+
+Second, whatever instructions the difference adds or removes bring their own
+pairing opportunities with them, so the change in pairs largely cancels the
+change in target.
+
+Adopt it because it is the correct comparison, not because it helps. Note also
+that godot and testcase0 can never appear here — we have their binaries, not
+their source, so they have no twin and only a same-build number exists.
+
+`sqlitem-*` is a matched pair built for this table (clang 18, `-O2`,
+`rv64g[c]_zba_zbb_zbs_zicond`); it is NOT the same build as `sqlite-rv64`,
+whose original flags could not be reproduced (201905 instructions against the
+corpus's 189677). Pairing a corpus file with a twin built differently would put
+the flag difference into the metric, so it gets its own pair instead.

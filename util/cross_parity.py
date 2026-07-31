@@ -40,10 +40,13 @@ TESTS = os.path.join(ROOT, "tests")
 
 # Matched (+C, no-C) builds in tests/. Anything not listed has no twin.
 PAIRS = [
-    ("musl-rv64",    "musl-norvc-rv64"),
-    ("musl-rv32",    "musl-norvc-rv32"),
-    ("musl-os-rv64", "musl-osnoc-rv64"),
-    ("musl-os-rv32", "musl-osnoc-rv32"),
+    ("musl-rv64",     "musl-norvc-rv64"),
+    ("musl-rv32",     "musl-norvc-rv32"),
+    ("musl-os-rv64",  "musl-osnoc-rv64"),
+    ("musl-os-rv32",  "musl-osnoc-rv32"),
+    ("musl-gcc-rv64", "musl-gccnoc-rv64"),
+    ("musl-gcc-rv32", "musl-gccnoc-rv32"),
+    ("sqlitem-rv64",  "sqlitem-noc-rv64"),
 ]
 
 
