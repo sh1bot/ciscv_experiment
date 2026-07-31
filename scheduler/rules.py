@@ -976,9 +976,18 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
             raise NotPair("is-not-li_mv_addi4spn")
         if insn.is_addi4spn and not insn.uimm_fits(6, 2, nonzero='remap'):
             raise NotPair(f"addi4spn immediate {insn.imm} out of range")
-        # The rows draw imma[4:0] / immb[4:0] for the li form.
-        if insn.is_li and (insn.imm is None or not (-16 <= insn.imm <= 15)):
+        # Row 2 draws immb[6:0] but imma[4:0], so ONE li may be wide.
+        if insn.is_li and (insn.imm is None or not (-64 <= insn.imm <= 63)):
             raise NotPair("li-big-imm")
+    # Only the immb field is 7 bits wide, so at most one of the two may exceed
+    # the narrow one.  Which SLOT it lands in does not matter: this frame
+    # requires mutual independence, so the encoder may swap the pair to put the
+    # wide operand in immb.  Accepting either order is worth the last 15 pairs
+    # of the 457 the widening buys.
+    wide = sum(1 for i in (a, b)
+               if i.is_li and i.imm is not None and not (-16 <= i.imm <= 15))
+    if wide > 1:
+        raise NotPair("li-both-wide")
     # A→B independence is enforced by _reject_dependence; also require B↛A
     # (reversed_order is never set for this symmetric tuple).
     if b.rd is not None and b.rd in a.uses_regs:

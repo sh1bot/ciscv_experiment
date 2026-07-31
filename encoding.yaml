@@ -733,6 +733,27 @@ doc:
 
   - frame:
       name: dual-indep-pair
+      # ONE immediate here is 7 bits, not 5. Rows 1-2 give `immb` the
+      # h+funct5+g span and move `rda` down into rs2; the earlier rows dropped
+      # each immediate into a single register column, which capped both at 5
+      # for no reason but the spelling. Only 68.8% of the corpus's `li` fit 5
+      # bits, against 82.7% at 7. Worth +457 pairs over musl-rv32,
+      # sqlite-rv64 and musl-gcc-rv32 -- and free, because a 7-bit op against
+      # a 7-bit drawn field still weighs 1, so the triangle below is unchanged
+      # at 11 codepoints.
+      #
+      # Only ONE of the pair may be wide: row 2 draws immb[6:0] but imma[4:0],
+      # and 22 operand bits cannot hold two destinations plus two wide
+      # immediates. That is not a real loss -- pairs with two wide immediates
+      # are rare, and since this frame already requires mutual independence
+      # the encoder may put whichever one is wide into the immb field. Taking
+      # the wide operand in EITHER slot is worth the last 15 of the 457.
+      #
+      # 8 bits is out of reach: it would need a fourth g/h mechanism, which
+      # TODO A1 item 1 has not settled. 7 is the ceiling here, so the decision
+      # to cap this group when it outgrew its old home stands -- it was the
+      # SPELLING of the rows that cost the two bits, not the split.
+      #
       # 11 codepoints: the triangle over li, mv, addi4spn_u6, where the last
       # weighs 2 (a 6-bit range over a 5-bit base field). That is 11 rather than
       # the ideal 10 because the triangle orders the OPCODES but has no syntax
@@ -765,9 +786,9 @@ doc:
         - {a: [li],            b: [li, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
-        - ["h", "rda", "g", "rs2b",      "rs1a",      "fn3", "rdb"]
-        - ["h", "rda", "g", "immb[4:0]", "rs1a",      "fn3", "rdb"]
-        - ["h", "rda", "g", "immb[4:0]", "imma[4:0]", "fn3", "rdb"]
+        - ["h", "rda", "g", "rs2b", "rs1a", "fn3", "rdb"]
+        - ["immb[6:0]*3", "rda", "rs1a", "fn3", "rdb"]
+        - ["immb[6:0]*3", "imma[4:0]", "rda", "fn3", "rdb"]
 
   - frame:
       name: rsd-alu-pair
