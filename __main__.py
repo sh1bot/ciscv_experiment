@@ -151,6 +151,9 @@ def main():
                         help="Forward-scan only, no reordering")
     parser.add_argument("--thorough", action="store_true",
                         help="BnB reordering within windows")
+    parser.add_argument("--smart", action="store_true",
+                        help="List scheduling, escalating to BnB only on windows "
+                             "the list schedule left enough room in to repay it")
     parser.add_argument("--overlap", type=int, default=None, metavar="N",
                         help="BnB window overlap (instructions carried between windows, default 0)")
     parser.add_argument("--no-stall-for-pair", action="store_true",
@@ -166,6 +169,8 @@ def main():
 
     if args.thorough:
         mode = ScheduleMode.BNB
+    elif args.smart:
+        mode = ScheduleMode.SMART
     elif args.fast:
         mode = ScheduleMode.FORWARD
     else:
