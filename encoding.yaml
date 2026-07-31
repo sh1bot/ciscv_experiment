@@ -747,7 +747,16 @@ doc:
            genuinely fusable today and we were spending the codepoint on the
            sequence hardware is not told to look for.
          * rules.py canonicalises, so both directions still pair; what the order
-           decides is which one the encoding blesses.
+           decides is which one the encoding blesses -- and, it turns out, which
+           one pays for the stricter test. `_reject_dependence` adds
+           `b.rd not in a.uses_regs` only for a NON-canonical order. While `mul`
+           was canonical, real hi-first code was the reversed case and got that
+           extra test, which rejects `mulh t, a, b ; mul a, a, b` -- a sequence
+           that is perfectly fusable, since the low result overwrites a source
+           only after both ops have read it. Putting the spec order first drops
+           that false rejection: +4 pairs on musl-rv32, 0 elsewhere. Small, but
+           it means the canonical direction is a correctness question and not
+           only a presentational one.
          * The gap is a toolchain one -- a compiler that knew this pairing were
            available would emit the two halves adjacently and in order. Treat
            the low score as a measurement of clang and GCC, not of the frame.
