@@ -46,6 +46,20 @@ So `lw`'s apparent popularity is mostly an artefact of including a 32-bit file.
 Frames whose op clusters list `ld/lw/sd/sw` — `post-inc-pair`, `mem-pair`,
 `pre-inc-pair` — are being sized against a blend that matches no single target.
 
+**Remeasured on the current 17-file corpus (2.57M instructions, 47.3% RV32 by
+count) — the skew GREW.** Balancing the corpus by instruction count does not
+balance it per mnemonic and cannot, because an RV64 build uses `ld`/`sd` for
+anything pointer-sized and leaves `lw`/`sw` to its 32-bit data alone:
+
+| op | RV32 files | RV64 files | RV32 share of total |
+|---|---:|---:|---:|
+| `ld` | 0 | 192,240 | 0% |
+| `lw` | 212,737 | 32,968 | **87%** |
+| `sw` | 165,330 | 20,810 | **89%** |
+| `sd` | 0 | 122,776 | 0% |
+
+The concern is sharper than it was, not stale. See `results/corpus/REMEASURE.md`.
+
 **Questions to settle:**
 
 1. Is the packet ISA targeting RV64 only, RV32 only, or both? `scheduler/RULES.md`
@@ -200,6 +214,13 @@ Top ops by slot occupancy:
   `xor` 4.8%, `mul` 4.3% — genuinely binary ops that use both inputs.
 - **independent:** `li` 27.2%, `mv` 21.1%, `addi4spn` 17.1%, `addi_rsd` 16.8% —
   overwhelmingly unary.
+
+**Remeasured over scheduled packets in musl-rv64 + sqlite-rv64:** independent
+slots are 40.9% unary (19196/46932), chain slots 12.6% (2803/22312). The
+asymmetry stands at 3.2x, but both ends moved a long way from 65.4%/2.9%, and
+the *conclusion* below — that one shared op set serves both badly — has since
+been acted on: the carve-out gave the frames separate `chain_alu` and `rsd_alu`
+anchors, so they no longer share one.
 
 This is a structural fact, not a sampling artefact: a chain frame's whole
 purpose is to feed A's result into B's input, so an op that ignores that input

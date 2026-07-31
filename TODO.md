@@ -5,6 +5,11 @@ pending a decision on the intended behaviour — they are *not* yet settled, so 
 code or doc change has been made for them.  Numbering follows the review's
 consolidated reconciliation table.
 
+Every number below was re-derived against the current tree and the current
+17-file corpus; `results/corpus/REMEASURE.md` holds the evidence and lists what
+changed.  Items that the remeasurement retired have been deleted rather than
+annotated — a stale number in a live document argues the wrong way.
+
 ---
 
 # A. The `encoding.yaml`-as-source-of-truth migration
@@ -20,22 +25,31 @@ leaves open.
    `immb` (immediate bits); the codepoint model prices wide immediates at
    `2^ext` and never mentions g/h.  Pick one and rewrite the Overview bullet.
    Blocks A2 below.
-2. **The 16×16 ALU op-lists.**  `chain-alu-pair` and `rsd-alu-pair` claim 512 of
-   1024 codepoints, and the planned budgets currently over-reserve (1036 > 1024,
-   `encoding_assign.py` exits non-zero).  Measured options are recorded in A3.
-3. **`mvload-jump-pair` has no yaml frame** (936 matched pairs;
-   `encoding_verify` calls it a spec gap).  Add the frame or drop the rule.
+2. ~~**The 16×16 ALU op-lists / codepoint overflow.**~~  RETIRED — the frames
+   were re-optimised and carved apart; `encoding_assign.py` now reports
+   1004/1024 reserved with 20 spare and exits 0.  A3's measured options were
+   taken against the superseded op-lists and are recorded there as history.
+3. ~~**`mvload-jump-pair` has no yaml frame.**~~  RETIRED — the frame exists
+   (`encoding.yaml:816`) and `rules_conform` reports no unframed rule.
 4. **Is the chain temp architecturally x31, or any dead register?**  The yaml
    says "x31 becomes undefined"; `yaml_migration.md` says `tmp` is the
    compiler's own register, required dead.  These differ for code using x31.
-5. **Wide `li`.**  This is `dual-indep-pair`'s 34.4% pack rate — dedicated
-   frame, lui-split, or accepted loss?
+5. **Wide `li`.**  Now measured on the population rather than the pack rate:
+   over 61033 `li` in five corpora, 68.8% fit 5 bits, 90.1% fit 8, 97.4% fit
+   10.  `dual-indep-pair` caps A-slot `li` at 5 bits, so it turns away 31.2% of
+   them — and since the cap is enforced up front they no longer show as
+   unencodable packed pairs (this is the −752 pairs the cap cost on two
+   corpora).  Dedicated frame, lui-split, wider field, or accepted loss?
 6. **`scheduler/RULES.md`'s future** — regenerated from the yaml, reduced to
    scheduler semantics only, or retired?  Its numeric limits have drifted from
    both the yaml and the code (see A4).
 7. **Pairing-rate metric** — pairs *accepted*, or accepted *and encodable*?
-   The verifier puts the second number materially lower (79.7% of matched pairs
-   carry an immediate that fits).  `results/` currently reports the first.
+   Much less material than it was: the verifier now puts 99.2% of checkable
+   immediates inside their declared field (was 79.7%).  What remains is
+   concentrated, not spread — `pre-inc-pair` fits only 35.1%, `post-inc-pair`
+   93.1%, `arith-mem-pair` 93.6% — so the honest fix is per-frame, and
+   `pre-inc-pair` should be re-costed before it is trusted (it is also the
+   frame GCC leans on hardest, see `results/corpus/GCC.md`).
 8. **Frame priority.**  `encoding_budget.py` and `encoding_verify.py` both
    `break` at the first accepting rule, so `RULES` list order determines every
    number they print.  Make it an explicit yaml property, or state in the docs
@@ -63,7 +77,12 @@ leaves open.
   revisions; the missing tool is a stats-diff across them (supersedes the
   `--rules` selector framing in item 15 below).
 
-## A3 — measured input to decision 2 (the codepoint overflow)
+## A3 — measured input to decision 2 (HISTORICAL)
+
+Decision 2 is retired and the op-lists these numbers were taken against no
+longer exist (`rsd_alu` is now 10 ops, `load-chain-alu` carries `lw`/`ld`
+only).  Kept because the *method* and the shape of the trade-offs still apply,
+not because the figures are current.
 
 Reserved blocks total 1036 against a 1024 namespace — 12 over.  Blocks are
 rounded up to powers of two, so *trimming a few ops frees nothing*: a 15×16 ALU
@@ -151,15 +170,16 @@ Recorded here so they are not lost; each needs a home in the design documents.
 - `level:` is undocumented — present on all frames, defined nowhere, and it
   drives markdown heading depth, so level-1 frames render as H1 siblings of
   section headers and break `encoding.md`'s outline.  Define it or decouple it.
-- Three frames carry two rule names in one comma-joined string, which consumers
-  split on `,`.  `post-inc-pair` now shows the better pattern with an explicit
-  `rules_py_names` list; the others should follow.
+- Two frames carry two rule names in one comma-joined string, which consumers
+  split on `,` (`deref-chain-load-pair, base-chain-load-pair` and
+  `load-sp-branch, load-base-branch`).  `post-inc-pair` shows the better
+  pattern with an explicit `rules_py_names` list; the others should follow.
 - `encoding_budget.py` still iterates `RULES` from `rules.py` rather than the
   yaml, so `encoding_budget.md` is generated from a different source of truth
-  than `encoding.md`.  This is why the two documents disagree about the frame
-  set (`mvload-jump-pair` appears in one, `dual-mem-shadd-pair` in the other)
-  and why the budget's "all 21 frames fit" conclusion contradicts
-  `encoding_assign.py` on the same tree.  Re-point it and regenerate.
+  than `encoding.md`.  The two no longer disagree in their conclusions — both
+  now say the namespace fits, and the frame sets match — so this is a
+  structural risk rather than an active contradiction.  Re-point it anyway:
+  the agreement is a coincidence of the two being edited together.
 
 ## A7 — tests
 
@@ -214,11 +234,6 @@ has not yet been written").  The dependency graph enforces RAW + WAR + WAW
 broaden the GOALS §2 wording to cover all true register/memory dependencies.
 
 ## 14 — code cleanups
-- Dead `mem_pair` match-kind branch in `_dual_shared_ok` (`scheduler/rules.py`):
-  no entry in `_DUAL_TUPLES` maps to `"mem_pair"`, so the branch is unreachable.
-  **Recast as a conformance question first** (§A): the yaml defines `mem-pair`
-  as a live frame, so the unreachable branch may be a missing implementation
-  rather than dead code.  Check against the frame before deleting.
 - `is_jump` docstring (`isa/instruction.py`) says it excludes calls/returns, but
   the predicate returns True for any `jal`/`jalr` including those.  Reconcile the
   docstring with the predicate (or the predicate with the docstring).
@@ -237,11 +252,14 @@ broaden the GOALS §2 wording to cover all true register/memory dependencies.
 See `ACCOUNTING.md` for the measurement conventions behind every corpus number
 (pairing rate, pack rate, codepoint demand, op-set yield) and its own register of
 open questions.  Two that block frame sizing:
-- **Corpus ISA mismatch:** `testcase0.s` is RV32, `godot.s` is RV64, and they are
-  pooled by instruction count.  `lw`/`sw` counts are 70%/52% RV32-sourced, so the
-  `ld/lw/sd/sw` clusters in `post-inc-pair` / `mem-pair` / `pre-inc-pair` are
-  sized against a blend matching no single target.  (ACCOUNTING §1)
-- **Chain and dual want different op sets:** unary ops (`li`/`mv`/`addi4spn`) are
-  65.4% of independent-pair slot occupancy but only 2.9% of chain.  `chain-alu-pair`
-  and `rsd-alu-pair` share one `*rsd_alu` anchor, so it serves both badly.
-  (ACCOUNTING §5)
+- **Corpus ISA mismatch — WORSE than recorded, not stale.**  The corpus is now
+  17 files and near-balanced by instruction count (47.3% RV32), but the mnemonic
+  skew grew: `lw` is 87% RV32-sourced and `sw` 89%, because an RV64 build uses
+  `ld`/`sd` for anything pointer-sized.  Balancing by instruction count cannot
+  fix this.  The `ld/lw/sd/sw` clusters in `post-inc-pair` / `mem-pair` /
+  `pre-inc-pair` are still sized against a blend matching no single target.
+  (ACCOUNTING §1)
+- **Chain and dual want different op sets:** remeasured at 40.9% of
+  independent-pair slot occupancy against 12.6% of chain (was 65.4%/2.9%).  The
+  asymmetry stands at 3.2x; the conclusion drawn from it does not, since the
+  carve-out gave the two frames separate anchors.  (ACCOUNTING §5)
