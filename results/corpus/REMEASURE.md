@@ -163,6 +163,35 @@ testcase0    4217   4361   4376  (+3.8%)  3786    4219
 musl-rv32   27896  28384  28569  (+2.4%)  24365   27942
 ```
 
+**Where the gain is.** Instrumenting `_bnb_single_window` against its own list
+seed over testcase0's 5565 windows: BnB improves on LIST in **165 of them
+(3.0%)**, for +167 pairs. By window size, cumulated from the largest down:
+
+```
+size  windows  gain  cum gain%   windows >= size
+  16      184     9      5.4%          3.3%
+  11       65     9     18.6%          6.9%
+  10       58    29     35.9%          7.9%
+   9      103    33     55.7%          9.8%
+   5      308    15     88.0%         24.5%
+   4      535    19     99.4%         34.1%
+   3     1259     1    100.0%         56.7%
+```
+
+Blocks of 1–3 instructions are 56.7% of all windows and contribute **one
+pair**. The largest windows are the expensive ones and contribute 5.4%. The
+money is in the middle — sizes 9 and 10 alone are 53% of the gain.
+
+Gating BnB by window size (single-process harness, its own LIST baseline):
+
+```
+gate      pairs   time    gain captured
+none       4195    3.2s        —
+4..10      4330   39.8s        82%
+4..12      4342   51.2s        89%
+all        4361   82.6s       100%
+```
+
 So ordering — not the pairing model — leaves 2.4–3.8% on the table, and BnB
 already demonstrates it is reachable. `STALL_FOR_PAIR` is worth ~0.1%
 (27896 → 27942 without it, i.e. slightly negative). Note also that with a
