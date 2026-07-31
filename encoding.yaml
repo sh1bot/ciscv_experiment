@@ -820,16 +820,48 @@ doc:
         - ["mv      rda, rs1a", "jr      rs1b"]
         - ["load    rda, k*imma(rs1a)", "jr      rs1b"]
         - ["li      rda, imma", "jr      rs1b"]
+        - ["mv      rda, rs1a", "j       4*immb"]
+        - ["load    rda, 0(rs1a)", "j       4*immb"]
+        - ["li      rda, imma", "j       4*immb"]
       ops:
-        - {a: [mv, lbu, lw, ld], b: [ret, jalr, j]}
-        - {a: [li], b: [ret, jalr, j]}
+        - {a: [mv, lbu, lw, ld], b: [ret, jalr]}
+        - {a: [li], b: [ret, jalr]}
+        - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
+        - {a: [li], b: [j]}
       rows:
         - ["h", "rs1b", "g", "imma[4:0]", "rs1a", "fn3", "rda"]
         - ["h", "rs1b", "g", "imma[4:0|9:5]*2", "fn3", "rda"]
+        - ["h", "rs1a",      "g", "immb[4:0|9:5]*2", "fn3", "rda"]
+        - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "rda"]
       notes: |
          * `j` covers `jal x0`; a jal with a real destination is a call and is
-           excluded from every jump frame. Jump displacements are unbounded and
-           not encoded in these fields.
+           excluded from every jump frame.
+         * DIRECT `j` NEEDS A DISPLACEMENT FIELD, and until rows 3-4 existed it
+           had none -- yet it is 78.7% of this frame's scheduled packets on
+           sqlite-rv64 and 92.4% on musl-rv32, so most of what the frame was
+           credited with could not have been encoded. Rows 3-4 drop `rs1b`,
+           which a direct jump does not need, and give `immb` the rs2+rs1 span
+           instead: 10 bits, extendable to 12 by `g`/`h`. A's source (or li's
+           immediate) moves into the funct5 column.
+         * The unit is PACKETS, not halfwords. A packet binary contains no
+           16-bit instructions, so every target is 4-byte aligned and the low
+           bit RVC must carry is dead. Measured against each corpus's own
+           density, a displacement costs 0.54x what the same jump costs RVC --
+           almost exactly one bit. Coverage in packet units:
+
+               corpus         10 bits   12 bits      (RVC halfwords, 10 bits)
+               sqlite-rv64      84.6%     92.0%              81.5%
+               sqlite-rv32      84.6%     92.1%              81.5%
+               musl-rv32        97.1%     99.7%              94.0%
+               musl-rv64        97.9%     99.7%              95.2%
+
+         * rules.py CANNOT enforce this range: corpus jump operands are
+           unresolved labels, so a pairwise rule has no displacement to test.
+           The scheduled count therefore still includes the ~8% of sqlite's
+           direct jumps that would not fit 12 bits. See results/corpus/README.md.
+         * Loads take row 3 with a zero offset only. That costs nothing measured
+           -- the frame's own note records load offsets as zero in 98.2% of
+           chained cases -- and buys the full 10-bit displacement.
 
   - frame:
       name: arith-mem-pair

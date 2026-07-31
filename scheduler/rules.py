@@ -1270,6 +1270,12 @@ _SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
 _MVLOAD_JUMP_A_MN = frozenset({"addi", "lbu", "lw", "ld"})
 _MVLOAD_JUMP_LI_BITS = 10        # imma[4:0|9:5] spans rs2+rs1 on the li row
 _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
+# A DIRECT jump needs a displacement, and encoding.yaml pays for it out of the
+# A slot: rows 3-4 give immb the rs2+rs1 span, leaving A only the funct5 column.
+# So li narrows to 5 bits and a load has no offset field left at all.  (The
+# displacement itself cannot be checked here — corpus jump operands are
+# unresolved labels, so a pairwise rule has nothing to measure.)
+_MVLOAD_JUMP_LI_J_BITS = 5
 
 
 def _is_small_jump(insn: Instruction) -> bool:
@@ -1297,22 +1303,35 @@ def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("B-not-small-jump")
 
 
+def _is_direct_jump(insn: Instruction) -> bool:
+    """`j label` / `jal x0, label` — a jump whose target is a displacement,
+    not a register.  These take encoding.yaml's rows 3-4."""
+    return insn.mnemonic == "j" or (insn.mnemonic == "jal" and insn.rd == 0)
+
+
 def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
     """mv / li, or a small-offset load, followed by a small control transfer."""
     if not _is_small_jump(b):
         raise NotPair("B-not-small-jump")
+    direct = _is_direct_jump(b)
     if a.is_mv:
         return None
     if a.is_li:
-        lim = 1 << (_MVLOAD_JUMP_LI_BITS - 1)
+        bits = _MVLOAD_JUMP_LI_J_BITS if direct else _MVLOAD_JUMP_LI_BITS
+        lim = 1 << (bits - 1)
         if a.imm is None or not (-lim <= a.imm < lim):
             raise NotPair("A-big-imm")
         return None
     if a.reads_memory:
-        # imma[4:0] scaled by the access width: 0, 1×w, ... 31×w.
         off, width = a.imm, a.access_width
         if off is None or off < 0 or not width:
             raise NotPair("A-big-imm")
+        if direct:
+            # Row 3 draws no offset field: the displacement took the span.
+            if off:
+                raise NotPair("A-offset-with-direct-jump")
+            return None
+        # imma[4:0] scaled by the access width: 0, 1×w, ... 31×w.
         if off % width or off > ((1 << _MVLOAD_JUMP_OFF_BITS) - 1) * width:
             raise NotPair("A-big-imm")
         return None
