@@ -692,6 +692,11 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 # distinct output registers.  The pair packs into a single 32-bit word.
 #
 # Match kinds (per tuple):
+#   "arith2"      both R-type; share rs1, rs2 positionally; two distinct dests.
+#                 Two halves of ONE computation (mul lo/hi, div quotient/rem,
+#                 sum/difference, min/max), declared as a pair so hardware can
+#                 fuse them instead of issuing twice — see encoding.yaml's
+#                 dual-arith2-pair notes.  Kept despite a near-zero score.
 #   "indep_pair"  two independent small pseudo-ops (li / mv / addi4spn).
 #
 # Canonical order is (tuple[0], tuple[1]).  The reverse order is accepted only
@@ -803,6 +808,18 @@ def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
 
 
 _DUAL_TUPLES: dict = {
+    # arith2 — sum/difference, min/max, mul hi/lo, div/rem (+ unsigned, word)
+    ("add", "sub"):       "arith2",
+    ("addw", "subw"):     "arith2",
+    ("min", "max"):       "arith2",
+    ("minu", "maxu"):     "arith2",
+    ("mul", "mulh"):      "arith2",
+    ("mul", "mulhu"):     "arith2",
+    ("mul", "mulhsu"):    "arith2",
+    ("div", "rem"):       "arith2",
+    ("divu", "remu"):     "arith2",
+    ("divw", "remw"):     "arith2",
+    ("divuw", "remuw"):   "arith2",
     # (post-increment mem+addi / mem+shNadd tuples live in _POST_INC_TUPLES)
     # (adjacent load/store pairs are handled by the dedicated mem-pair rule)
     # independent single-output pairs — no shared operands required
@@ -896,6 +913,19 @@ def dual_family(role: str):
             _reject_dependence(a, b, reversed_order)
         return check
     return deco
+
+
+@dual_family("arith2")
+def _dual_arith2(a: Instruction, b: Instruction) -> None:
+    """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...).
+
+    The pair is a fusion hint: both results of one computation are wanted, so an
+    implementation can produce them in a single pass.  Low corpus yield is a
+    fact about today's compilers, not about the frame."""
+    if None in (a.rs1, a.rs2, b.rs1, b.rs2):
+        raise NotPair("MALFORMED: missing register operand")
+    if a.rs1 != b.rs1 or a.rs2 != b.rs2:
+        raise NotPair("source-operand-mismatch")
 
 
 def post_inc_family(role: str):
@@ -1414,6 +1444,12 @@ RULES: list[PairingRule] = [
         b_mnemonic_set=_ARITH_MEM_B_MN,
         a_prerequisites=["is_rsd"],
         check=_arith_mem_pair,
+    ),
+    PairingRule(
+        name="dual-arith2-pair",
+        a_mnemonic_set=_role_mnems("arith2"),
+        b_mnemonic_set=_role_mnems("arith2"),
+        check=_dual_arith2,
     ),
     PairingRule(
         name="post-inc-addi-pair",

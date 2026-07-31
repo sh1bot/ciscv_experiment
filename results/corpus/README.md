@@ -184,3 +184,31 @@ and a pairwise rule has no layout to measure against. Fixing that needs
 displacements computed from an actual packet layout, which is a whole-file
 analysis the rule interface cannot express. It is the largest known gap between
 our reported pair count and an encodable one.
+
+## Why dual-arith2-pair is kept at 4.4 pairs per codepoint
+
+The reclamation pass ranked frames by scheduled pairs per reserved codepoint
+and flagged two: `post-inc-shadd-pair` (0 hits, cut) and `dual-arith2-pair`
+(70 hits over four corpora, 16 codepoints). The second was RESTORED, and the
+ranking is the wrong instrument for it.
+
+Every one of its clusters is two halves of ONE computation over the same
+operands — the low and high words of a multiply, quotient and remainder of a
+divide, sum and difference, min and max. Declaring them as a pair tells the
+implementation that both results are wanted, so it can fuse them into a single
+pass of the multiplier or divider rather than issuing the operation twice and
+throwing away half of each result. The frame exists to make that fusion
+legible to hardware; pairs are not what it is for.
+
+Today's compilers mostly do not emit the shape, and the ceiling confirms the
+frame is not being suppressed — adjacent tuple matches with positionally shared
+operands number 31 on musl-rv32, 25 on cpp-rv32, 2 on sqlite-gcc-rv64 and 0 on
+sqlite-rv64, against 70 pairs the scheduler actually takes by reordering. It is
+also not register-window constrained: `rules.py` carries no x0-x15 set and the
+row draws four full 5-bit fields. What little exists is the widening multiply,
+arriving reversed — `(mulhu, mul)` 21 times against `(mul, mulhu)` 5 on
+musl-rv32 — which `rules.py` canonicalises.
+
+So the low score measures clang and GCC, not the frame. Reclamation now stands
+at 8 codepoints from `post-inc-shadd-pair` alone; reserved budget is 1012/1024
+with 12 spare.

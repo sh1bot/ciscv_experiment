@@ -690,6 +690,48 @@ doc:
          * both opcodes in a pair must be identical operations
 
   - frame:
+      name: dual-arith2-pair
+      budget: 16
+      level: 1
+      templates:
+        - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
+      ops:
+        - {a: [add],    b: [sub]}
+        - {a: [addw],   b: [subw]}
+        - {a: [min],    b: [max]}
+        - {a: [minu],   b: [maxu]}
+        - {a: [mul],    b: [mulh, mulhu, mulhsu]}
+        - {a: [div],    b: [rem]}
+        - {a: [divu],   b: [remu]}
+        - {a: [divw],   b: [remw]}
+        - {a: [divuw],  b: [remuw]}
+      rows:
+        - ["h", "rda", "g", "rs2a", "rs1a", "fn3", "rdb"]
+      notes: |
+         * KEPT DELIBERATELY DESPITE A NEAR-ZERO SCORE. Do not cut this frame on
+           pairing-rate evidence; it is not here to earn pairs.
+         * Every cluster is two halves of ONE computation over the same operands:
+           the low and high words of a multiply, the quotient and remainder of a
+           divide, the sum and difference, the min and the max. Encoding them as
+           a declared pair tells the implementation both results are wanted, so
+           it can FUSE -- one pass of the multiplier or divider producing both
+           halves -- instead of issuing the operation twice and discarding half
+           of each result. That is a hardware invitation, and it is worth a
+           codepoint block whether or not today's compilers accept it.
+         * They mostly do not, yet. Measured over four corpora: 70 scheduled
+           pairs. The ceiling is no higher -- adjacent tuple matches with
+           positionally shared operands number 31 on musl-rv32, 25 on cpp-rv32,
+           2 on sqlite-gcc-rv64, 0 on sqlite-rv64 -- so nothing is suppressing
+           it. Notably the frame is NOT register-window constrained: rules.py
+           carries no x0-x15 set, and this row draws four full 5-bit fields.
+         * What little exists is the widening multiply, and it arrives REVERSED:
+           on musl-rv32, (mulhu, mul) 21 times against (mul, mulhu) 5. rules.py
+           canonicalises operand order, so both forms are accepted.
+         * The gap is a toolchain one -- a compiler that knew this pairing were
+           available would emit the two halves adjacently and in order. Treat
+           the low score as a measurement of clang and GCC, not of the frame.
+
+  - frame:
       name: dual-indep-pair
       # 11 codepoints: the triangle over li, mv, addi4spn_u6, where the last
       # weighs 2 (a 6-bit range over a 5-bit base field). That is 11 rather than
