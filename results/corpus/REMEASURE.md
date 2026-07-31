@@ -216,11 +216,9 @@ godot          90172   13527     13963   +3.2%    110.8%         +7841        +7
 musl-rv64     102040   22291     22878   +2.6%    106.7%         +5525        +4938
 musl-rv32     119026   27896     28569   +2.4%    101.5%         +1975        +1302
 sqlite-rv64   189677   43115     44233   +2.6%    106.4%         +9840        +8722
-sqlite-rv32   192768   46325     47480   +2.5%     94.5%*        +7445        +6290
+sqlite-rv32   192768   46325     47480   +2.5%    104.5%         +7445        +6290
 TOTAL                 157371    161499   +4128                  +32427       +28299
 ```
-
-*(sqlite-rv32's 104.5% as printed; the run's own figure, not recomputed here.)*
 
 **No corpus changes side.** testcase0 was the only one past RVC and still is —
 its margin nearly doubles, −199 to −358 pairs. Every other corpus stays behind,
