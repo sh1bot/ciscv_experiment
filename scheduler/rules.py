@@ -781,15 +781,14 @@ _ARITH_MEM_B_MN = _MEM_PAIR_MN
 
 
 def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
-    """B-slot: non-negative offset, aligned, fits 2-bit scaled field (0..3×width)."""
-    # use imm as offset for loads/stores
-    off = insn.imm
-    if off is None or off < 0:
-        return False
-    width = insn.access_width
-    if not width:
-        return False
-    return off % width == 0 and off <= 3 * width
+    """B-slot: the offset must be ZERO.
+
+    Both rows spend all seven columns on registers and A's immediate, so there
+    is no `immb` field.  A note used to say the two low selector bits supplied a
+    2-bit offset; they are opcode bits (every word runs to depth 10), and giving
+    the eleven B ops a real 2-bit field would cost 4x each — demand 55 -> 220,
+    a 256-block.  See TODO A7."""
+    return insn.imm == 0
 
 
 @a_is_rsd
@@ -798,9 +797,10 @@ def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
 def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
     """RSD arith (x0..x15, small imm) paired with small-offset mem op."""
     if a.mnemonic == "addi":
-        # Immediate field is [-64, 64] inclusive, excluding 0 (encode a zero
-        # immediate as a move from x0 instead).
-        if a.imm is None or a.imm == 0 or not (-64 <= a.imm <= 64):
+        # imma[4:0], and `addi` declares no extension: a 5-bit signed field,
+        # excluding 0 (encode a zero immediate as a move from x0 instead).
+        # This accepted [-64, 64] until the g/h audit — two bits it never had.
+        if a.imm is None or a.imm == 0 or not (-16 <= a.imm <= 15):
             raise NotPair("A-big-imm")
     if not _arith_mem_small_offset_ok(b):
         raise NotPair("B-big-imm")
@@ -1021,8 +1021,11 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
         raise NotPair("A not li form (must be addi rd, x0, imm)")
-    if not a.imm_fits(8):
-        raise NotPair("immediate out of 8-bit signed range [-128..127]")
+    # encoding.yaml declares li at 6 bits: a 5-bit imma column plus one opcode
+    # repeat.  This accepted 8 until the g/h audit -- the extra two bits were
+    # taken from selector bits that are not free (TODO A7).
+    if not a.imm_fits(6):
+        raise NotPair("immediate out of 6-bit signed range [-32..31]")
     return None
 
 

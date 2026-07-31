@@ -4,7 +4,7 @@
 # Every data row describes the seven variable columns h..rd; the renderer
 # appends the invariant "opcode5 │1 0" tail (5-bit opcode + 2-bit marker "10",
 # shown as bits). A cell may span N columns with a "*N" suffix (e.g.
-# "imma[5:0]*2" spans g+rs2). Each field's ASCII box is width = 2*bits - 1, so
+# "g", "imma[4:0]" spans g+rs2). Each field's ASCII box is width = 2*bits - 1, so
 # individual bits align uniformly; bit widths below are the real encoding sizes
 # and sum to 32 including opcode5(5)+marker(2). (funct3's box, 5 cols, can't
 # hold the label, so it renders as "fn3".)
@@ -442,9 +442,12 @@ doc:
       ops:
         - {a: [*li_6s], b: *branches}
       rows:
-        - ["h", "immb[9:5]", "imma[5:0]*2", "rs1b", "fn3", "immb[4:0]"]
+        - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1b", "fn3", "immb[4:0]"]
       notes: |
-         * For this frame `h` extends `imma` by one bit.
+         * `imma` is a 5-bit register column and `li` declares 6 bits, so the
+           sixth is bought by repeating the opcode. An earlier note treated the
+           low selector bit as spare immediate range; it is not -- every
+           selector word runs to depth 10, so both low bits are opcode. TODO A7.
          * TODO: could replace li with alu op and compare result with zero (mostly?).
 
   - frame:
@@ -455,9 +458,9 @@ doc:
         - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
         - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
       ops:
-        - {a: [andi, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
+        - {a: [{op: andi, imm: {bits: 6, signed: false}}, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
       rows:
-        - ["h", "immb[9:5]", "imma[5:0]*2", "rs1a", "fn3", "immb[4:0]"]
+        - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
 
   - md: |
       # Chain rules, but first op is result
@@ -475,7 +478,11 @@ doc:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
         - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
       notes: |
-         * For this frame `g` and `h` extend `immb` by two bits.
+         * `immb` is the branch displacement and is drawn 5 bits wide. An
+           earlier note treated the two low selector bits as spare range for it;
+           they are not (depth 10/10, so both are opcode). Displacements are
+           unresolved labels in the corpus, so nothing here measures the cost of
+           that correction -- see TODO A7.
 
   - frame:
       name: addi-branch-pair
@@ -486,7 +493,7 @@ doc:
       ops:
         - {a: [*addi_6s, *addiw_6s], b: *branches}
       rows:
-        - ["h", "immb[9:5]", "imma[5:0]*2", "rsda", "fn3", "immb[4:0]"]
+        - ["h", "immb[9:5]", "g", "imma[4:0]", "rsda", "fn3", "immb[4:0]"]
 
   - md: |
       # Scaled-index addressing
@@ -641,7 +648,7 @@ doc:
   - frame:
       name: post-inc-pair
       rules_py_names: [post-inc-addi-pair]   # rule names in rules.py this frame covers
-      budget: 8
+      budget: 4
       level: 2
       templates:
         - ["load    rda, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
@@ -666,7 +673,7 @@ doc:
 
   - frame:
       name: mem-pair
-      budget: 16
+      budget: 32
       level: 1
       templates:
         - ["load    rda, k*imm(rbase)", "load    rdb, k*imm+k(rbase)"]
@@ -674,19 +681,19 @@ doc:
         - ["load    rda, k*imm(sp)", "load    rdb, k*imm+k(sp)"]
         - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
       ops:            # shared opcode: both slots identical, so one singleton per op
-        - {a: [lb],  b: [lb]}
-        - {a: [lbu], b: [lbu]}
-        - {a: [lh],  b: [lh]}
-        - {a: [lhu], b: [lhu]}
-        - {a: [lw],  b: [lw]}
-        - {a: [lwu], b: [lwu]}
-        - {a: [ld],  b: [ld]}
-        - {a: [sb],  b: [sb]}
-        - {a: [sh],  b: [sh]}
-        - {a: [sw],  b: [sw]}
-        - {a: [sd],  b: [sd]}
+        - {a: [{op: lb, imm: {bits: 6, signed: false}}], b: [{op: lb, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: lbu, imm: {bits: 6, signed: false}}], b: [{op: lbu, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: lh, imm: {bits: 6, signed: false}}], b: [{op: lh, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: lhu, imm: {bits: 6, signed: false}}], b: [{op: lhu, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: lw, imm: {bits: 6, signed: false}}], b: [{op: lw, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: lwu, imm: {bits: 6, signed: false}}], b: [{op: lwu, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: ld, imm: {bits: 6, signed: false}}], b: [{op: ld, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: sb, imm: {bits: 6, signed: false}}], b: [{op: sb, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: sh, imm: {bits: 6, signed: false}}], b: [{op: sh, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: sw, imm: {bits: 6, signed: false}}], b: [{op: sw, imm: {bits: 6, signed: false}}]}
+        - {a: [{op: sd, imm: {bits: 6, signed: false}}], b: [{op: sd, imm: {bits: 6, signed: false}}]}
       rows:
-        - ["h", "rda",  "imm[5:0]*2",       "rbase", "fn3", "rdb"]
+        - ["h", "rda",  "g", "imm[4:0]",   "rbase", "fn3", "rdb"]
         - ["h", "rs2b", "i", "rs2a",        "rbase", "fn3", "imm[4:0]"]
         - {c: ["h", "rda",  "g", "imm[4:0|9:5]*2", "fn3", "rdb"], tag: SP-relative}
         - {c: ["h", "rs2b", "g", "rs2a", "imm[9:5]", "fn3", "imm[4:0]"], tag: SP-relative}
@@ -950,7 +957,8 @@ doc:
            sqlite-rv64 and 92.4% on musl-rv32, so most of what the frame was
            credited with could not have been encoded. Rows 3-4 drop `rs1b`,
            which a direct jump does not need, and give `immb` the rs2+rs1 span
-           instead: 10 bits, extendable to 12 by `g`/`h`. A's source (or li's
+           instead: a full 10 bits from two register columns, which needs no
+           extension at all. A's source (or li's
            immediate) moves into the funct5 column.
          * The unit is PACKETS, not halfwords. A packet binary contains no
            16-bit instructions, so every target is 4-byte aligned and the low
@@ -985,4 +993,8 @@ doc:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "rdb"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "rs2b"]
       notes: |
-         * For this frame `g` and `h` provide a 2-bit `immb`.
+         * B's memory offset MUST BE ZERO. An earlier note treated the two low
+           selector bits as a 2-bit `immb`; they are opcode bits (depth 10/10)
+           and the rows have no column to spare. Declaring a 2-bit offset on the
+           eleven B ops instead would cost 4x each: demand 55 -> 220, a
+           256-block. See TODO A7.

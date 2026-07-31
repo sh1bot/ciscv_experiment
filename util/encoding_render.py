@@ -470,15 +470,45 @@ def lint_frame(frame, grid):
     return out
 
 
+def shared_imm(frame):
+    """True if the frame's rows name one `imm` field serving BOTH slots, rather
+    than separate `imma`/`immb`."""
+    for row in frame.get("rows", []):
+        cells = row["c"] if isinstance(row, dict) else row
+        for cell in cells:
+            if _cell(cell)[0].split("[")[0] == "imm":
+                return True
+    return False
+
+
+def _ext(entry, base):
+    b = op_bits(entry)
+    return max(0, b - base) if b else 0
+
+
 def opcode_codepoints(frame, grid):
     """Real codepoint demand: Σ over clusters of weight(a)×weight(b), where each
     slot weight sums 2^ext per op. Factors per slot because the A and B
-    immediates extend their range independently."""
+    immediates extend their range independently.
+
+    UNLESS the frame draws ONE shared `imm` serving both slots (mem-pair). Then
+    there is only one field, so its extension is bought once: the cluster costs
+    `|a| * |b| * 2^maxext`, not `2^ext(a) * 2^ext(b)`. Billing a shared field
+    per slot squares a cost that was never paid twice — on mem-pair that is the
+    difference between 16 codepoints and 48."""
     ops = frame.get("ops")
     if not ops:
         return None
     base_a, _ = imm_field_bits(frame, grid, "a")
     base_b, _ = imm_field_bits(frame, grid, "b")
+    if shared_imm(frame):
+        base = max(base_a, base_b)
+        total = 0
+        for c in ops:
+            a, b = c.get("a", []), c.get("b", [])
+            ext = max([_ext(e, base) for e in list(a) + list(b)] or [0])
+            total += max(len(a), 1) * max(len(b), 1) * (1 << ext)
+        return total
     return sum(_slot_weight(c.get("a", []), base_a)
                * _slot_weight(c.get("b", []), base_b) for c in ops)
 
