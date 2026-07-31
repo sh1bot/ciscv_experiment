@@ -263,3 +263,43 @@ open questions.  Two that block frame sizing:
   independent-pair slot occupancy against 12.6% of chain (was 65.4%/2.9%).  The
   asymmetry stands at 3.2x; the conclusion drawn from it does not, since the
   carve-out gave the two frames separate anchors.  (ACCOUNTING §5)
+
+## A7 — the g/h immediate-extension mechanism is unfunded across the yaml
+
+`util/encoding_assign.py` now checks two things it previously only computed,
+and both find pre-existing problems.  Neither is a new regression; both were
+invisible while the checks were absent.
+
+**Eight frames claim a `g`/`h` immediate bit that does not exist.**  A frame can
+only carry an immediate in `g` or `h` if its selector word STOPS above that bit
+— identifier plus op-select must leave it free, which needs depth <= 9 for `h`
+and <= 8 for both.  Every frame is at depth 10/10, so no frame has either bit.
+`GH_FREE_DEPTH` / `H_FREE_DEPTH` encoded exactly this and were dead constants;
+they are now enforced and report: `chain-li-branch`, `chain-bit-test-branch`,
+`load-sp-branch`/`load-base-branch`, `addi-branch-pair`, `mem-pair`,
+`mvload-jump-pair`, `arith-mem-pair`.
+
+**Two frames take field width without declaring it.**  `_slot_weight` charges
+`2^(bits - base)` only for an op with an explicit `imm: {bits}`; a BARE op
+inherits the row's whole span for free.  `lint_frame` reports:
+
+  * `chain-bit-test-branch` slot a — `andi` bare against a 6-bit drawn field;
+  * `mem-pair` slots a and b — all eleven load/store ops bare against 6 bits.
+
+`mem-pair` is the expensive one and needs a decision, not a patch.  Declaring
+6 bits on all eleven ops makes each singleton cluster weigh 2x2, so demand goes
+11 -> 44 and the block 16 -> 64: **+48 codepoints against 12 spare**.  But that
+figure is itself suspect, because `mem-pair`'s immediate is SHARED between the
+slots (one `imm` field, not `imma`/`immb`), and the model multiplies the two
+slot weights as if the extension were bought twice.  A shared field should pay
+`2^ext` once.  So the options are: teach `opcode_codepoints` about shared
+immediates, narrow the row to 5 bits and measure the pair cost, or fund it.
+
+Until one of those lands, `mem-pair`'s 6-bit offset and `chain-bit-test-branch`'s
+6-bit `andi` are ranges we are reporting but have not paid for.
+
+THE RULE, so this stops recurring: **an immediate field is 5 or 10 bits drawn
+from register columns; extra range is bought by REPEATING THE OPCODE, declared
+as `imm: {bits}` on the op.**  Never both — drawing the extra bit AND declaring
+the width pays for the same bit twice, which a revision of `dual-indep-pair`
+briefly did.

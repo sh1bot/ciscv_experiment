@@ -54,10 +54,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from encoding_render import (_center, _cell, _spanned, header_lines,
                              opcode_demand, opcode_codepoints, op_name,
-                             row_operands, _OPERAND, _IMPLICIT)
+                             row_operands, lint_frame, _OPERAND, _IMPLICIT)
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
+# A frame can only carry an immediate bit in g or h if its selector word STOPS
+# above that bit -- identifier + op-select must leave it free.  These are the
+# depths that requires.  Every frame currently sits at depth 10/10, so nothing
+# can claim either bit, which is why the canonical form buys extra range by
+# repeating the opcode instead.  Checked in main(); they were dead constants
+# for a long time and the claim went unaudited.
 GH_FREE_DEPTH = 8               # word must stop at <= this depth to leave g & h free
 H_FREE_DEPTH = 9                # ... to leave just h free
 
@@ -371,10 +377,31 @@ def main():
             "wg": wg, "wh": wh, "fmt": fmt, "a_rank": _FMT_RANK[fmt],
         })
 
+    complaints = []
+    for f in frames:
+        complaints += lint_frame(f["spec"], spec["grid"])
+        need = GH_FREE_DEPTH if (f["wg"] and f["wh"]) else (
+            H_FREE_DEPTH if (f["wg"] or f["wh"]) else None)
+        f["gh_need"] = need
+
     order, reserved, W = allocate_blocks(frames)
     overflow = reserved > (1 << WBITS)
     widths = list(spec["grid"]["display"]) + [9, 3]
     header = header_lines(widths)
+
+    for f in frames:
+        need = f.get("gh_need")
+        if need is not None and min(W, WBITS) > need:
+            complaints.append(
+                f"{f['name']}: claims a g/h immediate bit, which needs the "
+                f"selector word to stop at depth <= {need}; it is at "
+                f"{min(W, WBITS)}, so the bit is an opcode bit and the claim is "
+                f"unfunded.")
+    if complaints:
+        print("## Codepoint-accounting complaints\n")
+        for c in complaints:
+            print(f"  ✗ {c}")
+        print()
 
     print("# Assigned opcode bit-patterns (variable-length prefix code)\n")
     print(f"Selector word = opcode5(5):funct3(3):g:h = {WBITS} bits, "

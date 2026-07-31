@@ -771,18 +771,23 @@ doc:
       # ONE immediate here is 6 bits, not 5, and it is paid for in the
       # canonical way: the FIELD is a 5-bit register column, and the extra bit
       # of range comes from REPEATING THE OPCODE -- `li` declares
-      # `imm: {bits: 6}` against a 5-bit base, so `_slot_weight` charges it
-      # 2 codepoints instead of 1. Demand goes 11 -> 15, still inside the same
-      # 16-block. Only 68.8% of the corpus's `li` fit 5 bits, against 74.1% at
-      # 6; worth +242 pairs over musl-rv32, sqlite-rv64 and musl-gcc-rv32.
+      # `imm: {bits: 6}` (the *li_s6 anchor) against a 5-bit base, so
+      # `_slot_weight` charges it 2 codepoints instead of 1, in BOTH slots.
+      # Demand 11 -> 17, so the block doubles to 32: sixteen codepoints for
+      # +169 pairs, about 10.6 per codepoint. That is a poor rate against the
+      # frames we keep, and worth paying only because nothing is competing for
+      # the space -- 28 codepoints were spare and idle. Revisit if that changes.
+      # Only 68.8% of the corpus's `li` fit 5 bits, against 74.1% at 6.
       #
-      # DO NOT buy width by drawing the field across `g`/`h` instead. That is
-      # the same two bits spent twice: `imm_field_bits` deliberately excludes
-      # g/h from the base so the extension is priced, but a BARE op (no `imm:`
-      # contract) inherits the row's full span for free and pays nothing. An
-      # earlier revision of this frame drew `immb[6:0]*3` with `li` left bare
-      # and appeared to get 7 bits for nothing; it was unfunded. Width must be
-      # declared on the op, not spelled into the row.
+      # NOTE THE ROWS DRAW A PLAIN 5-BIT immb. The sixth bit is NOT also
+      # spelled into the layout -- that would be the same bit bought twice,
+      # once by repeating the opcode and once by widening the field. Two
+      # earlier revisions of this frame got this wrong in both directions: one
+      # drew `immb[6:0]*3` with `li` left bare, taking 7 bits for nothing
+      # (a bare op inherits the row's whole span, since `_slot_weight` charges
+      # only a declared width); the next declared 6 bits AND kept a 6-bit drawn
+      # field, paying for the bit and drawing it too. Declare the width on the
+      # op; leave the row at a register column.
       #
       # 7 bits is affordable only at 2 repeats: demand 23, which needs a
       # 32-block, +16 codepoints against 12 spare. So 6 is the ceiling here
@@ -802,7 +807,7 @@ doc:
       # diagonal pays 2x2 where 2x3/2 would do. Deliberately left alone: 10 and
       # 11 both reserve the same 16-codepoint block, so the difference is a
       # don't-care until the frame grows past 16. See the `ops` header note.
-      budget: 16
+      budget: 32
       level: 1
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
@@ -824,12 +829,12 @@ doc:
       # which no row can encode, and excluding (mv, li), which row 1 encodes.
       ops:
         - {a: [mv],  b: [mv, *li_s6, *addi4spn_u6]}
-        - {a: [*li_s6], b: [li, *addi4spn_u6]}
+        - {a: [*li_s6], b: [*li_s6, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
         - ["h", "rda", "g", "rs2b", "rs1a", "fn3", "rdb"]
-        - ["immb[5:0]*2", "g", "rda", "rs1a", "fn3", "rdb"]
-        - ["immb[5:0]*2", "g", "rda", "imma[4:0]", "fn3", "rdb"]
+        - ["h", "rda", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
+        - ["h", "rda", "g", "immb[4:0]", "imma[4:0]", "fn3", "rdb"]
 
   - frame:
       name: rsd-alu-pair

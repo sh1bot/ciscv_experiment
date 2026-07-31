@@ -353,16 +353,39 @@ def opcode_demand(ops):
     return sum(len(c.get("a", [])) * len(c.get("b", [])) for c in ops)
 
 
+# Every immediate field name the layout may use. A row naming anything else is
+# an error, not a field the pricing model quietly ignores: an unrecognised name
+# is invisible to imm_field_bits, so its width is never charged. That is how a
+# 7-bit `immc` field once cost nothing.
+IMM_NAMES = {"a": {"imma", "imm"}, "b": {"immb", "imm"}}
+ALL_IMM_NAMES = IMM_NAMES["a"] | IMM_NAMES["b"]
+
+# Ops that carry no immediate at all, so a widened field cannot be theirs and
+# a missing `imm:` contract on them is not an omission.
+REG_FORM_OPS = {
+    "mv", "add", "addw", "sub", "subw", "and", "or", "xor", "sll", "sllw",
+    "srl", "srlw", "sra", "sraw", "slt", "sltu", "min", "minu", "max", "maxu",
+    "mul", "mulh", "mulhu", "mulhsu", "mulw", "div", "divu", "divw", "divuw",
+    "rem", "remu", "remw", "remuw", "sh1add", "sh2add", "sh3add", "adduw",
+    "czero.eqz", "czero.nez", "ret", "jr", "jalr", "j", "j_near",
+}
+
+
 def imm_field_bits(frame, grid, slot):
     """(base, full) immediate-range widths for a slot, read from the frame's
     base (non-SP) rows: `full` is the whole slice the layout holds, `base` is
     the part in the dedicated field columns (the two low opcode-word columns
     hold the extension). slot 'a'→imma, 'b'→immb; a shared `imm` counts for
     either. Range above the base (full-base) is what an op pays for in extra
-    codepoints rather than field bits."""
+    codepoints rather than field bits.
+
+    `base` is the WIDEST base across the frame's rows, which is right only
+    because the encoder may pick whichever row holds the op most cheaply. It
+    also means a narrow row hides behind a wide one, so `lint_frame` separately
+    requires an explicit width on every op in a slot whose rows absorb g/h."""
     cols, bits = grid["columns"], grid["bits"]
     gi, hi = cols.index("g"), cols.index("h")
-    names = {"a": {"imma", "imm"}, "b": {"immb", "imm"}}[slot]
+    names = IMM_NAMES[slot]
     base = full = 0
     for row in frame.get("rows", []):
         tag = row.get("tag") if isinstance(row, dict) else None
@@ -372,7 +395,14 @@ def imm_field_bits(frame, grid, slot):
         pos = 0
         for cell in cells:
             body, span = _cell(cell)
-            if body.split("[")[0] in names:
+            stem = body.split("[")[0]
+            if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
+                raise ValueError(
+                    f"{frame.get('name')}: row names immediate field '{stem}', "
+                    f"which the pricing model does not recognise (expected one "
+                    f"of {sorted(ALL_IMM_NAMES)}). An unrecognised name is never "
+                    f"charged for its width.")
+            if stem in names:
                 cspan = range(pos, pos + span)
                 tot = sum(bits[c] for c in cspan)
                 gh = sum(bits[c] for c in cspan if c in (gi, hi))
@@ -390,6 +420,54 @@ def _slot_weight(op_list, base):
         b = op_bits(e)
         w += 1 << (max(0, b - base) if b else 0)
     return w
+
+
+def lint_frame(frame, grid):
+    """Complaints about a frame whose codepoint demand cannot be trusted.
+
+    Two ways a frame can take immediate range without paying for it, both of
+    which have happened:
+
+      * A row absorbs `g`/`h` to widen a field, and an op in that slot is BARE
+        (no `imm: {bits}`).  `_slot_weight` charges `2^(bits - base)` only for
+        a declared width, so a bare op inherits the row's full span for free.
+        The canonical form is the opposite: draw a 5- or 10-bit field from the
+        register columns and buy extra range by REPEATING THE OPCODE, which is
+        exactly what a declared width prices.
+
+      * A row names an immediate field the model does not recognise, so its
+        width is never read at all.  `imm_field_bits` raises on that directly.
+
+    Returns a list of strings; empty means nothing detectable is wrong."""
+    out = []
+    for slot in ("a", "b"):
+        try:
+            base, full = imm_field_bits(frame, grid, slot)
+        except ValueError as e:
+            out.append(str(e))
+            continue
+        if full <= base:
+            continue                     # no extension drawn; nothing to fund
+        bare = []
+        for cluster in frame.get("ops") or []:
+            for entry in cluster.get(slot, []):
+                name = op_name(entry)
+                if name in REG_FORM_OPS:
+                    continue             # carries no immediate to widen
+                if not op_bits(entry):
+                    bare.append(name)
+        # Register-form ops never touch the immediate field, so only complain
+        # when the frame's templates actually give this slot an immediate.
+        tpl_imm = any("imm" in (t[0 if slot == "a" else 1] or "")
+                      for t in (frame.get("templates") or [])
+                      if isinstance(t, list) and len(t) > 1)
+        if bare and tpl_imm:
+            out.append(
+                f"{frame.get('name')}: slot {slot} draws {full} bits over a "
+                f"{base}-bit field, but {sorted(set(bare))} declare no width — "
+                f"they take the extension for free. Declare `imm: {{bits}}` or "
+                f"narrow the row.")
+    return out
 
 
 def opcode_codepoints(frame, grid):
