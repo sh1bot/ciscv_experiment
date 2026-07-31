@@ -979,14 +979,13 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
             raise NotPair("is-not-li_mv_addi4spn")
         if insn.is_addi4spn and not insn.uimm_fits(6, 2, nonzero='remap'):
             raise NotPair(f"addi4spn immediate {insn.imm} out of range")
-        # Row 2 draws immb[6:0] but imma[4:0], so ONE li may be wide.
-        if insn.is_li and (insn.imm is None or not (-64 <= insn.imm <= 63)):
+        # immb is a 5-bit field plus one opcode repeat = 6 bits; imma is 5.
+        if insn.is_li and (insn.imm is None or not (-32 <= insn.imm <= 31)):
             raise NotPair("li-big-imm")
-    # Only the immb field is 7 bits wide, so at most one of the two may exceed
-    # the narrow one.  Which SLOT it lands in does not matter: this frame
-    # requires mutual independence, so the encoder may swap the pair to put the
-    # wide operand in immb.  Accepting either order is worth the last 15 pairs
-    # of the 457 the widening buys.
+    # Only immb carries the extra bit, so at most one of the two may exceed the
+    # narrow field.  Which SLOT it lands in does not matter: this frame requires
+    # mutual independence, so the encoder may swap the pair to put the wide
+    # operand in immb.
     wide = sum(1 for i in (a, b)
                if i.is_li and i.imm is not None and not (-16 <= i.imm <= 15))
     if wide > 1:
@@ -1319,6 +1318,7 @@ _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
 # unresolved labels, so a pairwise rule has nothing to measure.)  Rows 6-7 draw
 # the opposite trade: full-width A, 7-bit displacement.  Both are encodable, so
 # this rule accepts the union and the encoder picks the row that fits.
+_MVLOAD_JUMP_LI_J_BITS = 5
 
 
 def _is_small_jump(insn: Instruction) -> bool:
@@ -1360,10 +1360,9 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
     if a.is_mv:
         return None
     if a.is_li:
-        # Row 4 narrows li to 5 bits to fund a 10-bit displacement; row 7 keeps
-        # the full 10 and takes 7 bits of displacement instead.  Either is
-        # encodable, so the wider one governs what this rule may accept.
-        lim = 1 << (_MVLOAD_JUMP_LI_BITS - 1)
+        # Row 4 narrows li to 5 bits to fund the 10-bit displacement.
+        bits = _MVLOAD_JUMP_LI_J_BITS if direct else _MVLOAD_JUMP_LI_BITS
+        lim = 1 << (bits - 1)
         if a.imm is None or not (-lim <= a.imm < lim):
             raise NotPair("A-big-imm")
         return None
@@ -1372,15 +1371,11 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
         if off is None or off < 0 or not width:
             raise NotPair("A-big-imm")
         if direct:
-            # Two layouts are drawn for a direct jump and the encoder takes
-            # whichever fits: row 3 spends the rs2+rs1 span on a 10-bit (12
-            # with g/h) displacement and leaves the load no offset field, while
-            # row 6 keeps the normal offset and takes a 7-bit displacement from
-            # h+funct5+g.  A zero offset is row 3; anything else is row 6, and
-            # both are legal here — only the displacement distinguishes them,
-            # and that is not visible to a pairwise rule.
-            if off % width or off > ((1 << _MVLOAD_JUMP_OFF_BITS) - 1) * width:
-                raise NotPair("A-big-imm")
+            # Row 3 spends the rs2+rs1 span on the displacement, so the load
+            # keeps no offset field.  (The "near" alternative that kept one was
+            # withdrawn as unfunded — see encoding.yaml.)
+            if off:
+                raise NotPair("A-offset-with-direct-jump")
             return None
         # imma[4:0] scaled by the access width: 0, 1×w, ... 31×w.
         if off % width or off > ((1 << _MVLOAD_JUMP_OFF_BITS) - 1) * width:

@@ -184,6 +184,11 @@ opsets:
   # ones that most need the compression, so x4 it is.)
   addi4spn_u6: &addi4spn_u6 {op: addi4spn, imm: {bits: 6, signed: false, scale: 4}}
 
+  # A 6-bit `li`: a 5-bit field plus ONE opcode repeat. Declared rather than
+  # drawn across g/h -- see the dual-indep-pair header for why that distinction
+  # is the whole difference between paying for the bit and not.
+  li_s6: &li_s6 {op: li, imm: {bits: 6, signed: true}}
+
 # Equivalencies: surface forms the scheduler should accept as matching a frame
 # because they are equivalent to the canonical form the packet encodes. Each
 # entry pairs a `canonical` form (how the frame is written) with a `spelled`
@@ -763,26 +768,32 @@ doc:
 
   - frame:
       name: dual-indep-pair
-      # ONE immediate here is 7 bits, not 5. Rows 1-2 give `immb` the
-      # h+funct5+g span and move `rda` down into rs2; the earlier rows dropped
-      # each immediate into a single register column, which capped both at 5
-      # for no reason but the spelling. Only 68.8% of the corpus's `li` fit 5
-      # bits, against 82.7% at 7. Worth +457 pairs over musl-rv32,
-      # sqlite-rv64 and musl-gcc-rv32 -- and free, because a 7-bit op against
-      # a 7-bit drawn field still weighs 1, so the triangle below is unchanged
-      # at 11 codepoints.
+      # ONE immediate here is 6 bits, not 5, and it is paid for in the
+      # canonical way: the FIELD is a 5-bit register column, and the extra bit
+      # of range comes from REPEATING THE OPCODE -- `li` declares
+      # `imm: {bits: 6}` against a 5-bit base, so `_slot_weight` charges it
+      # 2 codepoints instead of 1. Demand goes 11 -> 15, still inside the same
+      # 16-block. Only 68.8% of the corpus's `li` fit 5 bits, against 74.1% at
+      # 6; worth +242 pairs over musl-rv32, sqlite-rv64 and musl-gcc-rv32.
       #
-      # Only ONE of the pair may be wide: row 2 draws immb[6:0] but imma[4:0],
-      # and 22 operand bits cannot hold two destinations plus two wide
-      # immediates. That is not a real loss -- pairs with two wide immediates
-      # are rare, and since this frame already requires mutual independence
-      # the encoder may put whichever one is wide into the immb field. Taking
-      # the wide operand in EITHER slot is worth the last 15 of the 457.
+      # DO NOT buy width by drawing the field across `g`/`h` instead. That is
+      # the same two bits spent twice: `imm_field_bits` deliberately excludes
+      # g/h from the base so the extension is priced, but a BARE op (no `imm:`
+      # contract) inherits the row's full span for free and pays nothing. An
+      # earlier revision of this frame drew `immb[6:0]*3` with `li` left bare
+      # and appeared to get 7 bits for nothing; it was unfunded. Width must be
+      # declared on the op, not spelled into the row.
       #
-      # 8 bits is out of reach: it would need a fourth g/h mechanism, which
-      # TODO A1 item 1 has not settled. 7 is the ceiling here, so the decision
-      # to cap this group when it outgrew its old home stands -- it was the
-      # SPELLING of the rows that cost the two bits, not the split.
+      # 7 bits is affordable only at 2 repeats: demand 23, which needs a
+      # 32-block, +16 codepoints against 12 spare. So 6 is the ceiling here
+      # today, and the decision to cap this group when it outgrew its old home
+      # stands.
+      #
+      # Only ONE of the pair may be wide: row 2 draws immb for B but imma[4:0]
+      # for A. Not a real loss -- pairs with two wide immediates are rare, and
+      # since this frame already requires mutual independence the encoder may
+      # put whichever one is wide into the immb field, so rules.py accepts it
+      # in either slot.
       #
       # 11 codepoints: the triangle over li, mv, addi4spn_u6, where the last
       # weighs 2 (a 6-bit range over a 5-bit base field). That is 11 rather than
@@ -812,13 +823,13 @@ doc:
       # earlier li-first order had it exactly backwards, admitting (li, mv),
       # which no row can encode, and excluding (mv, li), which row 1 encodes.
       ops:
-        - {a: [mv],            b: [mv, li, *addi4spn_u6]}
-        - {a: [li],            b: [li, *addi4spn_u6]}
+        - {a: [mv],  b: [mv, *li_s6, *addi4spn_u6]}
+        - {a: [*li_s6], b: [li, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
         - ["h", "rda", "g", "rs2b", "rs1a", "fn3", "rdb"]
-        - ["immb[6:0]*3", "rda", "rs1a", "fn3", "rdb"]
-        - ["immb[6:0]*3", "imma[4:0]", "rda", "fn3", "rdb"]
+        - ["immb[5:0]*2", "g", "rda", "rs1a", "fn3", "rdb"]
+        - ["immb[5:0]*2", "g", "rda", "imma[4:0]", "fn3", "rdb"]
 
   - frame:
       name: rsd-alu-pair
@@ -907,7 +918,7 @@ doc:
       # is generous. That figure is one corpus idiom though -- 54 of 55 are the
       # same frame-pointer spill in RV32 -- so it is sized for a real vtable
       # dispatch that this corpus happens not to contain.
-      budget: 32
+      budget: 16
       level: 2
       templates:
         - ["mv      rda, rs1a", "jr      rs1b"]
@@ -916,23 +927,16 @@ doc:
         - ["mv      rda, rs1a", "j       4*immb"]
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
-        - ["mv      rda, rs1a", "j       4*immc"]
-        - ["load    rda, k*imma(rs1a)", "j       4*immc"]
-        - ["li      rda, imma", "j       4*immc"]
       ops:
         - {a: [mv, lbu, lw, ld], b: [ret, jalr]}
         - {a: [li], b: [ret, jalr]}
         - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
         - {a: [li], b: [j]}
-        - {a: [mv, lbu, lw, ld], b: [{op: j_near, imm: {bits: 7, signed: true, scale: 4}}]}
-        - {a: [li], b: [j_near]}
       rows:
         - ["h", "rs1b", "g", "imma[4:0]", "rs1a", "fn3", "rda"]
         - ["h", "rs1b", "g", "imma[4:0|9:5]*2", "fn3", "rda"]
         - ["h", "rs1a",      "g", "immb[4:0|9:5]*2", "fn3", "rda"]
         - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "rda"]
-        - ["immc[4:0|6:5]*3", "", "rs1a", "fn3", "rda"]
-        - ["immc[4:0|6:5]*3", "imma[4:0|9:5]*2", "fn3", "rda"]
       notes: |
          * `j` covers `jal x0`; a jal with a real destination is a call and is
            excluded from every jump frame.
