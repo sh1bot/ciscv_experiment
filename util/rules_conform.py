@@ -61,7 +61,8 @@ from util.encoding_render import op_name, op_contracts
 # mnemonic rather than opcodes of their own.
 PSEUDO_BASE = {"li": "addi", "mv": "addi", "addi4spn": "addi",
                "addi_rsd": "addi", "addi_other": "addi",
-               "j": "jal", "ret": "jalr", "beqz": "beq", "bnez": "bne"}
+               "j": "jal", "j_near": "jal", "ret": "jalr",
+               "beqz": "beq", "bnez": "bne"}
 
 # Register numbers the probes use. Nothing here may be x0 (rules read x0 as a
 # sentinel) or x2 (sp, which is what the base-class probe is trying to vary).

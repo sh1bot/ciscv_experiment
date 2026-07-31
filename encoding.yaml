@@ -814,7 +814,7 @@ doc:
       # is generous. That figure is one corpus idiom though -- 54 of 55 are the
       # same frame-pointer spill in RV32 -- so it is sized for a real vtable
       # dispatch that this corpus happens not to contain.
-      budget: 16
+      budget: 32
       level: 2
       templates:
         - ["mv      rda, rs1a", "jr      rs1b"]
@@ -823,16 +823,23 @@ doc:
         - ["mv      rda, rs1a", "j       4*immb"]
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
+        - ["mv      rda, rs1a", "j       4*immc"]
+        - ["load    rda, k*imma(rs1a)", "j       4*immc"]
+        - ["li      rda, imma", "j       4*immc"]
       ops:
         - {a: [mv, lbu, lw, ld], b: [ret, jalr]}
         - {a: [li], b: [ret, jalr]}
         - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
         - {a: [li], b: [j]}
+        - {a: [mv, lbu, lw, ld], b: [{op: j_near, imm: {bits: 7, signed: true, scale: 4}}]}
+        - {a: [li], b: [j_near]}
       rows:
         - ["h", "rs1b", "g", "imma[4:0]", "rs1a", "fn3", "rda"]
         - ["h", "rs1b", "g", "imma[4:0|9:5]*2", "fn3", "rda"]
         - ["h", "rs1a",      "g", "immb[4:0|9:5]*2", "fn3", "rda"]
         - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "rda"]
+        - ["immc[4:0|6:5]*3", "", "rs1a", "fn3", "rda"]
+        - ["immc[4:0|6:5]*3", "imma[4:0|9:5]*2", "fn3", "rda"]
       notes: |
          * `j` covers `jal x0`; a jal with a real destination is a call and is
            excluded from every jump frame.

@@ -1274,8 +1274,9 @@ _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
 # A slot: rows 3-4 give immb the rs2+rs1 span, leaving A only the funct5 column.
 # So li narrows to 5 bits and a load has no offset field left at all.  (The
 # displacement itself cannot be checked here — corpus jump operands are
-# unresolved labels, so a pairwise rule has nothing to measure.)
-_MVLOAD_JUMP_LI_J_BITS = 5
+# unresolved labels, so a pairwise rule has nothing to measure.)  Rows 6-7 draw
+# the opposite trade: full-width A, 7-bit displacement.  Both are encodable, so
+# this rule accepts the union and the encoder picks the row that fits.
 
 
 def _is_small_jump(insn: Instruction) -> bool:
@@ -1317,8 +1318,10 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
     if a.is_mv:
         return None
     if a.is_li:
-        bits = _MVLOAD_JUMP_LI_J_BITS if direct else _MVLOAD_JUMP_LI_BITS
-        lim = 1 << (bits - 1)
+        # Row 4 narrows li to 5 bits to fund a 10-bit displacement; row 7 keeps
+        # the full 10 and takes 7 bits of displacement instead.  Either is
+        # encodable, so the wider one governs what this rule may accept.
+        lim = 1 << (_MVLOAD_JUMP_LI_BITS - 1)
         if a.imm is None or not (-lim <= a.imm < lim):
             raise NotPair("A-big-imm")
         return None
@@ -1327,9 +1330,15 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
         if off is None or off < 0 or not width:
             raise NotPair("A-big-imm")
         if direct:
-            # Row 3 draws no offset field: the displacement took the span.
-            if off:
-                raise NotPair("A-offset-with-direct-jump")
+            # Two layouts are drawn for a direct jump and the encoder takes
+            # whichever fits: row 3 spends the rs2+rs1 span on a 10-bit (12
+            # with g/h) displacement and leaves the load no offset field, while
+            # row 6 keeps the normal offset and takes a 7-bit displacement from
+            # h+funct5+g.  A zero offset is row 3; anything else is row 6, and
+            # both are legal here — only the displacement distinguishes them,
+            # and that is not visible to a pairwise rule.
+            if off % width or off > ((1 << _MVLOAD_JUMP_OFF_BITS) - 1) * width:
+                raise NotPair("A-big-imm")
             return None
         # imma[4:0] scaled by the access width: 0, 1×w, ... 31×w.
         if off % width or off > ((1 << _MVLOAD_JUMP_OFF_BITS) - 1) * width:
