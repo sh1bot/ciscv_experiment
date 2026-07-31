@@ -133,3 +133,54 @@ their source, so they have no twin and only a same-build number exists.
 whose original flags could not be reproduced (201905 instructions against the
 corpus's 189677). Pairing a corpus file with a twin built differently would put
 the flag difference into the metric, so it gets its own pair instead.
+
+## The direct-jump displacement, and what the pair count does not show
+
+`mvload-jump-pair` pairs `mv`/`li`/load with a control transfer. Its original
+rows spent the `rs1b` column on the jump's register, which is right for
+`jr`/`jalr`/`ret` — and wrong for a DIRECT `j`, which needs a displacement and
+had no field for one. Direct `j` is **78.7%** of the frame's scheduled packets
+on sqlite-rv64 and **92.4%** on musl-rv32, so most of what our second-best
+frame by pairs-per-codepoint was credited with could not have been encoded.
+
+**The unit is packets, not halfwords.** A packet binary has no 16-bit
+instructions, so every target is 4-byte aligned and the low bit RVC must carry
+is dead. Packets are ~7% larger in bytes (3.13 B/insn against RVC's 2.88), but
+the field divides by 4 instead of 2, so a displacement costs 0.54x what the
+same jump costs RVC — almost exactly one bit. Coverage in packet units:
+
+```
+corpus          6b     7b     8b     9b    10b    11b    12b
+sqlite-rv64   56.0%  66.9%  75.5%  80.9%  84.6%  87.2%  91.9%
+musl-rv32     64.4%  77.0%  87.2%  93.7%  97.1%  98.6%  99.7%
+```
+
+Two layouts are drawn, because neither dominates. Scored on total ENCODABLE
+pairs — A-side cost measured by `rules.py`, displacement fit measured offline:
+
+```
+corpus       direct j   narrow A + 12b disp   full A + 7b disp
+sqlite-rv64      5215                  3126               3489
+musl-rv32        1695                  1279               1305
+```
+
+So rows 3-4 give `immb` the rs2+rs1 span (10 bits, 12 with `g`/`h`) and narrow
+A; rows 6-7 take 7 bits from `h`+funct5+`g` and keep A at full width. The
+encoder uses whichever fits. Budget 980 -> 996 of 1024, 28 spare; estimated
+gain over the better single layout ~850 pairs on sqlite-rv64, ~53 per
+codepoint.
+
+**The pair count does not move.** Measured before and after: musl-rv32 27873,
+sqlite-rv64 43115, sqlite-gcc-rv64 35146, musl-gcc-rv32 26535 — identical,
+because `rules.py` accepts the union of the two layouts and that union is what
+it accepted when the frame had no displacement field at all. The entire benefit
+is that the frame is now encodable as drawn.
+
+**The residual fiction is the displacement range**, and it is not small: the
+count still includes every direct jump too far for whichever row it would take
+— on the order of 8% of sqlite's under the wide row, 33% under the narrow one.
+`rules.py` cannot see it, because corpus jump operands are unresolved labels
+and a pairwise rule has no layout to measure against. Fixing that needs
+displacements computed from an actual packet layout, which is a whole-file
+analysis the rule interface cannot express. It is the largest known gap between
+our reported pair count and an encodable one.
