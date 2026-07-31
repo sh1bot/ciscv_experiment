@@ -700,7 +700,7 @@ doc:
         - {a: [addw],   b: [subw]}
         - {a: [min],    b: [max]}
         - {a: [minu],   b: [maxu]}
-        - {a: [mul],    b: [mulh, mulhu, mulhsu]}
+        - {a: [mulh, mulhu, mulhsu], b: [mul]}
         - {a: [div],    b: [rem]}
         - {a: [divu],   b: [remu]}
         - {a: [divw],   b: [remw]}
@@ -724,9 +724,30 @@ doc:
            2 on sqlite-gcc-rv64, 0 on sqlite-rv64 -- so nothing is suppressing
            it. Notably the frame is NOT register-window constrained: rules.py
            carries no x0-x15 set, and this row draws four full 5-bit fields.
-         * What little exists is the widening multiply, and it arrives REVERSED:
-           on musl-rv32, (mulhu, mul) 21 times against (mul, mulhu) 5. rules.py
-           canonicalises operand order, so both forms are accepted.
+         * ORDER IS NOT ARBITRARY, and it is not a dependency either. The two
+           ops read the same two sources and neither consumes the other's
+           result, so they commute -- but the RISC-V M extension names one
+           sequence as THE fusion idiom, and a microarchitecture told to detect
+           fusable pairs is looking for that one:
+
+               MULH[[S]U] rdh, rs1, rs2 ; MUL rdl, rs1, rs2
+               DIV[U]     rdq, rs1, rs2 ; REM[U] rdr, rs1, rs2
+
+           high half first, quotient first, "source register specifiers must be
+           in the same order and rdh cannot be the same as rs1 or rs2" -- that
+           last clause because the fused unit still needs both sources intact
+           when it delivers the second result. `_reject_dependence` already
+           enforces exactly that (`a.rd not in b.uses_regs`), so rules.py gets
+           it for free.
+         * The multiply cluster was listed the WRONG WAY ROUND (mul first) until
+           the corpus was checked against the spec. The compiler is already
+           doing the right thing: hi-first outnumbers lo-first 22:9 on musl-rv32
+           and 20:5 on cpp-rv32, div-first is universal, and EVERY occurrence in
+           all four corpora satisfies the rdh-not-a-source rule. So these are
+           genuinely fusable today and we were spending the codepoint on the
+           sequence hardware is not told to look for.
+         * rules.py canonicalises, so both directions still pair; what the order
+           decides is which one the encoding blesses.
          * The gap is a toolchain one -- a compiler that knew this pairing were
            available would emit the two halves adjacently and in order. Treat
            the low score as a measurement of clang and GCC, not of the frame.

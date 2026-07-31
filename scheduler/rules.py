@@ -813,9 +813,12 @@ _DUAL_TUPLES: dict = {
     ("addw", "subw"):     "arith2",
     ("min", "max"):       "arith2",
     ("minu", "maxu"):     "arith2",
-    ("mul", "mulh"):      "arith2",
-    ("mul", "mulhu"):     "arith2",
-    ("mul", "mulhsu"):    "arith2",
+    # High half first, per the M extension's fusion sequence -- see the
+    # dual-arith2-pair notes in encoding.yaml.  The canonical direction is what
+    # the encoding blesses; rules.py still accepts either order.
+    ("mulh", "mul"):      "arith2",
+    ("mulhu", "mul"):     "arith2",
+    ("mulhsu", "mul"):    "arith2",
     ("div", "rem"):       "arith2",
     ("divu", "remu"):     "arith2",
     ("divw", "remw"):     "arith2",
