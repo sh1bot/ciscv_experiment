@@ -231,3 +231,50 @@ Cost is 8-10x wall clock (sqlite-rv64: 51s to 401s).
 
 So ordering is real, cheap in codepoints, and not a category change. Frames
 remain where parity has to come from.
+
+---
+
+## 7. Gating the search — tried, and it does not work
+
+The §5 histogram said the search should be skippable: a window of `n`
+instructions holds at most `floor(n/2)` pairs, so a list schedule leaving
+`solos = n - 2*pairs` unplaced has already hit that ceiling when `solos <= 1`,
+and BnB improved **none** of testcase0's 2401 such windows. Gain rises
+monotonically from there:
+
+```
+solos    windows  improved   share of gain
+  0-1       2401         0            0.0%
+    2       1465        16            9.6%
+    3        512        13            7.8%
+  4-6       1187       136           82.6%
+```
+
+Implemented as an early return in `_bnb_single_window` (exact at a gate of 2;
+economical at 4) and measured:
+
+```
+corpus      mode        pairs    time      vs ungated
+testcase0   list         4217   0m04.6s
+testcase0   smart (4)    4332   1m20.3s    -29 pairs, -3%  time
+testcase0   thorough     4361   1m23.0s      0 pairs,  0%  time   (was 1m22.4s)
+musl-rv32   list        27896   0m26.8s
+musl-rv32   smart (4)   28212   3m29.2s   -172 pairs, -12% time
+musl-rv32   thorough    28384   3m57.2s      0 pairs,  0%  time   (was 3m58.3s)
+```
+
+**The exact gate saves nothing, because BnB already implements it.** At the
+root call `remaining = n` and `free_insn is None`, so the existing prune
+computes `upper = 0 + _bound(n, False) = n//2` and returns immediately when
+the seed already achieves it (`reorder.py:352`). The 43% of windows the gate
+would skip were being abandoned in one node.
+
+**And the economical gate is a bad trade** — 12% of the time back for 172
+pairs, on a corpus 1302 pairs short of parity.
+
+Reverted. The finding that matters is the diagnosis: BnB's cost is not in the
+many easy windows, it is concentrated in the few hard ones, and no cheap
+trigger separates a hard window that will repay the search from one that will
+not. Making the cheap mode stronger therefore means improving
+`_list_schedule`'s heuristic directly, with BnB as the oracle — not routing
+around it.

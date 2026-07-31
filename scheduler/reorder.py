@@ -23,7 +23,6 @@ class ScheduleMode(enum.Enum):
     FORWARD = "forward"
     LIST    = "list"
     BNB     = "bnb"
-    SMART   = "smart"    # list everywhere, search only where it can pay
 
 
 WINDOW_SIZE   = 16
@@ -31,27 +30,6 @@ WINDOW_OVERLAP = 0       # instructions carried from end of one window into the 
 NODE_BUDGET  = 50_000
 STAGNATION   = 5_000
 STALL_FOR_PAIR = True    # defer instructions whose pairable branch successor isn't ready yet
-
-# A window of n instructions can hold at most floor(n/2) pairs, so a list
-# schedule leaving `solos = n - 2*pairs` unplaced instructions has already hit
-# that ceiling when solos <= 1.  Searching such a window cannot improve it —
-# measured over testcase0's 5565 windows, BnB improved none of the 2401 with
-# solos <= 1, and the gain rises monotonically with the solo count from there:
-#
-#   solos    windows  improved   share of gain
-#     0-1       2401         0            0.0%
-#       2       1465        16            9.6%
-#       3        512        13            7.8%
-#     4-6       1187       136           82.6%
-#
-# So 2 is the exactness-preserving gate — never skips a window that could have
-# improved — and 4 is the economical one, keeping 82.6% of the gain for 21% of
-# the windows.  See results/corpus/REMEASURE.md §5.
-MIN_SOLOS_FOR_SEARCH = 2   # BNB: skip provably-optimal windows, no loss
-SMART_MIN_SOLOS      = 4   # SMART: skip windows unlikely to repay the search
-
-# The gate in force for the current schedule() call; set from the mode.
-_min_solos = MIN_SOLOS_FOR_SEARCH
 
 
 def schedule(block: BasicBlock, graph: Optional[DepGraph], mode: ScheduleMode) -> list:
@@ -69,12 +47,9 @@ def schedule(block: BasicBlock, graph: Optional[DepGraph], mode: ScheduleMode) -
     if graph is None:
         graph = build_dep_graph(block)
 
-    global _min_solos
     if mode == ScheduleMode.LIST:
         ordered = _list_schedule(insns, graph)
-    else:  # BNB or SMART — same search, different gate
-        _min_solos = (SMART_MIN_SOLOS if mode == ScheduleMode.SMART
-                      else MIN_SOLOS_FOR_SEARCH)
+    else:  # BNB
         ordered = _bnb_schedule(insns, graph)
 
     return ordered
@@ -315,12 +290,6 @@ def _bnb_single_window(insns: list, graph: DepGraph) -> list:
     list_result = _list_schedule(insns, graph)
     best_count = _pair_count(list_result)
     best_order = list(list_result)
-
-    # Nothing left to find: the list schedule already packs every instruction
-    # it possibly could (see MIN_SOLOS_FOR_SEARCH).  Returning here is exact at
-    # the default gate — it only skips windows whose bound is already met.
-    if n - 2 * best_count < _min_solos:
-        return best_order
 
     nodes_explored = [0]
     nodes_since_improvement = [0]
