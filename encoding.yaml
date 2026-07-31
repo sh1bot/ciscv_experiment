@@ -635,25 +635,24 @@ doc:
 
   - frame:
       name: post-inc-pair
-      rules_py_names: [post-inc-addi-pair, post-inc-shadd-pair]   # rule names in rules.py this frame covers
-      budget: 16
+      rules_py_names: [post-inc-addi-pair]   # rule names in rules.py this frame covers
+      budget: 8
       level: 2
       templates:
-        - ["load    rda, k*imma(rsda)", "shXadd  rsda, rsda, rs2b"]
-        - ["store   rs2a, k*imma(rsda)", "shXadd  rsda, rsda, rs2b"]
         - ["load    rda, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
         - ["store   rs2a, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
       ops:
         - {a: [ld, lw, sd, sw],     b: [addi]}
-        - {a: [ld, sd],             b: [sh3add]}
-        - {a: [lw, sw],             b: [sh2add]}
       rows:
-        - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
-        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "rda"]
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rda"]
       notes: |
          * Timing oddity here because reg in `rd` field is written in first cycle not second.
+         * The shXadd half of this frame (`post-inc-shadd-pair`, the sh2add/sh3add
+           clusters) was CUT: zero scheduled pairs on every corpus, under both
+           clang and GCC, for 8 of the frame's 16 codepoints.  A post-increment
+           by a register-held stride is a real idiom, but not one either compiler
+           emits adjacent to the access -- see results/corpus/README.md.
          * TODO: Try zero memory offset and all the load/store permutations instead
          * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
 
@@ -689,25 +688,6 @@ doc:
       notes: |
          * For row two, `i` extends `imm` by one bit (consistent with `imma` extension but in a B-type frame).
          * both opcodes in a pair must be identical operations
-
-  - frame:
-      name: dual-arith2-pair
-      budget: 16
-      level: 1
-      templates:
-        - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
-      ops:
-        - {a: [add],    b: [sub]}
-        - {a: [addw],   b: [subw]}
-        - {a: [min],    b: [max]}
-        - {a: [minu],   b: [maxu]}
-        - {a: [mul],    b: [mulh, mulhu, mulhsu]}
-        - {a: [div],    b: [rem]}
-        - {a: [divu],   b: [remu]}
-        - {a: [divw],   b: [remw]}
-        - {a: [divuw],  b: [remuw]}
-      rows:
-        - ["h", "rda", "g", "rs2a", "rs1a", "fn3", "rdb"]
 
   - frame:
       name: dual-indep-pair

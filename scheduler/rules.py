@@ -692,7 +692,6 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 # distinct output registers.  The pair packs into a single 32-bit word.
 #
 # Match kinds (per tuple):
-#   "arith2"      both R-type; share rs1, rs2 positionally; two distinct dests.
 #   "indep_pair"  two independent small pseudo-ops (li / mv / addi4spn).
 #
 # Canonical order is (tuple[0], tuple[1]).  The reverse order is accepted only
@@ -804,18 +803,6 @@ def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
 
 
 _DUAL_TUPLES: dict = {
-    # arith2 — sum/difference, min/max, mul hi/lo, div/rem (+ unsigned, word)
-    ("add", "sub"):       "arith2",
-    ("addw", "subw"):     "arith2",
-    ("min", "max"):       "arith2",
-    ("minu", "maxu"):     "arith2",
-    ("mul", "mulh"):      "arith2",
-    ("mul", "mulhu"):     "arith2",
-    ("mul", "mulhsu"):    "arith2",
-    ("div", "rem"):       "arith2",
-    ("divu", "remu"):     "arith2",
-    ("divw", "remw"):     "arith2",
-    ("divuw", "remuw"):   "arith2",
     # (post-increment mem+addi / mem+shNadd tuples live in _POST_INC_TUPLES)
     # (adjacent load/store pairs are handled by the dedicated mem-pair rule)
     # independent single-output pairs — no shared operands required
@@ -827,22 +814,19 @@ _DUAL_TUPLES: dict = {
 
 # post-inc-pair tuples, in strict (memory-op, base-update) order.  The op-sets
 # mirror encoding.yaml's post-inc-pair clusters: addi strides any of the four
-# 32/64-bit accesses, while shXadd's shift is tied to the access width.
+# 32/64-bit accesses.  The shXadd clusters were cut -- zero scheduled pairs on
+# every corpus under both compilers, for half the frame's codepoints.
 _POST_INC_TUPLES: dict = {
     ("ld",  "addi"):      "mem_addi",
     ("lw",  "addi"):      "mem_addi",
     ("sd",  "addi"):      "mem_addi",
     ("sw",  "addi"):      "mem_addi",
-    ("ld",  "sh3add"):    "mem_shadd",
-    ("sd",  "sh3add"):    "mem_shadd",
-    ("lw",  "sh2add"):    "mem_shadd",
-    ("sw",  "sh2add"):    "mem_shadd",
 }
 
 
 def _role_tuples(role: str) -> frozenset:
     """The (a.mnemonic, b.mnemonic) tuples belonging to one dual-op family."""
-    src = _POST_INC_TUPLES if role in ("mem_addi", "mem_shadd") else _DUAL_TUPLES
+    src = _POST_INC_TUPLES if role == "mem_addi" else _DUAL_TUPLES
     return frozenset(k for k, v in src.items() if v == role)
 
 
@@ -914,15 +898,6 @@ def dual_family(role: str):
     return deco
 
 
-@dual_family("arith2")
-def _dual_arith2(a: Instruction, b: Instruction) -> None:
-    """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...)."""
-    if None in (a.rs1, a.rs2, b.rs1, b.rs2):
-        raise NotPair("MALFORMED: missing register operand")
-    if a.rs1 != b.rs1 or a.rs2 != b.rs2:
-        raise NotPair("source-operand-mismatch")
-
-
 def post_inc_family(role: str):
     """Turn a per-family base-update check into a full rule check(a, b).
 
@@ -961,14 +936,6 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
     """`addi rsda, rsda, k*immb` — stride a nonzero width-scaled uimm5."""
     if not _width_stride_ok(a, b):
         raise NotPair("B-addi-imm-mismatch")
-
-
-@post_inc_family("mem_shadd")
-def _post_inc_shadd(a: Instruction, b: Instruction) -> None:
-    """`shXadd rsda, rsda, rs2b` — the shift is tied to the access width by the
-    tuple table, so the index register rs2b is otherwise unconstrained."""
-    if b.rs2 is None:
-        raise NotPair("MALFORMED: missing register operand")
 
 
 @dual_family("indep_pair")
@@ -1421,22 +1388,10 @@ RULES: list[PairingRule] = [
         check=_arith_mem_pair,
     ),
     PairingRule(
-        name="dual-arith2-pair",
-        a_mnemonic_set=_role_mnems("arith2"),
-        b_mnemonic_set=_role_mnems("arith2"),
-        check=_dual_arith2,
-    ),
-    PairingRule(
         name="post-inc-addi-pair",
         a_mnemonic_set=_a_slot_mnems("mem_addi"),
         b_mnemonic_set=_b_slot_mnems("mem_addi"),
         check=_post_inc_addi,
-    ),
-    PairingRule(
-        name="post-inc-shadd-pair",
-        a_mnemonic_set=_a_slot_mnems("mem_shadd"),
-        b_mnemonic_set=_b_slot_mnems("mem_shadd"),
-        check=_post_inc_shadd,
     ),
     PairingRule(
         name="dual-indep-pair",

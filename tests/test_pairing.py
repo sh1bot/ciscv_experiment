@@ -213,97 +213,6 @@ class TestRsdAluPair:
 
 class TestDualOpPair:
 
-    # --- arith2 ---
-
-    def test_add_sub_same_sources_pairs(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_add_sub_different_sources_no_pair(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=11, rs1=14, rs2=15)
-        assert can_pair(a, b) is not None
-
-    def test_add_sub_swapped_operand_order_no_pair(self):
-        """sub is non-commutative: rs1/rs2 must match positionally."""
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=11, rs1=13, rs2=12)
-        assert can_pair(a, b) is not None
-
-    def test_add_sub_same_dest_no_pair(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=10, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_a_clobbers_shared_source_no_pair(self):
-        """A-slot op writing a shared source corrupts B's read.
-
-        min/max chosen so no chain/rsd rule applies — isolates dual-arith2-pair.
-        """
-        a = make_insn("min", rd=12, rs1=12, rs2=13)   # rd == shared rs1
-        b = make_insn("max", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_b_writes_shared_source_canonical_ok(self):
-        """Canonical order: B writing a shared source is a legal WAR."""
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=12, rs1=12, rs2=13)   # rd == shared rs1
-        assert can_pair(a, b) is None
-
-    def test_reversed_independent_pairs(self):
-        """Reverse order accepted when fully independent."""
-        a = make_insn("sub", rd=11, rs1=12, rs2=13)
-        b = make_insn("add", rd=10, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_reversed_with_conflict_no_pair(self):
-        """Reverse order rejected when a dest is a shared source."""
-        a = make_insn("sub", rd=11, rs1=12, rs2=13)
-        b = make_insn("add", rd=12, rs1=12, rs2=13)   # b.rd in a.uses
-        assert can_pair(a, b) is not None
-
-    def test_min_max_pairs(self):
-        a = make_insn("min", rd=10, rs1=12, rs2=13)
-        b = make_insn("max", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_minu_maxu_pairs(self):
-        a = make_insn("minu", rd=10, rs1=12, rs2=13)
-        b = make_insn("maxu", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_mul_mulh_pairs(self):
-        a = make_insn("mul", rd=10, rs1=12, rs2=13)
-        b = make_insn("mulh", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_mul_mulhu_pairs(self):
-        a = make_insn("mul", rd=10, rs1=12, rs2=13)
-        b = make_insn("mulhu", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_div_rem_pairs(self):
-        a = make_insn("div", rd=10, rs1=12, rs2=13)
-        b = make_insn("rem", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_divuw_remuw_pairs(self):
-        a = make_insn("divuw", rd=10, rs1=12, rs2=13)
-        b = make_insn("remuw", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_unrelated_mnemonics_no_pair(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("xor", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_same_mnemonic_no_tuple(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("add", rd=11, rs1=12, rs2=13)
-        # (add, add) is not a tuple; falls to other rules (not rsd here) — no pair
-        assert can_pair(a, b) is not None
-
     # --- post-increment: mem + addi ---
     #
     # encoding.yaml `post-inc-pair`:
@@ -421,65 +330,11 @@ class TestDualOpPair:
         b = make_insn("addi", rd=12, rs1=12, imm=12)   # 12 not a multiple of 8
         assert can_pair(a, b) is not None
 
-    # --- post-increment: mem + shNadd ---
+    # --- pre-increment reached through a shadd ---
     #
-    #     B: shXadd rsda, rsda, rs2b
-    # The shift is tied to the access width by the tuple table (sh3add with
-    # 8-byte accesses, sh2add with 4-byte); rs2b is otherwise free.
-
-    def test_load_shadd_post_increment_pairs(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_load_shadd_nonzero_offset_pairs(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=8)
-        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_load_shadd_base_not_updated_in_place_no_pair(self):
-        """shadd must write the base it reads — rd == rs1 == the load base."""
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_load_shadd_base_mismatch_no_pair(self):
-        a = make_insn("ld", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=14, rs1=14, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_load_shadd_wrong_width_no_pair(self):
-        """lw pairs with sh2add, not sh3add."""
-        a = make_insn("lw", rd=10, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_lw_sh2add_pairs(self):
-        a = make_insn("lw", rd=10, rs1=12, imm=0)
-        b = make_insn("sh2add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_load_shadd_into_base_no_pair(self):
-        """Loading into the base register clobbers the pointer B updates."""
-        a = make_insn("ld", rd=12, rs1=12, imm=0)
-        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is not None
-
-    def test_store_shadd_post_increment_pairs(self):
-        a = make_insn("sd", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh3add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_sw_sh2add_pairs(self):
-        a = make_insn("sw", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh2add", rd=12, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_store_shadd_index_register_is_free(self):
-        """rs2b has its own encoded field, independent of the stored value."""
-        a = make_insn("sd", rs1=12, rs2=13, imm=0)
-        b = make_insn("sh3add", rd=12, rs1=12, rs2=14)
-        assert can_pair(a, b) is None
+    # The post-increment shXadd frame was cut (zero pairs on every
+    # corpus, both compilers).  Reversed, the same two instructions
+    # are still a pre-increment, which is a live frame.
 
     def test_shadd_store_reversed_is_pre_inc(self):
         """Reversed (shadd, store) is a pre-increment, not this frame."""
