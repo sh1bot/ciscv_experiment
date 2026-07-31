@@ -199,3 +199,37 @@ fixed order the greedy matcher is already optimal: only adjacent pairs are
 legal, which makes it maximum matching on a path, where left-to-right greedy
 is exact. There is nothing to win in `greedy_pair`; all of the headroom is in
 the order handed to it.
+
+---
+
+## 6. Best case from ordering alone — measured
+
+Every corpus scheduled twice on the same tree: the default list scheduler, and
+branch-and-bound with `--overlap 4` (the strongest setting we have). `vs RVC`
+is under BnB; `parity` columns are pairs still needed to beat real RVC, so
+negative means already past.
+
+```
+corpus         insns    list   bnb+ov4    gain    vs RVC   parity(list)  parity(bnb)
+testcase0      21876    4217      4376   +3.8%     98.0%          -199         -358
+godot          90172   13527     13963   +3.2%    110.8%         +7841        +7405
+musl-rv64     102040   22291     22878   +2.6%    106.7%         +5525        +4938
+musl-rv32     119026   27896     28569   +2.4%    101.5%         +1975        +1302
+sqlite-rv64   189677   43115     44233   +2.6%    106.4%         +9840        +8722
+sqlite-rv32   192768   46325     47480   +2.5%     94.5%*        +7445        +6290
+TOTAL                 157371    161499   +4128                  +32427       +28299
+```
+
+*(sqlite-rv32's 104.5% as printed; the run's own figure, not recomputed here.)*
+
+**No corpus changes side.** testcase0 was the only one past RVC and still is —
+its margin nearly doubles, −199 to −358 pairs. Every other corpus stays behind,
+and the aggregate gap closes from 32427 pairs to 28299: **the best ordering we
+can compute is worth 12.7% of the remaining distance to parity.**
+
+The gain is remarkably uniform — 2.4% to 3.8%, tightest on the largest corpora —
+which says it is a property of the scheduler, not of any particular code.
+Cost is 8-10x wall clock (sqlite-rv64: 51s to 401s).
+
+So ordering is real, cheap in codepoints, and not a category change. Frames
+remain where parity has to come from.
