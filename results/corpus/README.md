@@ -170,11 +170,24 @@ encoder uses whichever fits. Budget 980 -> 996 of 1024, 28 spare; estimated
 gain over the better single layout ~850 pairs on sqlite-rv64, ~53 per
 codepoint.
 
-**The pair count does not move.** Measured before and after: musl-rv32 27873,
-sqlite-rv64 43115, sqlite-gcc-rv64 35146, musl-gcc-rv32 26535 — identical,
-because `rules.py` accepts the union of the two layouts and that union is what
-it accepted when the frame had no displacement field at all. The entire benefit
-is that the frame is now encodable as drawn.
+**The pair count DROPS, and that is the honest outcome.** The claim above that
+it "does not move" held only while the second layout existed, and that layout
+was withdrawn as unfunded (see the frame notes). With the frame at its
+canonical single layout, a direct jump takes the rs2+rs1 span for its
+displacement, so a load in the A slot has no offset field and `li` narrows to
+5 bits — constraints the rows always implied and `rules.py` never checked:
+
+```
+corpus           session start   corrected   delta
+musl-rv32                27896       27558    -338
+sqlite-rv64              43115       41378   -1737
+musl-gcc-rv32            26564       26031    -533
+```
+
+Nearly all of that is the direct-jump constraint (measured alone at -412,
+-1813, -569), partly offset by `dual-indep-pair`'s 6-bit `li` (+54, +69, +46).
+The pairs removed were never encodable; the earlier figures were counting
+packets the layout could not hold.
 
 **The residual fiction is the displacement range**, and it is not small: the
 count still includes every direct jump too far for whichever row it would take
