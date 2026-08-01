@@ -169,6 +169,7 @@ opsets:
   addi_6s:  &addi_6s  {op: addi,  imm: {bits: 6, signed: true}}
   addiw_6s: &addiw_6s {op: addiw, imm: {bits: 6, signed: true}}
   li_6s:    &li_6s    {op: li,    imm: {bits: 6, signed: true}}
+  li_7s:    &li_7s    {op: li,    imm: {bits: 7, signed: true}}
 
   # addi4spn carries its scale in its name: the offset is always a multiple of
   # 4, so the low two bits are structurally zero and encoding them is waste.
@@ -187,7 +188,7 @@ opsets:
   # A 6-bit `li`: a 5-bit field plus ONE opcode repeat. Declared rather than
   # drawn across g/h -- see the dual-indep-pair header for why that distinction
   # is the whole difference between paying for the bit and not.
-  li_s6: &li_s6 {op: li, imm: {bits: 6, signed: true}}
+
 
 # Equivalencies: surface forms the scheduler should accept as matching a frame
 # because they are equivalent to the canonical form the packet encodes. Each
@@ -435,12 +436,12 @@ doc:
 
   - frame:
       name: chain-li-branch
-      budget: 16
+      budget: 32
       level: 2
       templates:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
       ops:
-        - {a: [*li_6s], b: *branches}
+        - {a: [*li_7s], b: *branches}
       rows:
         - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1b", "fn3", "immb[4:0]"]
       notes: |
@@ -673,7 +674,7 @@ doc:
 
   - frame:
       name: mem-pair
-      budget: 32
+      budget: 16
       level: 1
       templates:
         - ["load    rda, k*imm(rbase)", "load    rdb, k*imm+k(rbase)"]
@@ -681,12 +682,9 @@ doc:
         - ["load    rda, k*imm(sp)", "load    rdb, k*imm+k(sp)"]
         - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
       ops:            # shared opcode: both slots identical, so one singleton per op
-        - {a: [{op: lb, imm: {bits: 6, signed: false}}], b: [{op: lb, imm: {bits: 6, signed: false}}]}
         - {a: [{op: lbu, imm: {bits: 6, signed: false}}], b: [{op: lbu, imm: {bits: 6, signed: false}}]}
-        - {a: [{op: lh, imm: {bits: 6, signed: false}}], b: [{op: lh, imm: {bits: 6, signed: false}}]}
         - {a: [{op: lhu, imm: {bits: 6, signed: false}}], b: [{op: lhu, imm: {bits: 6, signed: false}}]}
         - {a: [{op: lw, imm: {bits: 6, signed: false}}], b: [{op: lw, imm: {bits: 6, signed: false}}]}
-        - {a: [{op: lwu, imm: {bits: 6, signed: false}}], b: [{op: lwu, imm: {bits: 6, signed: false}}]}
         - {a: [{op: ld, imm: {bits: 6, signed: false}}], b: [{op: ld, imm: {bits: 6, signed: false}}]}
         - {a: [{op: sb, imm: {bits: 6, signed: false}}], b: [{op: sb, imm: {bits: 6, signed: false}}]}
         - {a: [{op: sh, imm: {bits: 6, signed: false}}], b: [{op: sh, imm: {bits: 6, signed: false}}]}
@@ -700,6 +698,13 @@ doc:
       notes: |
          * For row two, `i` extends `imm` by one bit (consistent with `imma` extension but in a B-type frame).
          * both opcodes in a pair must be identical operations
+         * `lb`, `lh` and `lwu` were CUT. Across musl-rv32 and sqlite-rv64 they
+           account for 12 of 37816 scheduled slots -- `lb` never appears at all.
+           Eight ops at 6 bits is demand 16, so the block halves to 16 and the
+           freed codepoints go to chain-li-branch, which returns +422 pairs for
+           them against the +270 that spending them here on a 7th bit would
+           (mem-pair's SP rows already draw 10 bits, so a wider base-register
+           field reaches only the minority of its traffic).
 
   - frame:
       name: dual-arith2-pair
@@ -778,7 +783,7 @@ doc:
       # ONE immediate here is 6 bits, not 5, and it is paid for in the
       # canonical way: the FIELD is a 5-bit register column, and the extra bit
       # of range comes from REPEATING THE OPCODE -- `li` declares
-      # `imm: {bits: 6}` (the *li_s6 anchor) against a 5-bit base, so
+      # `imm: {bits: 6}` (the *li_6s anchor) against a 5-bit base, so
       # `_slot_weight` charges it 2 codepoints instead of 1, in BOTH slots.
       # Demand 11 -> 17, so the block doubles to 32: sixteen codepoints for
       # +169 pairs, about 10.6 per codepoint. That is a poor rate against the
@@ -835,8 +840,8 @@ doc:
       # earlier li-first order had it exactly backwards, admitting (li, mv),
       # which no row can encode, and excluding (mv, li), which row 1 encodes.
       ops:
-        - {a: [mv],  b: [mv, *li_s6, *addi4spn_u6]}
-        - {a: [*li_s6], b: [*li_s6, *addi4spn_u6]}
+        - {a: [mv],  b: [mv, *li_6s, *addi4spn_u6]}
+        - {a: [*li_6s], b: [*li_6s, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
         - ["h", "rda", "g", "rs2b", "rs1a", "fn3", "rdb"]

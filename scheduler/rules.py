@@ -732,8 +732,12 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 # shift is tied to the width by the tuple table (sh3add with 8-byte accesses,
 # sh2add with 4-byte).
 
-_MEM_PAIR_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld",
-                          "sb", "sh", "sw", "sd"})
+# lb/lh/lwu cut: 12 of 37816 scheduled slots across musl-rv32 and sqlite-rv64,
+# and `lb` never appeared at all.  Eight ops fit a 16-block; the freed 16
+# codepoints buy chain-li-branch its seventh bit, worth more.  arith-mem-pair
+# reuses this set for its B slot, which is fine -- those three are equally
+# absent there.
+_MEM_PAIR_MN = frozenset({"lbu", "lhu", "lw", "ld", "sb", "sh", "sw", "sd"})
 
 
 @exclusive_rd
@@ -1024,8 +1028,8 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     # encoding.yaml declares li at 6 bits: a 5-bit imma column plus one opcode
     # repeat.  This accepted 8 until the g/h audit -- the extra two bits were
     # taken from selector bits that are not free (TODO A7).
-    if not a.imm_fits(6):
-        raise NotPair("immediate out of 6-bit signed range [-32..31]")
+    if not a.imm_fits(7):
+        raise NotPair("immediate out of 7-bit signed range [-64..63]")
     return None
 
 
