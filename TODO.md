@@ -407,3 +407,54 @@ something at random.  The options, roughly:
 
 Measure (3) first: it bounds what the sp rows are actually worth.  Until this
 is settled, every reserved-codepoint figure in the repo is understated by 132.
+
+### A9 resolution — measured, and much cheaper than +132
+
+Splitting the paired memory traffic by base register, over musl-rv32 and
+sqlite-rv64:
+
+```
+frame                   sp    op mix (sp side)         sp offset fit
+mem-pair             18072   sw 53% lw 47%   (100%)   5b:41%  6b:54%  10b:100%
+                     13546   ld 56% sd 42%   ( 98%)   5b:91%  6b:98%
+load-sp-branch         127   lw 89% lbu 9%           5b:69%  6b:87%  10b:100%
+                       477   ld 62% lw 22% lbu 16%   5b:66%  6b:84%
+load-chain-alu-pair    239   lw 100%                 5b:95%  6b:99%
+                       372   ld 95% lw 5%            5b:92%  6b:99%
+store-chain-alu-pair    82   sw 100%                 5b:79%  6b:90%
+                        49   sd 80% sw 20%           5b:80%  6b:92%
+addi-store-pair        178   sw 99%                  5b:100%
+                       249   sd 94%                  5b:100%
+```
+
+**The XLEN hypothesis holds.**  SP traffic is overwhelmingly XLEN-width load
+and store, and which one it is tracks the ISA -- `lw`/`sw` on rv32, `ld`/`sd`
+on rv64.  Two opcodes can serve both, sharing an encoding across XLEN exactly
+as `c.lwsp`/`c.ldsp` already do.  Only `load-sp-branch` on rv64 is mixed
+(62/22/16), and even there two ops cover 84%.
+
+**But the frames divide on whether the sp form's WIDE FIELD is earning
+anything**, and that is what decides the fix per frame:
+
+  * `mem-pair` and `load-sp-branch` NEED it — sp offsets fit five bits only
+    41-69% of the time, and reach 100% only at ten.  These get their own sp
+    frame: no `rbase` column, so a 10-bit immediate comes free from two
+    register columns, weight 1, two singleton clusters, a 2-block.
+    `mem-pair` becomes base 16 + sp 2 = 18, against 32 with a discriminator
+    bit and 16 today unpriced.
+  * `load-chain-alu-pair`, `store-chain-alu-pair` and `addi-store-pair` do
+    NOT — their sp offsets already fit five bits 79-100% of the time.  Drop
+    the sp rows entirely and let sp accesses use the base form with x2 in
+    `rbase`.  No discriminator is needed because there is only one row family,
+    and the measured cost is about 66 pairs across both corpora.
+
+Net against the +132 overflow: roughly +2 for `mem-pair`, a little for
+`load-sp-branch` (already two rules, so it is half-split today), and ZERO for
+the other three -- call it under +20 rather than +132, with ~66 pairs paid.
+The namespace fits again.
+
+Worth noting how the two questions interact: `mem-pair`'s sp side is 81-85% of
+its traffic, so what we have been treating as the variant is the dominant case,
+and it is the one whose offsets do not fit.  The base side is nearly done at
+six bits.  They want different widths for real reasons, which is the argument
+for separate frames independent of the codepoint arithmetic.
