@@ -92,7 +92,8 @@ def _render_progress(done: float, total: float, start: float, width: int = 30) -
 
 
 def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode,
-                   progress=None, chunk_weight: int = 0) -> list[tuple]:
+                   progress=None, chunk_weight: int = 0,
+                   xlen: int = None) -> list[tuple]:
     """Parse and schedule one source chunk; return its fn_packets list.
 
     If `progress` is a queue, the chunk's `chunk_weight` is reported back to the
@@ -103,6 +104,12 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode,
     from analysis.depgraph import build_dep_graph
     from scheduler.reorder import schedule
     from scheduler.pairing import greedy_pair, stamp_slot_eligibility
+    # Set in the worker, not inherited: a spawn-based pool would not carry the
+    # parent's module global, and silently scheduling RV64 as RV32 would only
+    # show up as a quiet drop in pairs.
+    if xlen is not None:
+        import scheduler.rules as _r
+        _r.set_xlen(xlen)
 
     _blocks, functions = parse_file(chunk)
 
@@ -177,6 +184,18 @@ def main():
     if args.no_stall_for_pair:
         _reorder.STALL_FOR_PAIR = False
 
+    # Tell the rules which base we are scheduling for, from the corpus's own
+    # ELF-class header.  Frames that spend one opcode on the natural word
+    # (lw/sw on RV32, ld/sd on RV64) cannot be checked without it.
+    from isa.xlen import detect_xlen
+    import scheduler.rules as _rules
+    with open(args.input) as _probe:
+        _xlen, _certain = detect_xlen(_probe.read(8192))
+    _rules.set_xlen(_xlen)
+    if not _certain and args.verbose:
+        print(f"warning: {args.input} declares no ELF class and uses no "
+              f"RV64-only mnemonic; assuming RV{_xlen}", file=sys.stderr)
+
     with open(args.input) as f:
         source = f.read()
 
@@ -225,7 +244,7 @@ def main():
     with ProcessPoolExecutor() as executor:
         futures = {
             executor.submit(_process_chunk, chunk, args.same_base_reorder, mode,
-                            progress_q, len(chunk)): orig_idx
+                            progress_q, len(chunk), _xlen): orig_idx
             for orig_idx, chunk in indexed
         }
         pending = set(futures)

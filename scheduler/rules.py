@@ -12,6 +12,26 @@ from collections.abc import Iterable
 from functools import wraps
 
 from isa.instruction import Instruction
+from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
+
+# Which base this run is scheduling for.  Set once per input by __main__ from
+# the corpus's own ELF-class header (see isa/xlen.detect_xlen); frames that
+# spend a single opcode on "the natural word" cannot be checked without it.
+# Module-level rather than threaded through every check because RULES is built
+# at import, long before any file is read.
+XLEN = _XLEN_DEFAULT
+
+
+def set_xlen(bits):
+    """Point the XLEN-width predicates at RV32 or RV64 for this input."""
+    global XLEN
+    XLEN = bits
+
+
+def a_is_xlen_mem(insn) -> bool:
+    """`lw`/`sw` on RV32, `ld`/`sd` on RV64 -- the op an sp-relative frame
+    spends its one load/store opcode on."""
+    return is_xlen_width(insn, XLEN)
 
 
 # ---------------------------------------------------------------------------
