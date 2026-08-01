@@ -499,20 +499,30 @@ class TestDualOpPair:
         assert can_pair(a, b) is not None
 
     def test_mem_pair_sp_8bit_offset_pairs(self):
-        """sp-relative ld pair with 8-bit scaled offset (>5-bit range) pairs."""
-        # scaled offset 183 = 0xB7, raw = 183*8 = 1464, needs 8 bits
-        a = make_insn("ld", rd=10, rs1=2, imm=1464)
-        b = make_insn("ld", rd=11, rs1=2, imm=1472)
-        assert can_pair(a, b) is None
+        """sp-relative natural-word pair with an 8-bit scaled offset pairs --
+        this is mem-pair-sp, whose implicit base pays for a 10-bit field.
+        `ld` is the natural word only on RV64, so the base must be set."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            # scaled offset 183 = 0xB7, raw = 183*8 = 1464, needs 8 bits
+            a = make_insn("ld", rd=10, rs1=2, imm=1464)
+            b = make_insn("ld", rd=11, rs1=2, imm=1472)
+            assert can_pair(a, b) is None
+        finally:
+            _r.set_xlen(old)
 
-    def test_mem_pair_non_sp_load_6bit_limit(self):
-        """The base-register LOAD row draws imm[5:0]*2 — six bits, so a scaled
-        offset of 32 fits and 64 does not."""
-        a = make_insn("ld", rd=10, rs1=12, imm=256)      # 256/8 = 32, fits 6b
-        b = make_insn("ld", rd=11, rs1=12, imm=264)
+    def test_mem_pair_non_sp_load_5bit_limit(self):
+        """Both base-register rows draw imm[4:0] — five bits, so a scaled
+        offset of 31 fits and 32 does not.  (It was six until the sp carve-out;
+        base offsets fit five bits 94-97% of the time, and halving the field
+        halved the block, which is what funded mem-pair-sp.)"""
+        a = make_insn("ld", rd=10, rs1=12, imm=240)      # 240/8 = 30, fits 5b
+        b = make_insn("ld", rd=11, rs1=12, imm=248)      # 248/8 = 31, fits 5b
         assert can_pair(a, b) is None
-        a = make_insn("ld", rd=10, rs1=12, imm=512)      # 512/8 = 64, over 6b
-        b = make_insn("ld", rd=11, rs1=12, imm=520)
+        a = make_insn("ld", rd=10, rs1=12, imm=256)      # 256/8 = 32, over 5b
+        b = make_insn("ld", rd=11, rs1=12, imm=264)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_non_sp_store_5bit_limit(self):

@@ -773,14 +773,10 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     if abs(a.imm - b.imm) != width:
         raise NotPair(f"bad-delta")
     shift = a.access_shift or 0
-    # encoding.yaml mem-pair rows: SP-relative rows draw imm[4:0|9:5] (10 bits);
-    # the base-register load row draws imm[5:0]*2 (6); the store row imm[4:0] (5).
-    if a.rbase == 2:
-        imm_bits = 10
-    elif a.reads_memory:
-        imm_bits = 6
-    else:
-        imm_bits = 5
+    # Both rows draw imm[4:0] against `rbase`.  The wide sp form is its own
+    # frame now (mem-pair-sp), so there is no 10-bit path here -- an sp access
+    # too wide for five bits belongs to that frame or to neither.
+    imm_bits = 5
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
@@ -802,6 +798,38 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
 
 _ARITH_MEM_A_MN = frozenset({"add", "sub", "and", "or", "addi"})
 _ARITH_MEM_B_MN = _MEM_PAIR_MN
+
+# The union over both bases; `_mem_pair_sp` enforces which is the natural word
+# for the base actually being scheduled.  A set rather than None so the rule is
+# not eligible for -- and does not annotate -- unrelated instructions.
+_MEM_PAIR_SP_MN = frozenset({"lw", "sw", "ld", "sd"})
+
+
+@exclusive_rd
+def _mem_pair_sp(a: Instruction, b: Instruction) -> None:
+    """Two adjacent sp-relative accesses of the NATURAL WORD, offsets one width
+    apart.
+
+    encoding.yaml's mem-pair-sp: the base is implicit, so the freed column pays
+    for a 10-bit shared offset -- which sp traffic needs (only 41% of it fits
+    five bits on rv32) and base traffic does not (97% fits).  The op is `lx`/`sx`,
+    one XLEN-switchable opcode meaning lw/sw on RV32 and ld/sd on RV64, which
+    covers 100% and 98% of measured sp pairs respectively."""
+    if a.mnemonic != b.mnemonic:
+        raise NotPair("opcode-mismatch")
+    if not (is_xlen_width(a, XLEN) and is_xlen_width(b, XLEN)):
+        raise NotPair("not-xlen-width")
+    if a.rbase != 2 or b.rbase != 2:
+        raise NotPair("not-SP-base")
+    if a.imm is None or b.imm is None:
+        raise NotPair("MALFORMED: memory offset absent")
+    width = a.access_width or (1 << (a.access_shift or 0))
+    if abs(a.imm - b.imm) != width:
+        raise NotPair("bad-delta")
+    shift = a.access_shift or 0
+    for insn in (a, b):
+        if not insn.uimm_fits(10, shift):
+            raise NotPair("big-imm")
 
 
 def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
@@ -1476,6 +1504,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_CHAIN_LOAD_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
         check=_base_chain_load_pair,
+    ),
+    PairingRule(
+        name="mem-pair-sp",
+        a_mnemonic_set=_MEM_PAIR_SP_MN,
+        b_mnemonic_set=_MEM_PAIR_SP_MN,
+        check=_mem_pair_sp,
     ),
     PairingRule(
         name="mem-pair",

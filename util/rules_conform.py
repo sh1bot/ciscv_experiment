@@ -89,11 +89,22 @@ def _real_mnemonic(name):
 
 def frame_slot_ops(frame, slot):
     """Real mnemonics a frame allows in one slot, pseudo-ops mapped to the
-    mnemonic that carries them."""
+    mnemonic that carries them.
+
+    An XLEN-switchable op contributes EVERY mnemonic it can mean, because
+    `RULES` is built at import -- before the base is known -- so a rule's
+    mnemonic set is necessarily the union over bases.  Which one is the natural
+    word for the base actually being scheduled is enforced by the rule's check,
+    not by its set, and this comparison does not reach into checks."""
+    from isa.xlen import xlen_ops
     out = set()
     for cluster in frame.get("ops") or []:
         for entry in cluster.get(slot, []):
-            out.add(_real_mnemonic(op_name(entry)))
+            n = op_name(entry)
+            if is_xlen_op(n):
+                out.update(xlen_ops()[n].values())
+            else:
+                out.add(_real_mnemonic(n))
     return out
 
 
