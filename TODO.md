@@ -303,3 +303,55 @@ from register columns; extra range is bought by REPEATING THE OPCODE, declared
 as `imm: {bits}` on the op.**  Never both — drawing the extra bit AND declaring
 the width pays for the same bit twice, which a revision of `dual-indep-pair`
 briefly did.
+
+## A8 — making the yaml actually singular, not nominally
+
+Every encoding glitch this session came from the same shape: a fact stated in
+`encoding.yaml` and RE-STATED somewhere else, with nothing comparing the two.
+The yaml is the source of truth by declaration; these are the steps that would
+make it one in practice, in leverage order.
+
+**Done.** `tests/test_conformance.py` runs `rules_conform` and the codepoint
+accounting on every commit. All three checks existed already and were wired to
+nothing, which is exactly why four width drifts and eight unfunded g/h claims
+survived. The gate caught a real drift within minutes of being added
+(`arith-mem-pair`'s B ops against a trimmed `_MEM_PAIR_MN`).
+
+**Done.** `scheduler/imm_contracts.py` derives per-rule immediate widths from
+the yaml at import, so a width can be READ rather than re-typed.
+
+**Next, in order:**
+
+1. **Consume `imm_contracts` in `rules.py`.**  Ten named constants
+   (`_RSD_IMM_BITS`, `_CHAIN_IMM_BITS`, `_ADDI_STORE_BITS`,
+   `_BIT_BRANCH_IMM_HI`, `_LI_CZERO_BITS`, `_INDEX_MEM_OFF_BITS`,
+   `_MVLOAD_JUMP_*`) plus four inline numeric ranges are hand-copies of yaml
+   facts, over 32 call sites.  Four had drifted.  Replacing them with
+   `width_of(rule, slot, mnemonic)` removes the whole class — there would be
+   one number, not two.  The blocker is that a rule's check does not currently
+   know its own name; give `PairingRule` a back-reference and it falls out.
+
+2. **Schema validation for the yaml** (the old A2 item, now with evidence).
+   Grid bits sum to 32; rows span exactly seven columns net of spans; every
+   field name resolves to a grid column or a declared operand; op clusters
+   agree with templates; frame names unique.  A row naming `immc` cost a
+   frame's whole displacement field this session, and a row spanning six
+   columns instead of seven was caught only by a rendering exception.
+
+3. **Structure the g/h claims.**  `wants_gh()` greps English prose for
+   "`g` ... extend".  That is load-bearing natural language: it silently
+   matched CORRECTIONS that said g/h do *not* extend anything, and it is why
+   eight frames claimed bits nothing had audited.  Make it a frame key
+   (`gh: {a: 1}` or absent) and delete the regex.
+
+4. **Extend `rules_conform`'s reach.**  Coverage is 64% because its probe
+   cannot construct a pair shape some rules accept — `mem-pair`'s eleven ops
+   are unverified precisely because the frame needs two same-mnemonic accesses
+   one width apart.  Per-frame probe hints in the yaml would close it.
+
+5. **Regeneration gate.**  `encoding.md` and `encoding_budget.md` are generated
+   and can silently drift from the yaml; nothing requires a zero-diff
+   re-render.  Add it to the conformance test.
+
+The through-line: every check must be attached to something that fails.  A tool
+nobody runs is documentation, and documentation is what drifted.

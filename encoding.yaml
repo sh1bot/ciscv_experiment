@@ -157,7 +157,7 @@ opsets:
     - xori
   loads:    &loads    [lb, lbu, lh, lhu, lw, lwu, ld]
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
-  mem:      &mem      [lb, lbu, lh, lhu, lw, lwu, ld, sb, sh, sw, sd]
+  mem:      &mem      [lbu, lhu, lw, ld, sb, sh, sw, sd]
 
   # Width-annotated ops: a bare mnemonic takes the frame's base immediate range;
   # these request an explicit wider range, and each bit of range above the base
