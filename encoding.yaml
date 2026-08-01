@@ -155,6 +155,21 @@ opsets:
     - sub
     - xor
     - xori
+  # XLEN-switchable ops. A frame that spends ONE opcode on "the natural word"
+  # -- as c.lwsp/c.ldsp do -- cannot name `lw` or `ld`, because which it means
+  # depends on the base. These names do, and the mapping is declared HERE
+  # rather than in the scheduler: it is a fact about the encoding, and the
+  # scheduler will read it from this file once it parses the yaml directly,
+  # switching after it deduces XLEN from the input (isa/xlen.detect_xlen reads
+  # the corpus's own ELF-class header).
+  #
+  # Measured justification: sp-relative paired traffic is 100% lw/sw on RV32
+  # and 98% ld/sd on RV64, so one switchable opcode covers essentially all of
+  # it. See results/corpus/IMMEDIATES.md and TODO A9.
+  xlen_switchable:
+    lx: {32: lw, 64: ld}
+    sx: {32: sw, 64: sd}
+
   loads:    &loads    [lb, lbu, lh, lhu, lw, lwu, ld]
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
   mem:      &mem      [lbu, lhu, lw, ld, sb, sh, sw, sd]

@@ -55,6 +55,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from scheduler.rules import RULES, NotPair
+from isa.xlen import resolve_xlen_op, is_xlen_op
 from util.encoding_render import op_name, op_contracts
 
 # Pseudo-op names the yaml may use that are register-operand choices on a real
@@ -76,14 +77,23 @@ SP = 2
 CONFIG_CAP = 12
 
 
+def _real_mnemonic(name):
+    """The mnemonic a yaml op name denotes.  Pseudo-ops are one-to-one (`li` is
+    always `addi`); XLEN-dependent ops are not, so they are resolved against
+    the base rules.py is currently set to."""
+    if is_xlen_op(name):
+        import scheduler.rules as _r
+        return resolve_xlen_op(name, _r.XLEN)
+    return PSEUDO_BASE.get(name, name)
+
+
 def frame_slot_ops(frame, slot):
     """Real mnemonics a frame allows in one slot, pseudo-ops mapped to the
     mnemonic that carries them."""
     out = set()
     for cluster in frame.get("ops") or []:
         for entry in cluster.get(slot, []):
-            n = op_name(entry)
-            out.add(PSEUDO_BASE.get(n, n))
+            out.add(_real_mnemonic(op_name(entry)))
     return out
 
 
@@ -103,8 +113,8 @@ def op_pairs(frame, limit=3, pin=None):
         ops = {s: [op_name(e) for e in cluster.get(s, [])] for s in ("a", "b")}
         if pin:
             slot, want = pin
-            if want not in ops[slot] and PSEUDO_BASE.get(want, want) not in [
-                    PSEUDO_BASE.get(o, o) for o in ops[slot]]:
+            if want not in ops[slot] and _real_mnemonic(want) not in [
+                    _real_mnemonic(o) for o in ops[slot]]:
                 continue
             ops[slot] = [want]
         for a in (ops["a"] or [None])[:limit]:
@@ -169,7 +179,7 @@ def _mk(op, rd, rs1, rs2, imm):
     name: `li` is an addi from x0, `j` is a jal to x0, `beqz` compares against
     x0. Getting these wrong is why a jump or branch slot was never reached."""
     from isa.instruction import Instruction
-    mn = PSEUDO_BASE.get(op, op)
+    mn = _real_mnemonic(op)
     if op == "li":
         rs1 = 0
     elif op == "mv":
@@ -365,7 +375,7 @@ def main():
             got = getattr(rule, attr)
             if not want or got is None:
                 continue
-            got = {PSEUDO_BASE.get(m, m) for m in got}
+            got = {_real_mnemonic(m) for m in got}
             if want != got:
                 if want - got:
                     notes.append(f"{slot}: yaml has {sorted(want - got)}, rules.py lacks them")
@@ -388,7 +398,7 @@ def main():
             bits = c.get("bits")
             if not bits or c.get("scale"):     # scaled fields need the width; skip
                 continue
-            base = PSEUDO_BASE.get(mn, mn)
+            base = _real_mnemonic(mn)
             for slot in ("a", "b"):
                 if base not in frame_slot_ops(frame, slot):
                     continue
