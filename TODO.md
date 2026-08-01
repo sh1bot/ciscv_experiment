@@ -355,3 +355,55 @@ the yaml at import, so a width can be READ rather than re-typed.
 
 The through-line: every check must be attached to something that fails.  A tool
 nobody runs is documentation, and documentation is what drifted.
+
+## A9 — ROW DISCRIMINATION IS NOT PRICED (found; unresolved; the budget is over)
+
+`opcode_codepoints` iterates a frame's `ops` and never looks at its `rows`, and
+`imm_field_bits` skips any row tagged `SP-relative` outright.  So where a frame
+draws two row layouts for the SAME operands, nothing pays for the bit that
+tells the decoder which layout it is looking at.
+
+Some row pairs need no bit, because the OPCODE already implies the layout:
+`chain-alu-pair`'s register row (`add`) versus its immediate row (`addi`) are
+different ops, so the distinction is free.  That is the case the model
+implicitly assumes for all of them.
+
+The SP-relative variants are not that case.  `mem-pair`'s base row and its SP
+row both hold `lw`/`lw`; nothing in the opcode says which.  The SP row drops
+the `rbase` column and spends it on a wider immediate, so the two rows have
+DIFFERENT field layouts and the decoder must be told.  RVC pays this openly —
+`c.lwsp` and `c.lw` are separate opcodes.  Five frames are affected and none
+names an sp-form op:
+
+```
+frame                   demand  block   priced  block   delta
+load-chain-alu-pair         64     64      128    128     +64
+store-chain-alu-pair        32     32       64     64     +32
+mem-pair                    16     16       32     32     +16
+load-sp-branch/base         14     16       28     32     +16
+addi-store-pair              4      4        8      8      +4
+                                                          +132
+```
+
+**Reserved goes 1024/1024 -> 1156/1024.  The namespace does not fit.**
+
+This is not a small correction and it should not be patched by narrowing
+something at random.  The options, roughly:
+
+1. **Pay it.**  Needs 132 codepoints found elsewhere; the whole reclamation
+   pass this session freed 24.  Would require cutting a 256-block ALU frame,
+   which A3 measured at -2.3pp to -10pp of yield.
+2. **Give the sp forms their own ops** (`lwsp`, `swsp`, ...) so the demand
+   model counts them naturally.  Same codepoints, but honestly stated, and it
+   matches what RVC does.  Probably the right answer.
+3. **Drop the sp rows** and let sp-relative accesses use the base-register
+   form with x2 in `rbase`.  Free, and costs only the wider immediate the sp
+   rows buy — which is exactly the 10-bit reach that makes `mem-pair`'s SP
+   traffic encodable, so measure before believing it is cheap.
+4. **Sentinel**: let `rbase = x2` in the base row SELECT the sp layout.  Zero
+   opcode cost, but the base row's immediate is 5 bits and the sp row's is 10 —
+   the wider field has nowhere to come from once `rbase` is still drawn.  Only
+   works if the sp form's extra width is abandoned, collapsing this into (3).
+
+Measure (3) first: it bounds what the sp rows are actually worth.  Until this
+is settled, every reserved-codepoint figure in the repo is understated by 132.
