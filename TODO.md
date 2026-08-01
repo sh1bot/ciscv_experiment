@@ -450,8 +450,21 @@ anything**, and that is what decides the fix per frame:
 
 Net against the +132 overflow: roughly +2 for `mem-pair`, a little for
 `load-sp-branch` (already two rules, so it is half-split today), and ZERO for
-the other three -- call it under +20 rather than +132, with ~66 pairs paid.
-The namespace fits again.
+the other three -- call it under +20 rather than +132.  The namespace fits
+again.
+
+**Step 1 done and MEASURED: -206 pairs, not the ~66 estimated.**  musl-rv32
+27248 -> 27174 and sqlite-rv64 40708 -> 40576.  The estimate came from the
+sp-offset fit rates times those frames' sp populations and was 3x optimistic;
+the fit rates are per-instruction while the loss is per-pair, and either end
+of a pair failing kills it.
+
+Still clearly the right trade, but check the reasoning rather than the ratio:
+206 pairs for 100 codepoints is 2 pairs per codepoint, which looks poor
+against frames earning 16 to 2180.  The alternative was not "keep the rows
+free" -- it was to find 100 codepoints in a namespace that is exactly full,
+i.e. cut 100 codepoints of frames earning >=16 pairs each, for >=1600 pairs.
+Dropping the sp rows is roughly eight times cheaper than funding them.
 
 Worth noting how the two questions interact: `mem-pair`'s sp side is 81-85% of
 its traffic, so what we have been treating as the variant is the dominant case,
