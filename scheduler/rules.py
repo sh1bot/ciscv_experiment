@@ -496,8 +496,11 @@ def _chain_mem_check(insn: Instruction, base_bits: int) -> None:
     offset. rules.py previously applied the SP-only check unconditionally and
     refused every base-register form the encoding already reserves."""
     shift = insn.access_shift or 0
-    if insn.rs1 == 2 and insn.uimm_fits(10, shift):
-        return
+    # No sp-wide path: encoding.yaml's SP-relative rows for these frames were
+    # dropped (TODO A9).  Their sp offsets fit the base field 79-100% of the
+    # time, so an sp access simply uses the base form with x2 in the register
+    # column -- which costs a fraction of what a second row layout costs in
+    # codepoints, since nothing in the opcode distinguishes the two.
     if not insn.uimm_fits(base_bits, shift):
         raise NotPair("big-imm")
 
@@ -574,8 +577,9 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
 # a full 5-bit field.
 _ADDI_STORE_MN = frozenset({"sb", "sh", "sw", "sd"})
 _ADDI_STORE_BITS = 10                        # signed immediate field
-_ADDI_STORE_SP_OFF = 5                       # width-scaled, sp variant
-# the base-register variant spends its remaining bits on rbase: zero offset only
+# The frame draws ONE row now: the SP-relative variant was dropped (TODO A9)
+# because its offsets fit the base field 100% of the time on both corpora.  The
+# remaining row spends its bits on rbase, so B carries no offset at all.
 
 
 def _addi_store_pair(a: Instruction, b: Instruction) -> None:
@@ -591,12 +595,8 @@ def _addi_store_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-result-escapes")
     if b.rs1 is None:
         raise NotPair("MALFORMED: missing register operand")
-    if b.rs1 == 2:
-        shift = b.access_shift if b.access_shift is not None else 0
-        if not b.uimm_fits(_ADDI_STORE_SP_OFF, shift):
-            raise NotPair("B-big-imm")
-    elif b.imm:
-        raise NotPair("B-big-imm")           # base variant encodes no offset
+    if b.imm:
+        raise NotPair("B-big-imm")           # the one row encodes no offset
 
 
 @chain_uses_low_regs
