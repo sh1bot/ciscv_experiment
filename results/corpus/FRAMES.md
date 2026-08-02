@@ -104,11 +104,15 @@ like on this workbench.
      on today's numbers; re-measure if the offset column can be funded.
    * **Inverted-condition far jump** (`bXX ; j L`, branch over exactly one
      unconditional jump — the if/else diamond head): 24–656 per corpus,
-     heavy in sqlite/cpp.  One packet: branch ops in the opcode, rs1+rs2
-     (10 bits) + a 10-bit PACKET displacement = 20 exactly, and it converts
-     the corpus's worst displacement pressure (far branches) into the
-     packet's best field.  ~8 codepoints for ~500 realizable pairs on
-     sqlite-class code.  The strongest new candidate from this census.
+     heavy in sqlite/cpp, and REFUTED on measurement.  The packing is
+     pretty (rs1+rs2 10 bits + 10-bit packet displacement = 20 exactly) but
+     the population is far-by-construction: the compiler emits this diamond
+     precisely when the conditional target exceeds B-type range (+/-4KiB),
+     so a 10-bit packet field — SMALLER than the solo branch's own 12-bit
+     displacement — reaches 0% of resolved targets (609 sqlite / 29 musl
+     diamonds; even 12 bits reaches 22%/59%).  A cautionary twin of the
+     RVC-eligibility caveat: an adjacency census means nothing for a
+     displacement idiom until the displacements are resolved.
    * Curiosity: **conditional return** (`bXX ; ret`): 11–88 per corpus,
      10 bits + implicit ret — nearly free to encode if a home exists.
 2. **`lui+addi` 32-bit constant (LI32).**  Celio 2016; SiFive patent
