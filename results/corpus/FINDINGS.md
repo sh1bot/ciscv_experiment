@@ -602,52 +602,63 @@ frees five bits for the offsets.  It splits the corpora hard -- 58% of musl's
 copies share a base against 5% of sqlite's -- so it would serve struct-copy
 code and do nothing for sqlite.
 
-## alu-alu-chain resized to 8 ops per axis (2026-08)
+## alu-alu-chain resized to 11 ops per axis (2026-08)
 
-The frame was the roster's worst value: 256 codepoints for 2502 pairs on
-musl-rv32 + sqlite-rv64, 9.8 per codepoint.  Measured alternatives, block
-sizes exact (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256):
+The frame was the roster's worst value: 256 codepoints for 5090 pairs across
+musl-rv32 + sqlite-rv64 + cpp-rv64, 19.9 per codepoint.  Block sizes are
+exact squares (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256), so the axes hold 8,
+11 or 16 ops of weight (`addi` counts 2 for its 6-bit immediate).
 
-| ops/axis | block | frame pairs | total vs 16x16 | pairs/cp |
-|--:|--:|--:|--:|--:|
-| **8** | **64** | 2009 | **-461** | **31.9** |
-| 11 | 128 | ~2330 | -172 | 18.2 |
-| 16 | 256 | 2502 | — | 9.8 |
+| ops/axis | block | census pairs (3 corpora) | pairs/cp |
+|--:|--:|--:|--:|
+| 8 | 64 | 3755 (74%) | 58.7 |
+| **11** | **128** | **4500 (88%)** | **35.2** |
+| 16 | 256 | 5090 (100%) | 19.9 |
 
-As the marginal cost of KEEPING space: 128 -> 256 buys 172 pairs (1.3/cp),
-64 -> 128 buys 289 (4.5/cp).  Both under the portfolio floor near 6, so the
-block is 64 and the frame becomes one of the better earners.
+As the marginal cost of KEEPING space: 64 -> 128 buys 745 census pairs
+(11.6/cp), 128 -> 256 buys 590 (4.6/cp).  Deflated by the ~0.7
+census-to-measured factor seen throughout this project those are roughly 8
+and 3 against a portfolio floor near 6 — so **128**.  Measured on
+musl-rv32 + sqlite-rv64 the 11/axis frame costs 230 pairs against the full
+block, i.e. the top 128 codepoints were earning 1.8 per codepoint.
 
-**The axes are decoupled, and that is worth ~8%.**  The best SYMMETRIC set of
-the same weight (exhaustive search) reaches 1691 census pairs against 1830
-for the asymmetric pair — because a symmetric set is forced to carry `sltu`
-(which only ever produces) and `or` (which only ever consumes), wasting a
-slot on each axis.  A produces values, B consumes them.
+**A two-corpus fit is not safe here — this was caught, not predicted.**  An
+8/axis set fitted on musl-rv32 + sqlite-rv64 alone was measured, shipped, and
+then failed validation on cpp-rv64: it cost 1007 pairs there (1.2% of the
+corpus's total) against 461 across the other two combined.  The cause is
+`srliw`, C++'s second heaviest A op at 456 of 2588 — an RV64 W-form shift
+that cannot appear on RV32 at all and is rare in sqlite, so neither fitting
+corpus could see it.  `andi` (232) and `xori` (118) are smaller versions of
+the same trap.  That set covers just 66% of the three-corpus population
+against 88% for the set fitted on all three.
+
+**The axes are decoupled, worth ~8%.**  The best SYMMETRIC set of equal
+weight reaches 1691 census pairs against 1830 for the asymmetric pair (two
+corpora), because a symmetric set must carry `sltu` (only ever a producer)
+and `or` (only ever a consumer), wasting a slot on each axis.
 
 **What `sltu` feeds.**  Nearly every occurrence is spelled `snez`
-(`sltu rd, x0, rs`) or `seqz` (`sltiu rd, rs, 1`), so its one bit is a
-PREDICATE, and it is spent three ways: 52% into `add`/`addi` (branchless
-conditional increment, `count += (x < y)`), 31% into `or`/`and`/`xor`
-(combining predicates), 14% into `slli` (shifting the flag into a bit
-position).  A comparison is never a consumer, which is exactly why the
-asymmetry pays.
+(`sltu rd, x0, rs`) or `seqz` (`sltiu rd, rs, 1`), so its single bit is a
+PREDICATE, spent three ways: 52% into `add`/`addi` (branchless conditional
+increment, `count += (x < y)`), 31% into `or`/`and`/`xor` (combining
+predicates), 14% into `slli` (shifting the flag into a bit position).  A
+comparison is never a consumer, which is exactly why the asymmetry pays.
 
 ### Re-optimising on uniquely-owned value changes nothing
 
 Attributed hits overstate a frame's worth: some of its pairs would be
-re-formed by other frames, or its instructions would find other partners.
-Two measurements separate the notions.
+re-formed elsewhere, or its instructions would find other partners.  Two
+measurements separate the notions.
 
 * **Exact-pair uniqueness: 100%.**  Every pair alu-alu-chain wins is a shape
   no other rule accepts — the rule set is disjoint at the pair level.
 * **Schedule-level uniqueness: 58%.**  Deleting the frame outright costs
-  1455 packets, not 2502, because the freed instructions re-pair with
-  DIFFERENT neighbours.
+  1455 packets, not 2502 (two corpora), because the freed instructions
+  re-pair with DIFFERENT neighbours.
 
 Re-running the op-set search weighted by that recoverability (a pair counts
 only insofar as its instructions end up solo once the frame is gone) returns
-**exactly the same A and B sets**, covering 73% of unique value just as they
-covered 73% of attributed pairs.  The recoverable mass is spread
-proportionally across the op mix rather than concentrated in particular ops,
-so the shipped set is not an artifact of counting attributed hits.
-
+**exactly the same sets**, covering 73% of unique value just as they covered
+73% of attributed pairs.  The recoverable mass is spread proportionally
+across the op mix rather than concentrated in particular ops, so the choice
+is not an artifact of counting attributed hits.

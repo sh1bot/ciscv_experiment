@@ -119,13 +119,15 @@ _CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
                            "slli", "srli", "srliw"})
 _CHAIN_ALU_IMM_BITS = {mn: _w("load-alu-chain", "b", mn)          # signed
                    for mn in ("addi", "andi", "xori", "sltiu")}
-# alu-alu-chain narrows to 8 weight per axis (addi counts 2 for its 6-bit
-# immediate), and the two axes differ: A produces a value, B consumes it.
-# Measured at 31.9 pairs/codepoint against 9.8 for the full 16x16 block -- see
-# the frame note in encoding.yaml.  The three chain frames still SHARE
+# alu-alu-chain narrows to 11 weight per axis (addi counts 2 for its 6-bit
+# immediate; 11^2 = 121 fits a 128 block), and the two axes differ: A produces
+# a value, B consumes it.  Fitted on THREE corpora -- a set tuned without a
+# C++ corpus drops srliw, which RV32 cannot even spell.  See encoding.yaml.  The three chain frames still SHARE
 # _CHAIN_ALU_MN above; only this frame is cut.
-_ALU_ALU_A_MN = frozenset({"add", "addi", "slli", "sltiu", "sltu", "srli", "sub"})
-_ALU_ALU_B_MN = frozenset({"add", "addi", "and", "or", "slli", "srli", "sub"})
+_ALU_ALU_A_MN = frozenset({"add", "addi", "andi", "or", "slli", "sltiu", "sltu",
+                           "srli", "srliw", "sub"})
+_ALU_ALU_B_MN = frozenset({"add", "addi", "and", "andi", "or", "slli", "sltiu",
+                           "srli", "sub", "xor"})
 
 _CHAIN_ALU_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
 _CHAIN_ALU_SHIFT_HI = (1 << _w("load-alu-chain", "b", "slli")) - 1

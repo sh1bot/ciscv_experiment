@@ -434,25 +434,32 @@ doc:
       # (musl-rv32 + sqlite-rv64), 9.8 per codepoint.  Measured alternatives,
       # blocks exact (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256):
       #
-      #   ops/axis  block  pairs   vs 256  pairs/cp
-      #      8        64   ~2041    -461     31.9
-      #     11       128   ~2330    -172     18.2
-      #     16       256    2502       -      9.8
+      #   ops/axis  block  census pairs (3 corpora)  pairs/cp
+      #      8        64            3755 (74%)          58.7
+      #     11       128            4500 (88%)          35.2
+      #     16       256            5090 (100%)         19.9
       #
-      # Read as the marginal cost of KEEPING the space: 128 -> 256 codepoints
-      # buys 172 pairs (1.3/cp) and 64 -> 128 buys 289 (4.5/cp), both under the
-      # portfolio floor near 6.  So the block is 64.  (The census predicted a
-      # loss of 672; the measured loss is 461, because a third of the rejected
-      # pairs are picked up by other frames.)
-      budget: 64
+      # Read as the marginal cost of KEEPING space: 64 -> 128 codepoints buys
+      # 745 census pairs (11.6/cp) and 128 -> 256 buys 590 (4.6/cp).  Deflating
+      # by the ~0.7 census-to-measured factor seen throughout this project puts
+      # those at roughly 8 and 3 against a portfolio floor near 6, so the block
+      # is 128.
+      #
+      # The op set MUST be fitted on all three corpora.  A set tuned on
+      # musl-rv32 + sqlite-rv64 alone drops `srliw`, which cannot appear on
+      # RV32 at all and is rare in sqlite -- but is C++'s second heaviest A op
+      # (456 of 2588), so that set covers only 66% of the three-corpus
+      # population against 88% here.  `andi` and `xori` are smaller versions of
+      # the same trap.
+      budget: 128
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
       ops:
         - a: [{op: addi, imm: {bits: 6, signed: true}},   # 2 codepoints
-              add, slli, sltiu, sltu, srli, sub]
+              add, andi, or, slli, sltiu, sltu, srli, srliw, sub]
           b: [{op: addi, imm: {bits: 6, signed: true}},   # 2 codepoints
-              add, and, or, slli, srli, sub]
+              add, and, andi, or, slli, sltiu, srli, sub, xor]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
