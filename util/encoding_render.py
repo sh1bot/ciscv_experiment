@@ -358,6 +358,43 @@ IMM_NAMES = {"a": {"imma", "imm"}, "b": {"immb", "imm"}}
 ALL_IMM_NAMES = IMM_NAMES["a"] | IMM_NAMES["b"]
 
 
+def rd_column_cells(frame, grid):
+    """The cell stem each row places in the `rd` column, one per row.
+
+    The rd column is where the x0/x2 sentinel lives (encoding.yaml `reserved`),
+    so what a frame puts there decides its role: a destination register in
+    every row means the frame OWES the reservation and can HOST a guest in the
+    slice its rd cannot reach; a literal bit pattern means the frame IS a
+    guest, selected by that pattern rather than by an opcode of its own; an
+    immediate means neither -- the column is not a register field at all."""
+    col = grid["columns"].index("rd")
+    out = []
+    for row in frame.get("rows") or []:
+        cells = row["c"] if isinstance(row, dict) else row
+        pos = 0
+        for cell in cells:
+            body, span = _cell(cell)
+            if pos <= col < pos + span:
+                out.append(body.split("[")[0])
+                break
+            pos += span
+        else:
+            out.append(None)
+    return out
+
+
+def rd_column_role(frame, grid):
+    """'host' | 'guest' | None — see rd_column_cells."""
+    stems = [s for s in rd_column_cells(frame, grid) if s is not None]
+    if not stems:
+        return None
+    if all(s.startswith(("rd", "rsd")) and s[-1] in "ab" for s in stems):
+        return "host"
+    if all(re.fullmatch(r"[01](?: [01])*", s or "") for s in stems):
+        return "guest"
+    return None
+
+
 def imm_field_bits(frame, grid, slot):
     """The immediate FIELD width a slot's rows draw: the register columns the
     field occupies, and nothing else. Five bits from one column, ten from two.

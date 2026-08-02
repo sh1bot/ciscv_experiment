@@ -54,7 +54,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from encoding_render import (_center, _cell, _spanned, header_lines,
                              opcode_demand, opcode_codepoints, op_name,
-                             row_operands, lint_frame, _OPERAND, _IMPLICIT)
+                             row_operands, lint_frame, rd_column_role,
+                             _OPERAND, _IMPLICIT)
+
+# Sentinel bit patterns reserved in the rd column (encoding.yaml `reserved`):
+# x0 and x2.  A hosted guest is selected by one of them, so each codepoint a
+# host lends can carry this many guest identities.
+SENTINELS = 2
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
@@ -339,14 +345,56 @@ def main():
             "name": f["name"], "spec": f, "demand": d, "base": base,
             "budget": budget, "opsel": opsel_bits(budget),
             "fmt": fmt, "a_rank": _FMT_RANK[fmt],
+            "role": rd_column_role(f, spec["grid"]),
         })
 
     complaints = []
     for f in frames:
         complaints += lint_frame(f["spec"], spec["grid"])
 
-    order, reserved, W = allocate_blocks(frames)
+    # A1.11 — hosting.  A frame whose rd column carries the sentinel is
+    # selected by that bit pattern, not by an opcode of its own, so it needs no
+    # top-level block: it rides inside a host's codepoints, in the rd slice the
+    # host can never reach (rules.py enforces that the host never writes x0 or
+    # x2 there).  The host gives up nothing -- that slice was dead -- and the
+    # guest's whole budget comes back to the namespace.
+    guests = [f for f in frames if f["role"] == "guest"]
+    hosts = sorted((f for f in frames if f["role"] == "host"),
+                   key=lambda f: -(1 << f["opsel"]))
+    lend = {}
+    unhosted = []
+    for g in guests:
+        need = -(-g["budget"] // SENTINELS)      # ceil: identities per codepoint
+        for h in hosts:
+            free = (1 << h["opsel"]) - lend.get(h["name"], 0)
+            if free >= need:
+                lend[h["name"]] = lend.get(h["name"], 0) + need
+                g["host"] = h["name"]
+                g["host_cp"] = need
+                break
+        else:
+            unhosted.append(g["name"])
+
+    hosted = [f for f in frames if f.get("host")]
+    order, reserved, W = allocate_blocks([f for f in frames if not f.get("host")])
     overflow = reserved > (1 << WBITS)
+
+    # Place each guest at the top of its host's block, largest first so every
+    # sub-block stays aligned to its own size.  The guest's identifier is a
+    # real prefix in the same namespace -- it just lives inside codepoints the
+    # host already reserved, and is told apart from the host by the rd field.
+    by_name = {f["name"]: f for f in order}
+    taken = {}
+    for g in sorted(hosted, key=lambda f: -f["host_cp"]):
+        h = by_name[g["host"]]
+        need = g["host_cp"]
+        off = taken.get(h["name"], 0) + need
+        taken[h["name"]] = off
+        g["opsel"] = max(0, (need - 1).bit_length())
+        g["base_cp"] = h["base_cp"] + (1 << h["opsel"]) - off
+        g["id_len"] = max(0, W - g["opsel"])
+        g["id_val"] = g["base_cp"] >> g["opsel"]
+        g["depth"] = min(W, WBITS)
     widths = list(spec["grid"]["display"]) + [9, 3]
     header = header_lines(widths)
 
@@ -361,9 +409,22 @@ def main():
           f"{1<<WBITS} codepoints, read MSB->LSB.")
     print("'0'/'1' = frame identifier (constant), 'o' = op-select, "
           "'.' = free/unused.\n")
-    print(f"Reserved {reserved}/{1<<WBITS} codepoints across {len(frames)} frames "
+    print(f"Reserved {reserved}/{1<<WBITS} codepoints across {len(order)} frames "
           f"({100*reserved/(1<<WBITS):.0f}%), each frame a fixed block sized to its\n"
           f"budget so it can grow into its own free slots without moving the rest.\n")
+    if hosted:
+        print("Hosted frames (rd = x0/x2 sentinel) take NO block of their own — each\n"
+              "rides in a host's codepoints, in the rd slice that host cannot reach.\n"
+              "The host loses nothing: it keeps every one of those codepoints for its\n"
+              "own encodings, which all name a real register there.  Each lent\n"
+              f"codepoint carries {SENTINELS} guest identities (rd = x0 and rd = x2).\n")
+        for g in hosted:
+            print(f"    {g['name']:20} budget {g['budget']:>3} -> "
+                  f"{g['host_cp']:>3} codepoint(s) of {g['host']}")
+        print(f"    {'':20} {sum(g['budget'] for g in hosted):>10} codepoints "
+              f"returned to the namespace\n")
+    if unhosted:
+        print(f"⚠ Sentinel frames with no host large enough: {', '.join(unhosted)}\n")
     print("Each frame prints its form, then per template the encoding twice — the\n"
           "A instruction then the B — with the fields that slot does NOT use erased.\n"
           "A field kept in both copies is shared by both instructions.\n")
@@ -387,6 +448,17 @@ def main():
               f"depth {depth}/{WBITS}")
         print()
         render_frame_body(f, widths, header)
+        print()
+
+    for g in hosted:
+        print(f"## {g['name']}  [hosted]")
+        print(f"    A-slot: {g['fmt']:7}   no block of its own; selected by the "
+              f"rd = x0/x2 sentinel\n"
+              f"    inside {g['host_cp']} codepoint(s) of {g['host']} "
+              f"({SENTINELS} identities each); "
+              f"using {g['demand']} of budget {g['budget']}")
+        print()
+        render_frame_body(g, widths, header)
         print()
 
     print("─" * 72)

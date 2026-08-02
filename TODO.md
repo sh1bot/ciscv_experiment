@@ -52,16 +52,13 @@ The planning documents name `encoding.yaml` as the source of truth (see
     the frame that broke it — and that concession is stated explicitly at the
     point it is made, never by quiet reordering.  Recorded in the yaml's
     "Enumeration policy" note.
-11. **`rd = x0/x2` sentinel** — DECIDED: ENFORCE.  `rules.py` must reject
-    `rd` in {x0, x2} wherever a row draws a register there, which makes the
-    sentinel real and unlocks hosting: a sentinel-selected frame
-    (`arith-jump`/`prologue`/`epilogue`) can ride inside another rd-bearing
-    frame's opcode word in the slice that frame's `rd` cannot reach —
-    roughly 68 codepoints at zero opcode cost.  A frame may host only if its
-    `rd` column holds a register in EVERY row; frames whose `rd` carries
-    `immb[4:0]` have no unreachable slice to lend.  To build: the rd check in
-    rules.py, host eligibility in `encoding_assign.py`, and a remeasure (the
-    check can only cost pairs; the codepoints are the return).
+11. **`rd = x0/x2` sentinel** — DONE.  Enforced in `rules.py` (derived from
+    the yaml: the frames that owe the reservation are exactly those whose
+    rows draw a destination in the rd column) at zero measured cost —
+    musl-rv32 27191 -> 27192, sqlite-rv64 40850 -> 40851, both attribution
+    reshuffles.  `encoding_assign.py` then hosts the three sentinel frames
+    inside `chain-alu-pair`'s block, two guest identities per lent codepoint:
+    **986 -> 918 reserved, spare 38 -> 106**.
 
 ## A5 — design constraints that live only in tooling or scheduler code
 
