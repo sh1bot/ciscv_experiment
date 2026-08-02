@@ -267,12 +267,14 @@ doc:
        * the value of `k` in instruction templates is the size of the
          corresponding load or store data width.  The value of `X` in `shXadd`
          mnemonics is the corresponding bit shift.
-       * IMMEDIATE FIELDS ARE FIVE BITS — one register column — or ten from
-         two columns.  An op needing more range says so with `imm: {bits: N}`
-         and pays by duplicating immediate-form opcode entries: each bit above
-         the drawn field doubles that op's codepoints (see the width-annotated
-         entries in `opsets`).  There is no other widening mechanism; `g` and
-         `h` are opcode bits like any other.
+       * AN IMMEDIATE FIELD IS FIVE BITS PER REGISTER FIELD IT CONSUMES:
+         five bits from one register column, ten from two.  Beyond that it
+         grows INCREMENTALLY, one bit at a time, by taking multiple entries in
+         the opcode list: an op declaring `imm: {bits: N}` occupies
+         2^(N - field) entries, so field+1 bits costs 2 entries, field+2 costs
+         4, and so on (see the width-annotated entries in `opsets`).  There is
+         no other widening mechanism; `g` and `h` are opcode bits like any
+         other.
 
   - md: |
       # Enumeration policy (intent only)

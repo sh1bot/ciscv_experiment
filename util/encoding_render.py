@@ -357,11 +357,12 @@ def imm_field_bits(frame, grid, slot):
     slot 'a'→imma, 'b'→immb; a shared `imm` counts for either; the widest row
     governs, since the encoder may pick whichever row holds an op.
 
-    THE RULE (encoding.yaml Overview): an op needing more range than the field
-    declares `imm: {bits: N}` and pays by opcode duplication — `_slot_weight`
-    charges 2^(N - field). There is no other widening mechanism. A row that
-    parks an immediate in `g`/`h`, or names a field the model does not know,
-    is an error, not a wider field."""
+    THE RULE (encoding.yaml Overview): a field is five bits per register
+    column it consumes, and grows incrementally past that by taking multiple
+    opcode-list entries — an op declaring `imm: {bits: N}` occupies
+    2^(N - field) entries, which `_slot_weight` charges. There is no other
+    widening mechanism. A row that parks an immediate in `g`/`h`, or names a
+    field the model does not know, is an error, not a wider field."""
     cols, bits = grid["columns"], grid["bits"]
     gi, hi = cols.index("g"), cols.index("h")
     names = IMM_NAMES[slot]
