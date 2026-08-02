@@ -563,37 +563,41 @@ measured in this project.
 Both fit inside the 106 spare codepoints with room left over.  Neither has
 been drawn into `encoding.yaml`; these are measurements, not decisions.
 
-### Candidate 5 (mem-copy): the design space, measured
+### Candidate 5 (mem-copy): the design space, measured — and BUILT as B
 
-Baseline 27192 / 40851.  Every row below is a scheduler run, not an
-extrapolation.  The row is `load tmp, imma(rbase_a)` then
-`store tmp, immb(rbase_b)` with tmp dead: four operands, 20 bits, exactly the
-operand budget at two 5-bit scaled offsets.
+Baseline 27192 / 40851.  Every row is a scheduler run.  The frame is
+`load tmp, k*imma(rs1a)` then `store tmp, k*immb(rs1b)` with tmp dead: two
+bases and two width-scaled offsets fill the 20-bit budget exactly.
 
 | option | ops | offsets | codepoints | musl | sqlite | net pairs | pairs/cp |
 |---|---|---|--:|--:|--:|--:|--:|
-| A minimal | width-matched diagonal | 5b | **4** | +313 | +541 | **+854** | 214 |
-| B knee | width-matched diagonal | 6b | **16** | +386 | +851 | **+1237** | 77 |
-| C wide ops | full 4x4 cross | 5b | 16 | — | — | ~+1020 (est) | 64 |
-| D both | full 4x4 cross | 6b | 64 | — | — | ~+1400 (est) | 22 |
-| ceiling | diagonal | unbounded | n/a | +827 | +901 | +1728 | — |
+| A | width-matched diagonal | 5b | 4 | +242 | +362 | +604 | 151 |
+| **B — BUILT** | width-matched diagonal | 6b | **16** | +314 | +647 | **+961** | **60** |
+| C | full 4x4 cross | 5b | ~32 | +313 | +541 | +854 | 27 |
+| D | full 4x4 cross | 6b | ~112 | +386 | +851 | +1237 | 11 |
+| ceiling | full cross | unbounded | n/a | +827 | +901 | +1728 | — |
 
-Two facts decide it.  **The 5-bit field is the binding constraint, not the op
-set**: uncensored, the population is 859 (musl) / 968 (sqlite) sites, of which
-only 39% / 62% have both scaled offsets inside 5 bits — 47% / 95% at six bits,
-63% / 98% at seven.  And **the op set barely matters**: copies are
-width-matched 96% (musl) / 79% (sqlite), so the diagonal alone gets nearly
-everything, and the truncating tail (`ld` -> `sw`, 122 on sqlite) costs 4x the
-block for ~12 pairs/cp.
+CORRECTION: an earlier version of this table labelled C and D as the
+"diagonal" and priced them at 4 and 16 codepoints.  The scratch rules behind
+those two runs never enforced width matching, so they were measuring the full
+cross product, whose op list costs 28-32 codepoints before any widening and
+~112 with it.  A and B are the real diagonal, measured after the frame was
+drawn.  The recommendation survives the correction; the numbers under it did
+not.
 
-**B is the knee.**  The marginal 12 codepoints over A buy 383 pairs (32/cp,
-still 5x the portfolio floor) and take sqlite — the corpus furthest from
-parity — from 62% to 95% capture.  Seven bits would cost 64 codepoints for
-perhaps 150 more pairs (~2/cp), well under the floor.
+Two facts decide it.  **The offset width binds, not the op set**: uncensored
+the population is 859 (musl) / 968 (sqlite) sites, of which only 39% / 62%
+have both scaled offsets inside five bits, 47% / 95% inside six, 63% / 98%
+inside seven.  **Copies preserve width** 96% / 79% of the time, so the
+diagonal captures nearly everything; the truncating tail (`ld` -> `sw`, 122
+pairs on sqlite) is worth ~250 pairs for ~28 extra codepoints (~9/cp), close
+enough to the portfolio floor to leave out.
 
-One structural alternative, unmeasured: a SAME-BASE variant (`rbase_a ==
-rbase_b`) frees five bits for the offsets.  It splits the corpora hard —
-58% of musl's copies share a base against 5% of sqlite's — so it would serve
-struct-copy code and do nothing for sqlite.  Worth measuring only if A/B are
-rejected on width grounds.
+B is the knee: the marginal 12 codepoints over A buy 357 pairs (30/cp,
+5x the floor) and take sqlite -- the corpus furthest from parity -- from 62%
+to 95% capture.  Seven bits would cost 64 codepoints for perhaps 150 more.
 
+One structural alternative, unmeasured: a SAME-BASE variant (`rs1a == rs1b`)
+frees five bits for the offsets.  It splits the corpora hard -- 58% of musl's
+copies share a base against 5% of sqlite's -- so it would serve struct-copy
+code and do nothing for sqlite.

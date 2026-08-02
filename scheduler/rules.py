@@ -1451,6 +1451,42 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
         return None
     raise NotPair("A is not mv/li or a small-offset load")
 
+# ---------------------------------------------------------------------------
+# load-store-chain
+# ---------------------------------------------------------------------------
+# A memory copy: A loads a value, B stores it straight back out, and the
+# loaded value (the chain temporary) is dead afterwards.  Four operands -- two
+# bases and two width-scaled offsets -- fill the 20-bit budget exactly.
+#
+# A slot: any load;  B slot: a store of the SAME access width whose stored
+# value is A's result.  Signed loads are accepted and encoded as the unsigned
+# form: feeding a same-width store, both write identical bytes.
+
+_LOAD_STORE_A_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
+_LOAD_STORE_B_MN = frozenset({"sb", "sh", "sw", "sd"})
+_LOAD_STORE_OFF_BITS = _w("load-store-chain", "a", "lw")
+
+
+@must_chain_stored
+@no_escape
+@a_base_not_from_auipc
+def _load_store_chain(a: Instruction, b: Instruction) -> None:
+    """Load a value and store it straight back out; the temporary dies."""
+    if a.rd is None or a.rbase is None or b.rbase is None:
+        raise NotPair("MALFORMED: missing base or destination")
+    if a.access_width != b.access_width:
+        raise NotPair("width-mismatch")
+    # A load that lands its result in its own base would make B store the
+    # loaded value through a clobbered pointer -- still well defined, but the
+    # frame's temp must be dead, and @no_escape does not see this.
+    if a.rd == a.rbase:
+        raise NotPair("load-clobbers-base")
+    for insn in (a, b):
+        if not insn.uimm_fits(_LOAD_STORE_OFF_BITS, insn.access_shift or 0):
+            raise NotPair("big-imm")
+    return None
+
+
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
@@ -1518,6 +1554,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_MEM_BASE_MN,
         b_mnemonic_set=_MEM_BASE_MN,
         check=_mem_base_pair,
+    ),
+    PairingRule(
+        name="load-store-chain",
+        a_mnemonic_set=_LOAD_STORE_A_MN,
+        b_mnemonic_set=_LOAD_STORE_B_MN,
+        check=_load_store_chain,
     ),
     PairingRule(
         name="macro-op-pair",
@@ -1608,6 +1650,7 @@ RULES: list[PairingRule] = [
         check=_mvload_jump_pair,
     ),
 ]
+
 
 
 # ---------------------------------------------------------------------------

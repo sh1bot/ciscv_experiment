@@ -1324,3 +1324,45 @@ class TestRvcEligiblePseudoOps:
     def test_jal_ra_does_not_compress_on_rv64(self):
         # c.jal is RV32C-only; jal ra, target must NOT compress on RV64.
         assert not make_insn("jal", rd=1).rvc_eligible
+
+
+class TestLoadStoreChain:
+    """A loads a value, B stores it straight back out through a dead temp —
+    a memory copy.  Widths must match; both offsets are width-scaled uimm6."""
+
+    def test_word_copy_pairs(self):
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("sw", rs1=13, rs2=31, imm=0)
+        assert _rule_reason("load-store-chain", a, b) is None
+
+    def test_width_mismatch_no_pair(self):
+        """`ld` into `sw` truncates — a real idiom, but out of this frame's
+        width-matched diagonal (it would cost 4x the block)."""
+        a = make_insn("ld", rd=31, rs1=12, imm=0)
+        b = make_insn("sw", rs1=13, rs2=31, imm=0)
+        assert _rule_reason("load-store-chain", a, b) is not None
+
+    def test_signed_load_pairs(self):
+        """`lb` feeding `sb` writes the same byte as `lbu` would, so it is
+        matched and encoded as the unsigned form."""
+        a = make_insn("lb", rd=31, rs1=12, imm=0)
+        b = make_insn("sb", rs1=13, rs2=31, imm=0)
+        assert _rule_reason("load-store-chain", a, b) is None
+
+    def test_offset_over_6bit_no_pair(self):
+        a = make_insn("lw", rd=31, rs1=12, imm=252)      # 63*4, fits 6b
+        b = make_insn("sw", rs1=13, rs2=31, imm=0)
+        assert _rule_reason("load-store-chain", a, b) is None
+        a = make_insn("lw", rd=31, rs1=12, imm=256)      # 64*4, over 6b
+        assert _rule_reason("load-store-chain", a, b) is not None
+
+    def test_value_must_die(self):
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("sw", rs1=13, rs2=31, imm=0)
+        b.live_out = frozenset({31})                     # copy survives
+        assert _rule_reason("load-store-chain", a, b) is not None
+
+    def test_store_must_consume_the_load(self):
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("sw", rs1=13, rs2=14, imm=0)       # stores something else
+        assert _rule_reason("load-store-chain", a, b) is not None

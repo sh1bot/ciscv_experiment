@@ -345,19 +345,39 @@ def op_contracts(frame):
     return out
 
 
-def cluster_combos(c):
-    """(opA, opB) combinations one cluster allows.
+# Access width in bytes, for `same_width` clusters.  XLEN-switchable ops have
+# no fixed width and never take part in a width diagonal.
+MEM_WIDTH = {"lb": 1, "lbu": 1, "sb": 1, "lh": 2, "lhu": 2, "sh": 2,
+             "lw": 4, "lwu": 4, "sw": 4, "ld": 8, "sd": 8}
 
-    Normally the cross product: any A op with any B op.  `same_op: true` makes
-    it the DIAGONAL instead — A and B must be the same opcode, as in
-    mem-base-pair, where a load may only be paired with the same width of load.
-    Enumerating the diagonal as N singleton clusters prices the same, but says
-    the constraint only by how the clusters happen to be split; the flag says
-    it in the data, so it survives anyone tidying the list."""
+
+def cluster_pairs(c):
+    """The (a_entry, b_entry) combinations one cluster allows.
+
+    Normally the cross product: any A op with any B op.  Two flags restrict it
+    to a DIAGONAL, and both exist so the constraint lives in the data rather
+    than in how the clusters happen to be split — enumerating a diagonal as N
+    singleton clusters prices identically but reads as a free choice, and does
+    not survive anyone tidying the list:
+
+      `same_op`    — A and B must be the SAME opcode (mem-base-pair: a load
+                     pairs only with the same width of load).
+      `same_width` — A and B must have the same ACCESS WIDTH, though not the
+                     same opcode (load-store-chain: lw pairs with sw)."""
     a, b = c.get("a", []), c.get("b", [])
     if c.get("same_op"):
-        return len({op_name(x) for x in a} & {op_name(y) for y in b})
-    return len(a) * len(b)
+        by = {op_name(y): y for y in b}
+        return [(x, by[n]) for x in a if (n := op_name(x)) in by]
+    if c.get("same_width"):
+        return [(x, y) for x in a for y in b
+                if MEM_WIDTH.get(op_name(x)) is not None
+                and MEM_WIDTH.get(op_name(x)) == MEM_WIDTH.get(op_name(y))]
+    return [(x, y) for x in a for y in b]
+
+
+def cluster_combos(c):
+    """How many (opA, opB) combinations one cluster allows."""
+    return len(cluster_pairs(c))
 
 
 def opcode_demand(ops):
@@ -530,14 +550,15 @@ def opcode_codepoints(frame, grid):
     total = 0
     for c in ops:
         if c.get("same_op"):
-            # Diagonal: one entry per shared opcode, each paying its own ext
-            # once (the same op in both slots is one opcode, not two).
-            by_a = {op_name(x): x for x in c.get("a", [])}
-            total += sum(1 << max(_ext(by_a[n], base_a), _ext(y, base_b))
-                         for y in c.get("b", []) if (n := op_name(y)) in by_a)
+            # One opcode, not two: the same op in both slots pays its ext once.
+            total += sum(1 << max(_ext(x, base_a), _ext(y, base_b))
+                         for x, y in cluster_pairs(c))
         else:
-            total += (_slot_weight(c.get("a", []), base_a)
-                      * _slot_weight(c.get("b", []), base_b))
+            # Two independent opcodes and two independent fields, so each
+            # allowed combination pays both extensions.  For a full cross
+            # product this is exactly _slot_weight(a) * _slot_weight(b).
+            total += sum((1 << _ext(x, base_a)) * (1 << _ext(y, base_b))
+                         for x, y in cluster_pairs(c))
     return total
 
 

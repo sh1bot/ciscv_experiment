@@ -406,6 +406,21 @@ Also chain rules with surviving first result, but also sometimes a second result
 * No `lb`, `lh` or `lwu`: they account for 12 of 37816 scheduled
   slots across musl-rv32 and sqlite-rv64.
 
+## load-store-chain
+
+*Copy a value from one memory location to another.*
+
+    load    tmp, k*imma(rs1a)
+    store   tmp, k*immb(rs1b)
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │  rs1b   │ opcode5 │1 0│
+
+* Both offsets are width-scaled and unsigned; the loaded value is the
+  chain temporary and is not encoded.
+
 # macro-op-pair
 
 *Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them.*
