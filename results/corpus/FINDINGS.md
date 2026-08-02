@@ -562,3 +562,38 @@ measured in this project.
 
 Both fit inside the 106 spare codepoints with room left over.  Neither has
 been drawn into `encoding.yaml`; these are measurements, not decisions.
+
+### Candidate 5 (mem-copy): the design space, measured
+
+Baseline 27192 / 40851.  Every row below is a scheduler run, not an
+extrapolation.  The row is `load tmp, imma(rbase_a)` then
+`store tmp, immb(rbase_b)` with tmp dead: four operands, 20 bits, exactly the
+operand budget at two 5-bit scaled offsets.
+
+| option | ops | offsets | codepoints | musl | sqlite | net pairs | pairs/cp |
+|---|---|---|--:|--:|--:|--:|--:|
+| A minimal | width-matched diagonal | 5b | **4** | +313 | +541 | **+854** | 214 |
+| B knee | width-matched diagonal | 6b | **16** | +386 | +851 | **+1237** | 77 |
+| C wide ops | full 4x4 cross | 5b | 16 | — | — | ~+1020 (est) | 64 |
+| D both | full 4x4 cross | 6b | 64 | — | — | ~+1400 (est) | 22 |
+| ceiling | diagonal | unbounded | n/a | +827 | +901 | +1728 | — |
+
+Two facts decide it.  **The 5-bit field is the binding constraint, not the op
+set**: uncensored, the population is 859 (musl) / 968 (sqlite) sites, of which
+only 39% / 62% have both scaled offsets inside 5 bits — 47% / 95% at six bits,
+63% / 98% at seven.  And **the op set barely matters**: copies are
+width-matched 96% (musl) / 79% (sqlite), so the diagonal alone gets nearly
+everything, and the truncating tail (`ld` -> `sw`, 122 on sqlite) costs 4x the
+block for ~12 pairs/cp.
+
+**B is the knee.**  The marginal 12 codepoints over A buy 383 pairs (32/cp,
+still 5x the portfolio floor) and take sqlite — the corpus furthest from
+parity — from 62% to 95% capture.  Seven bits would cost 64 codepoints for
+perhaps 150 more pairs (~2/cp), well under the floor.
+
+One structural alternative, unmeasured: a SAME-BASE variant (`rbase_a ==
+rbase_b`) frees five bits for the offsets.  It splits the corpora hard —
+58% of musl's copies share a base against 5% of sqlite's — so it would serve
+struct-copy code and do nothing for sqlite.  Worth measuring only if A/B are
+rejected on width grounds.
+
