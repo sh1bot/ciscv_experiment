@@ -120,6 +120,10 @@ not the frame.  Do not cut it on pairing-rate evidence.
 
 ## Other measurement records in this directory
 
+- `FRAMES.md` — frames considered and abandoned (and why), the roster
+  cross-referenced against industry fusion/code-size prior art (Qualcomm
+  Oct-2023 deck, Celio 2016, SiFive SFB, Zcmp/Zba/Zilsd), and the
+  suggested-but-unevaluated queue.
 - `GCC.md` — the cross-compiler generalisation gap (clang 18 vs GCC 13.3).
 - `TUNE.md` — `-mtune` and compiler-scheduling effects on rv32 (negligible).
 - `REMEASURE.md` — the audit that re-derived every standing claim; includes
