@@ -424,12 +424,35 @@ doc:
   - frame:
       name: alu-alu-chain
       does: "Two ALU operations, the second consuming the first's result."
-      budget: 256
+      # Sized by measurement, and DELIBERATELY asymmetric -- the two slots want
+      # different vocabularies, which the shared `alu_chain` anchor cannot say.
+      # A is where values are produced (shifts, adds, comparisons); B is where
+      # they are consumed (masking and merging).  `sltu`/`sltiu` appear only in
+      # A -- a predicate is made, then spent -- and `and`/`or` only in B.
+      #
+      # At 15 ops per axis the block is 16x16 = 256 codepoints for 2502 pairs
+      # (musl-rv32 + sqlite-rv64), 9.8 per codepoint.  Measured alternatives,
+      # blocks exact (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256):
+      #
+      #   ops/axis  block  pairs   vs 256  pairs/cp
+      #      8        64   ~2041    -461     31.9
+      #     11       128   ~2330    -172     18.2
+      #     16       256    2502       -      9.8
+      #
+      # Read as the marginal cost of KEEPING the space: 128 -> 256 codepoints
+      # buys 172 pairs (1.3/cp) and 64 -> 128 buys 289 (4.5/cp), both under the
+      # portfolio floor near 6.  So the block is 64.  (The census predicted a
+      # loss of 672; the measured loss is 461, because a third of the rejected
+      # pairs are picked up by other frames.)
+      budget: 64
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
       ops:
-        - {a: *alu_chain, b: *alu_chain}
+        - a: [{op: addi, imm: {bits: 6, signed: true}},   # 2 codepoints
+              add, slli, sltiu, sltu, srli, sub]
+          b: [{op: addi, imm: {bits: 6, signed: true}},   # 2 codepoints
+              add, and, or, slli, srli, sub]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]

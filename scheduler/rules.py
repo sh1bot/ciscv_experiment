@@ -114,32 +114,40 @@ _RSD_JUMP_SHIFT_BITS = _w("arith-jump-pair", "a", "slli")
 # encoded field, so li/mv/addi4spn are register choices rather than opcodes and
 # fold into `addi` -- which is why only addi earns extra range here.
 # rsd-alu-pair and arith-jump-pair keep _RSD_ALU_MN (different population).
-_ALU_ALU_CHAIN_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
+_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
                            "xor", "xori", "maxu", "sltu", "sltiu",
                            "slli", "srli", "srliw"})
-_ALU_ALU_CHAIN_IMM_BITS = {mn: _w("alu-alu-chain", "b", mn)          # signed
+_CHAIN_ALU_IMM_BITS = {mn: _w("load-alu-chain", "b", mn)          # signed
                    for mn in ("addi", "andi", "xori", "sltiu")}
-_ALU_ALU_CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
-_ALU_ALU_CHAIN_SHIFT_HI = (1 << _w("alu-alu-chain", "b", "slli")) - 1
+# alu-alu-chain narrows to 8 weight per axis (addi counts 2 for its 6-bit
+# immediate), and the two axes differ: A produces a value, B consumes it.
+# Measured at 31.9 pairs/codepoint against 9.8 for the full 16x16 block -- see
+# the frame note in encoding.yaml.  The three chain frames still SHARE
+# _CHAIN_ALU_MN above; only this frame is cut.
+_ALU_ALU_A_MN = frozenset({"add", "addi", "slli", "sltiu", "sltu", "srli", "sub"})
+_ALU_ALU_B_MN = frozenset({"add", "addi", "and", "or", "slli", "srli", "sub"})
+
+_CHAIN_ALU_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
+_CHAIN_ALU_SHIFT_HI = (1 << _w("load-alu-chain", "b", "slli")) - 1
 
 
-def _alu_alu_chain_imm_in_range(insn: Instruction) -> None:
+def _chain_alu_imm_in_range(insn: Instruction) -> None:
     """Immediate / shift range for a chain-frame ALU op, per encoding.yaml's
     `alu_chain` op contracts. addi carries a signed 6-bit field (it is also the
     li/mv form, so zero is encodable, and it is where the wide constants are);
     andi the 5-bit base range; shifts an unsigned 5-bit amount."""
-    bits = _ALU_ALU_CHAIN_IMM_BITS.get(insn.mnemonic)
+    bits = _CHAIN_ALU_IMM_BITS.get(insn.mnemonic)
     if bits is not None:
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-immediate")
         if not (-(1 << (bits - 1)) <= imm <= (1 << (bits - 1)) - 1):
             raise NotPair("big-imm")
-    elif insn.mnemonic in _ALU_ALU_CHAIN_SHIFT_MN:
+    elif insn.mnemonic in _CHAIN_ALU_SHIFT_MN:
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-shift-amount")
-        if not (0 <= imm <= _ALU_ALU_CHAIN_SHIFT_HI):
+        if not (0 <= imm <= _CHAIN_ALU_SHIFT_HI):
             raise NotPair("big-imm")
 
 
@@ -147,7 +155,7 @@ def a_chain_imm_ok(func: Callable):
     """A-slot immediate is in the chain-frame encodable range."""
     @wraps(func)
     def check_a_chain_imm(a: Instruction, b: Instruction):
-        _alu_alu_chain_imm_in_range(a)
+        _chain_alu_imm_in_range(a)
         return func(a, b)
     return check_a_chain_imm
 
@@ -156,7 +164,7 @@ def b_chain_imm_ok(func: Callable):
     """B-slot immediate is in the chain-frame encodable range."""
     @wraps(func)
     def check_b_chain_imm(a: Instruction, b: Instruction):
-        _alu_alu_chain_imm_in_range(b)
+        _chain_alu_imm_in_range(b)
         return func(a, b)
     return check_b_chain_imm
 
@@ -1496,14 +1504,14 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="alu-alu-chain",
-        a_mnemonic_set=_ALU_ALU_CHAIN_MN,
-        b_mnemonic_set=_ALU_ALU_CHAIN_MN,
+        a_mnemonic_set=_ALU_ALU_A_MN,
+        b_mnemonic_set=_ALU_ALU_B_MN,
         check=_alu_alu_chain,
     ),
     PairingRule(
         name="load-alu-chain",
         a_mnemonic_set=_SP_LOAD_MN,
-        b_mnemonic_set=_ALU_ALU_CHAIN_MN,
+        b_mnemonic_set=_CHAIN_ALU_MN,
         check=_load_alu_chain,
     ),
     PairingRule(
@@ -1514,7 +1522,7 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="alu-store-chain",
-        a_mnemonic_set=_ALU_ALU_CHAIN_MN,
+        a_mnemonic_set=_CHAIN_ALU_MN,
         b_mnemonic_set=_SP_STORE_MN,
         check=_alu_store_chain,
     ),
