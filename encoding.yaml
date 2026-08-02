@@ -99,16 +99,19 @@ opsets:
   # actually draws: that frame spends its rd column on a sentinel, leaving only
   # `imma[4:0]`. Worth 414 candidate pairs if the row is ever widened -- see the
   # frame's notes. W=10, so 10 x 4 = 40 codepoints inside a budget of 64.
+  # Every imm op carries a sixth bit (one doubling each): demand 40 -> 64
+  # fills arith-jump-pair's 64-block exactly, so the range is free.  Census:
+  # imm fit 73.7% -> 79.7% of 4861 A-slot immediates.
   rsd_alu_j: &rsd_alu_j
-    - {op: addi, imm: {bits: 5, signed: true}}
-    - {op: li,   imm: {bits: 5, signed: true}}
+    - {op: addi, imm: {bits: 6, signed: true}}
+    - {op: li,   imm: {bits: 6, signed: true}}
     - add
-    - {op: addiw, imm: {bits: 5, signed: true}}
+    - {op: addiw, imm: {bits: 6, signed: true}}
     - and
-    - {op: andi,  imm: {bits: 5, signed: true}}
+    - {op: andi,  imm: {bits: 6, signed: true}}
     - or
-    - {op: slli,  imm: {bits: 5, signed: false}}
-    - {op: srli,  imm: {bits: 5, signed: false}}
+    - {op: slli,  imm: {bits: 6, signed: false}}
+    - {op: srli,  imm: {bits: 6, signed: false}}
     - xor
 
   # The ALU set shared by the three CHAIN frames (chain-alu-pair,
@@ -181,10 +184,8 @@ opsets:
   # 6-bit; these addi-family entries carry a 6-bit signed immediate.
   slli_6u:  &slli_6u  {op: slli,  imm: {bits: 6, signed: false}}
   srli_6u:  &srli_6u  {op: srli,  imm: {bits: 6, signed: false}}
-  addi_6s:  &addi_6s  {op: addi,  imm: {bits: 6, signed: true}}
-  addiw_6s: &addiw_6s {op: addiw, imm: {bits: 6, signed: true}}
   li_6s:    &li_6s    {op: li,    imm: {bits: 6, signed: true}}
-  li_7s:    &li_7s    {op: li,    imm: {bits: 7, signed: true}}
+  li_8s:    &li_8s    {op: li,    imm: {bits: 8, signed: true}}
 
   # addi4spn carries its scale in its name: the offset is always a multiple of
   # 4, so the low two bits are structurally zero and encoding them is waste.
@@ -469,17 +470,18 @@ doc:
 
   - frame:
       name: chain-li-branch
-      budget: 32
+      budget: 64
       level: 2
       templates:
         - ["li      tmp, imma", "bXX     rs1b, tmp, 4*immb"]
       ops:
-        - {a: [*li_7s], b: *branches}
+        - {a: [*li_8s], b: *branches}
       rows:
         - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1b", "fn3", "immb[4:0]"]
       notes: |
-         * `imma` is a 5-bit register column; `li` declares 7 bits, bought by
-           opcode duplication.
+         * `imma` is a 5-bit register column; `li` declares 8 bits, bought by
+           three opcode doublings (census li fit 66.9% -> 85.3% of 2293,
+           ~13 pairs/codepoint for the extra 32).
          * TODO: could replace li with alu op and compare result with zero (mostly?).
 
   - frame:
@@ -683,21 +685,29 @@ doc:
       level: 2
       templates:
         - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
-        - ["addi    rsda, rsda, k*imma", "load    rdb, k*immb(rsda)"]
+        - ["addi    rsda, rsda, k*imma", "load    rdb, 0(rsda)"]
         - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
-        - ["addi    rsda, rsda, k*imma", "store   rs2b, k*immb(rsda)"]
-      ops:
-        - {a: [addi],   b: [ld, lw, sd, sw]}
+        - ["addi    rsda, rsda, k*imma", "store   rs2b, 0(rsda)"]
+      ops:            # addi split by width so each declares its true scale
+        - {a: [{op: addi, imm: {bits: 10, signed: true, scale: 8}}], b: [ld, sd]}
+        - {a: [{op: addi, imm: {bits: 10, signed: true, scale: 4}}], b: [lw, sw]}
         - {a: [sh3add], b: [ld, sd]}
         - {a: [sh2add], b: [lw, sw]}
       rows:
-        - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "immb[4:0]"]
-        - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rdb"]
-        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "immb[4:0]"]
-        - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rdb"]
+        - ["h", "rs2b",      "g", "rs2a", "rsda", "fn3", "immb[4:0]"]
+        - ["h", "immb[4:0]", "g", "rs2a", "rsda", "fn3", "rdb"]
+        - ["h", "rs2b", "g", "imma[4:0|9:5]*2", "fn3", "rsda"]
+        - ["h", "rdb",  "g", "imma[4:0|9:5]*2", "fn3", "rsda"]
       notes: |
-         * TODO: Try zero memory offset and all the load/store permutations instead
-         * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
+         * The addi rows access AT the bumped pointer: at genuine
+           (non-prologue) surviving-sum sites the memory offset is zero
+           68-78% of the time, so the rows spend no immb and give the bump
+           the freed column instead -- a 10-bit width-scaled imma, which the
+           op declares at no extra codepoints.  Even so the bump population
+           is structurally wide (record-sized walks: 10-bit scaled fit is
+           39-59%); this is the affordable ceiling, not full coverage.
+         * The shXadd rows keep the 5-bit scaled immb: their stride is the
+           register, so the offset field still earns its column.
 
   - frame:
       name: post-inc-pair
@@ -757,20 +767,24 @@ doc:
 
   - frame:
       name: mem-pair
-      budget: 8
+      budget: 16
       level: 1
       templates:
         - ["load    rda, k*imm(rbase)", "load    rdb, k*imm+k(rbase)"]
         - ["store   rs2a, k*imm(rbase)", "store   rs2b, k*imm+k(rbase)"]
-      ops:            # shared opcode: both slots identical, so one singleton per op
-        - {a: [lbu], b: [lbu]}
-        - {a: [lhu], b: [lhu]}
-        - {a: [lw], b: [lw]}
-        - {a: [ld], b: [ld]}
-        - {a: [sb], b: [sb]}
-        - {a: [sh], b: [sh]}
-        - {a: [sw], b: [sw]}
-        - {a: [sd], b: [sd]}
+      # Shared opcode (both slots identical) and a SHARED imm, so each op's
+      # sixth bit is bought once per cluster (2 codepoints each, 16 total).
+      # Census: base-offset fit 87.8% -> 94.1% of 10326; the earlier narrowing
+      # to 5 was set from censored data.
+      ops:
+        - {a: [{op: lbu, imm: &mp6 {bits: 6, signed: false}}], b: [{op: lbu, imm: *mp6}]}
+        - {a: [{op: lhu, imm: *mp6}], b: [{op: lhu, imm: *mp6}]}
+        - {a: [{op: lw, imm: *mp6}], b: [{op: lw, imm: *mp6}]}
+        - {a: [{op: ld, imm: *mp6}], b: [{op: ld, imm: *mp6}]}
+        - {a: [{op: sb, imm: *mp6}], b: [{op: sb, imm: *mp6}]}
+        - {a: [{op: sh, imm: *mp6}], b: [{op: sh, imm: *mp6}]}
+        - {a: [{op: sw, imm: *mp6}], b: [{op: sw, imm: *mp6}]}
+        - {a: [{op: sd, imm: *mp6}], b: [{op: sd, imm: *mp6}]}
       rows:
         - ["h", "rda",  "g", "imm[4:0]",   "rbase", "fn3", "rdb"]
         - ["h", "rs2b", "g", "rs2a",        "rbase", "fn3", "imm[4:0]"]

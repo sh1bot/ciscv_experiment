@@ -91,9 +91,11 @@ _RSD_ALU_REGS = frozenset(range(32))         # x0..x31 — a FULL 5-bit field
 # addi/li; arith-jump-pair spends its rd column on a sentinel and draws only
 # imma[4:0], so it caps the same ops at 5.
 _RSD_IMM_BITS   = {"addi": 7, "addiw": 5, "andi": 5}
-_RSD_JUMP_BITS  = {"addi": 5, "addiw": 5, "andi": 5}
+_RSD_JUMP_BITS  = {"addi": 6, "addiw": 6, "andi": 6}
 _RSD_SHIFT_MN = frozenset({"slli", "srli"})
-_RSD_SHIFT_LO, _RSD_SHIFT_HI = 0, 31   # unsigned 5-bit field, as chain_alu
+# Shift-amount width is per-frame like the signed widths: rsd-alu-pair keeps
+# the 5-bit field, arith-jump-pair's ops all carry a sixth bit (rv64 shamts).
+_RSD_SHIFT_BITS, _RSD_JUMP_SHIFT_BITS = 5, 6
 
 # The ALU set shared by the three CHAIN frames — encoding.yaml `chain_alu`.
 # Chain slots write `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1 an
@@ -150,7 +152,8 @@ def b_chain_imm_ok(func: Callable):
 # Shared per-slot helpers (mnemonic already confirmed by rule.mnemonic_set)
 # ---------------------------------------------------------------------------
 
-def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS) -> None:
+def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS,
+                  shift_bits: int = _RSD_SHIFT_BITS) -> None:
     """Immediate / shift-amount range check for an RSD ALU op (mnemonic already ok).
 
     `widths` selects the per-frame contract: rsd-alu-pair passes _RSD_IMM_BITS,
@@ -172,7 +175,7 @@ def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS) -> None:
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-shift-amount")
-        if not (_RSD_SHIFT_LO <= imm <= _RSD_SHIFT_HI):
+        if not (0 <= imm <= (1 << shift_bits) - 1):
             raise NotPair("big-imm")
 
 
@@ -387,10 +390,11 @@ def b_imm_ok(func: Callable):
 
 
 def a_jump_imm_ok(func: Callable):
-    """A-slot immediate fits arith-jump-pair's imma[4:0] (see _RSD_JUMP_BITS)."""
+    """A-slot immediate fits arith-jump-pair's declared widths (see
+    _RSD_JUMP_BITS / _RSD_JUMP_SHIFT_BITS — every imm op carries a sixth bit)."""
     @wraps(func)
     def check_a_jump_imm_ok(a: Instruction, b: Instruction):
-        _imm_in_range(a, _RSD_JUMP_BITS)
+        _imm_in_range(a, _RSD_JUMP_BITS, _RSD_JUMP_SHIFT_BITS)
         return func(a, b)
     return check_a_jump_imm_ok
 
@@ -749,10 +753,11 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     if abs(a.imm - b.imm) != width:
         raise NotPair(f"bad-delta")
     shift = a.access_shift or 0
-    # Both rows draw imm[4:0] against `rbase`.  The wide sp form is its own
-    # frame now (mem-pair-sp), so there is no 10-bit path here -- an sp access
-    # too wide for five bits belongs to that frame or to neither.
-    imm_bits = 5
+    # Both rows draw imm[4:0] against `rbase`; the shared sixth bit is bought
+    # once per op on the opcode list (encoding.yaml mem-pair).  The wide sp
+    # form is its own frame (mem-pair-sp) -- an sp access too wide for this
+    # field belongs to that frame or to neither.
+    imm_bits = 6
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
@@ -1014,10 +1019,10 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
         raise NotPair("A not li form (must be addi rd, x0, imm)")
-    # encoding.yaml declares li at 7 bits: a 5-bit imma column plus two
+    # encoding.yaml declares li at 8 bits: a 5-bit imma column plus three
     # doublings on the opcode list.
-    if not a.imm_fits(7):
-        raise NotPair("immediate out of 7-bit signed range [-64..63]")
+    if not a.imm_fits(8):
+        raise NotPair("immediate out of 8-bit signed range [-128..127]")
     return None
 
 
@@ -1264,20 +1269,23 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
         raise NotPair("bad-tuple")
-    # B's offset rides the width-scaled immb[4:0] field every row draws.
-    if b.has_mem_operand and not b.uimm_fits(5, b.access_shift or 0):
-        raise NotPair("B-big-imm")
-    # A's stride rides imma[4:0], scaled by the access width — `addi rsda, rsda,
-    # k*imma` in the template.  This was UNCHECKED, which is why
-    # encoding_verify put the frame at 35.1% encodable with a 12-bit example:
-    # the field is five bits and nothing was holding A to it.
     if a.mnemonic == "addi":
+        # The addi rows access AT the bumped pointer (offset structurally
+        # zero) and spend the freed column on a 10-bit width-scaled bump —
+        # `addi rsda, rsda, k*imma` then `access 0(rsda)`.
+        if b.has_mem_operand and b.imm != 0:
+            raise NotPair("B-imm-not-zero")
         shift = b.access_shift or 0
         if a.imm is None or not a.imm_multiple(shift):
             raise NotPair("A-stride-not-width-multiple")
         v = a.imm >> shift if a.imm >= 0 else -((-a.imm) >> shift)
-        if not (-16 <= v <= 15):
+        if not (-512 <= v <= 511):
             raise NotPair("A-big-imm")
+    else:
+        # shXadd rows: the stride is the register, so B keeps the width-scaled
+        # immb[4:0] offset field.
+        if b.has_mem_operand and not b.uimm_fits(5, b.access_shift or 0):
+            raise NotPair("B-big-imm")
     return None
 
 

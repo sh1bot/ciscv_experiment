@@ -328,9 +328,16 @@ def op_contracts(frame):
                     continue
                 name = op_name(entry)
                 if name in out and out[name] != c:
-                    raise ValueError(
-                        f"{frame.get('name')}: conflicting immediate contracts "
-                        f"for {name}: {out[name]} vs {c}")
+                    # A k-scaled op legitimately declares a different `scale`
+                    # per width cluster (pre-inc addi: 8 with ld/sd, 4 with
+                    # lw/sw). Width and signedness are still opcode properties.
+                    strip = lambda d: {k: v for k, v in d.items() if k != "scale"}
+                    if strip(out[name]) != strip(c):
+                        raise ValueError(
+                            f"{frame.get('name')}: conflicting immediate "
+                            f"contracts for {name}: {out[name]} vs {c}")
+                    c = dict(c, scale=max(out[name].get("scale") or 0,
+                                          c.get("scale") or 0))
                 out[name] = c
     return out
 

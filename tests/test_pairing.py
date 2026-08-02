@@ -480,22 +480,21 @@ class TestDualOpPair:
         finally:
             _r.set_xlen(old)
 
-    def test_mem_pair_non_sp_load_5bit_limit(self):
-        """Both base-register rows draw imm[4:0] — five bits, so a scaled
-        offset of 31 fits and 32 does not.  (It was six until the sp carve-out;
-        base offsets fit five bits 94-97% of the time, and halving the field
-        halved the block, which is what funded mem-pair-sp.)"""
-        a = make_insn("ld", rd=10, rs1=12, imm=240)      # 240/8 = 30, fits 5b
-        b = make_insn("ld", rd=11, rs1=12, imm=248)      # 248/8 = 31, fits 5b
+    def test_mem_pair_non_sp_load_6bit_limit(self):
+        """The base rows draw imm[4:0] plus a shared sixth bit bought on the
+        opcode list — six bits, so a scaled offset of 63 fits and 64 does
+        not."""
+        a = make_insn("ld", rd=10, rs1=12, imm=496)      # 496/8 = 62, fits 6b
+        b = make_insn("ld", rd=11, rs1=12, imm=504)      # 504/8 = 63, fits 6b
         assert can_pair(a, b) is None
-        a = make_insn("ld", rd=10, rs1=12, imm=256)      # 256/8 = 32, over 5b
-        b = make_insn("ld", rd=11, rs1=12, imm=264)
+        a = make_insn("ld", rd=10, rs1=12, imm=512)      # 512/8 = 64, over 6b
+        b = make_insn("ld", rd=11, rs1=12, imm=520)
         assert can_pair(a, b) is not None
 
-    def test_mem_pair_non_sp_store_5bit_limit(self):
-        """The base-register STORE row draws only imm[4:0] — five bits."""
-        a = make_insn("sd", rs1=12, rs2=10, imm=256)     # 32, over 5b
-        b = make_insn("sd", rs1=12, rs2=11, imm=264)
+    def test_mem_pair_non_sp_store_6bit_limit(self):
+        """The base-register STORE row has the same shared six-bit field."""
+        a = make_insn("sd", rs1=12, rs2=10, imm=512)     # 64, over 6b
+        b = make_insn("sd", rs1=12, rs2=11, imm=520)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_non_sp_5bit_in_range_pairs(self):
@@ -695,16 +694,27 @@ class TestPreIncPair:
         with pytest.raises(NotPair):
             pre_inc.check(a, b)
 
-    def test_addi_ld_nonzero_offset_pairs(self):
-        """B's offset rides the width-scaled immb[4:0] field every pre-inc row
-        draws; it need not be zero."""
+    def test_addi_ld_nonzero_offset_no_pair(self):
+        """The addi rows access AT the bumped pointer — the offset field was
+        spent on the 10-bit bump, so a nonzero B offset cannot encode."""
         a = make_insn("addi", rd=12, rs1=12, imm=8)
         b = make_insn("ld", rd=10, rs1=12, imm=8)
-        assert _rule_reason("pre-inc-pair", a, b) is None
+        assert _rule_reason("pre-inc-pair", a, b) is not None
 
-    def test_addi_ld_offset_over_5bit_no_pair(self):
-        a = make_insn("addi", rd=12, rs1=12, imm=8)
-        b = make_insn("ld", rd=10, rs1=12, imm=256)      # 256/8 = 32, over 5b
+    def test_addi_wide_scaled_bump_pairs(self):
+        """The bump rides a 10-bit width-scaled field: ±512 units."""
+        a = make_insn("addi", rd=12, rs1=12, imm=4088)   # 511*8, fits
+        b = make_insn("ld", rd=10, rs1=12, imm=0)
+        assert _rule_reason("pre-inc-pair", a, b) is None
+        a = make_insn("addi", rd=12, rs1=12, imm=4096)   # 512*8, over
+        assert _rule_reason("pre-inc-pair", a, b) is not None
+
+    def test_shxadd_keeps_offset_field(self):
+        """shXadd rows still draw the 5-bit scaled immb offset."""
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=14)
+        b = make_insn("ld", rd=10, rs1=12, imm=248)      # 31*8, fits 5b
+        assert _rule_reason("pre-inc-pair", a, b) is None
+        b = make_insn("ld", rd=10, rs1=12, imm=256)      # 32*8, over 5b
         assert _rule_reason("pre-inc-pair", a, b) is not None
 
     def test_addi_ld_same_rd_no_pair(self):
