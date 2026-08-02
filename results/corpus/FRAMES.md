@@ -69,18 +69,48 @@ Every surviving frame has at least one independent industry endorsement:
 Each entry: the idiom, who endorses it, and what a measurement would look
 like on this workbench.
 
-1. **Predicated-ALU packet (short-forward-branch fusion).**  `bXX …, +4` over
-   exactly one ALU op → one predicated operation.  SiFive ships this on the
-   7-series (branch side beq/bne/blt[u]/bge[u]; fused side ADD[I], SUB,
-   shifts, SLT[I][U], AND/XOR/OR[I], LUI, C.MV, C.LI)
-   (<https://reviews.llvm.org/D135814>).  For us it is a NEW SHAPE: the
-   global slot discipline puts control transfers only in the B slot, so this
-   frame would carry the branch as a *condition field*, not a transfer — no
-   displacement needed at all (the skip distance is structurally +1
-   instruction).  Measure: adjacency census of conditional-branch-over-one-
-   ALU-op with the branch target resolving to the next-next instruction;
-   zicond corpora already convert some of this population, so measure on
-   both `_zicond` and plain builds.
+1. **Predicated-ALU packet (short-forward-branch fusion) — MEASURED and
+   REJECTED; two better shapes surfaced.**  SiFive ships SFB fusion on the
+   7-series (<https://reviews.llvm.org/D135814>); as a packet the branch
+   would be a condition field, not a transfer, needing no displacement (the
+   skip is structurally one instruction).  Census of conditional branches
+   skipping exactly one instruction, six corpora:
+
+   | corpus | over-1 | alu | store | jump | load | other |
+   |---|--:|--:|--:|--:|--:|--:|
+   | musl-rv32 (clang, zicond) | 342 | 12 | 160 | 60 | 6 | 104 |
+   | musl-gcc-rv32 (no zicond) | 290 | 86 | 45 | 37 | 8 | 114 |
+   | musl-gcc-rv64 (no zicond) | 289 | 104 | 46 | 32 | 10 | 97 |
+   | sqlite-rv64 (clang, zicond) | 1130 | 15 | 277 | 637 | 82 | 119 |
+   | sqlite-rv32 (clang, zicond) | 1139 | 16 | 269 | 656 | 81 | 117 |
+   | cpp-rv64 (clang, zicond) | 952 | 41 | 123 | 507 | 9 | 272 |
+
+   The ALU column — the frame's whole premise — is 12–41 on every clang
+   corpus: **zicond already predicated the profitable cases** (czero counts
+   1281–1530 there), and our `czero-select`/`li-czero` frames already
+   package the result.  GCC's 86–104 survivors are li/mv/addi — exactly the
+   czero shapes — so they are the fourth "corpus is shaped by its compiler"
+   instance (GCC without zicond in `-march`), not frame demand.  The
+   predication-vs-prediction debate is moot at this layer anyway: a packet
+   is an encoding, not a microarchitecture — an OoO core may crack it back
+   into a predicted branch exactly as SiFive's fusion does the reverse.
+
+   What the census DID surface, both unreachable by zicond:
+   * **Conditional store** (`bXX ; store`, the skip): 44–277 per corpus.
+     zicond cannot predicate a store.  Fit: branch condition rs1+rs2 is 10
+     bits, store src+base is 10 — offset must be 0, which holds 82% on musl
+     but only 5% on sqlite (whose cond-stores carry small struct offsets).
+     A zero-compare condition (beqz form) frees 5 bits for offset.  Marginal
+     on today's numbers; re-measure if the offset column can be funded.
+   * **Inverted-condition far jump** (`bXX ; j L`, branch over exactly one
+     unconditional jump — the if/else diamond head): 24–656 per corpus,
+     heavy in sqlite/cpp.  One packet: branch ops in the opcode, rs1+rs2
+     (10 bits) + a 10-bit PACKET displacement = 20 exactly, and it converts
+     the corpus's worst displacement pressure (far branches) into the
+     packet's best field.  ~8 codepoints for ~500 realizable pairs on
+     sqlite-class code.  The strongest new candidate from this census.
+   * Curiosity: **conditional return** (`bXX ; ret`): 11–88 per corpus,
+     10 bits + implicit ret — nearly free to encode if a home exists.
 2. **`lui+addi` 32-bit constant (LI32).**  Celio 2016; SiFive patent
    US10996952B2; GCC `RISCV_FUSE_LUI_ADDI`; VRoom
    (<https://arxiv.org/abs/1607.02318>,
