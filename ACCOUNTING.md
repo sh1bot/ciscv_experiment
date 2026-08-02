@@ -62,9 +62,10 @@ The concern is sharper than it was, not stale. See `results/corpus/REMEASURE.md`
 
 **Questions to settle:**
 
-1. Is the packet ISA targeting RV64 only, RV32 only, or both? `scheduler/RULES.md`
-   §1.2 assumes RV64GC. If that is the target, RV32 corpus evidence needs either
-   exclusion or explicit translation (§2), not silent merging.
+1. Is the packet ISA targeting RV64 only, RV32 only, or both? The original
+   rule documentation assumed RV64GC; the scheduler now detects XLEN per input
+   and the yaml declares XLEN-switchable ops (`opsets.xlen_switchable`), but
+   RV32 corpus evidence still merges into shared tables without weighting.
 2. If both, should the two corpora be weighted equally rather than by
    instruction count? Right now godot outvotes testcase0 4.5:1 purely by size,
    which is a statement about file size, not about importance.

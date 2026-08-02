@@ -8,13 +8,13 @@ open items in `TODO.md`; measurement conventions in `ACCOUNTING.md`.
 frames (op clusters + templates + row layout), immediate widths, and codepoint
 budget live there, and it is the single point of iteration (render with
 `python3 util/encoding_render.py`; see `yaml_migration.md` for the migration).
-`scheduler/rules.py` is the runtime enforcement of those frames and
-`scheduler/RULES.md` documents its scheduler-side semantics (deadness, chaining,
-order-sensitivity); numeric limits are yaml-owned, and
-`tests/test_conformance.py` gates yaml/rules agreement on every commit. The
-migration is in progress — `scheduler/RULES.md` still restates numbers it
-should reference (TODO A4), and `rules.py` still hand-copies widths that
-`scheduler/imm_contracts.py` can derive (TODO A8).
+`scheduler/rules.py` is the runtime enforcement of those frames, and each
+rule's scheduler-side semantics (deadness, chaining, order-sensitivity) are
+documented at its definition there; numeric limits are yaml-owned, and
+`tests/test_conformance.py` gates yaml/rules agreement, yaml structure, and
+`encoding.md` regeneration on every commit. The migration is in progress —
+`rules.py` still hand-copies widths that `scheduler/imm_contracts.py` can
+derive (TODO A8).
 
 ## Measurement caveats — remind the user about these when relevant
 

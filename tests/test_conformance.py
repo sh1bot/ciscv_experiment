@@ -56,3 +56,19 @@ def test_immediate_contracts_derive():
     assert width_of("chain-li-branch", "a", "li") == 8
     assert width_of("dual-indep-pair", "b", "li") == 6
     assert width_of("mem-pair", "a", "lw") == 6
+
+
+def test_yaml_schema_valid():
+    """encoding.yaml must be structurally valid: grid arithmetic, row spans,
+    resolvable field names, unique frame names, power-of-two budgets,
+    well-formed immediate contracts (util/encoding_schema.py, TODO A2)."""
+    r = _run("util/encoding_schema.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_encoding_md_regenerated():
+    """encoding.md is generated from the yaml and must not drift: a re-render
+    must match the checked-in file byte-for-byte (TODO A2).  On failure:
+    python3 util/encoding_render.py -o encoding.md"""
+    r = _run("util/encoding_render.py", "--check")
+    assert r.returncode == 0, (r.stdout[-2000:] if r.stdout else r.stderr)

@@ -649,12 +649,13 @@ def main():
             fromfile="encoding.md", tofile="encoding.yaml->render"))
         if not diff:
             print("IDENTICAL: render matches encoding.md byte-for-byte.")
-        else:
-            sys.stdout.writelines(diff)
-            adds = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
-            dels = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
-            print(f"\n# {dels} lines removed / {adds} lines added vs encoding.md")
-        return
+            return
+        sys.stdout.writelines(diff)
+        adds = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
+        dels = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
+        print(f"\n# {dels} lines removed / {adds} lines added vs encoding.md"
+              f"\n# regenerate: python3 util/encoding_render.py -o encoding.md")
+        sys.exit(1)
 
     if args.output:
         with open(args.output, "w") as fh:

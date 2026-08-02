@@ -31,7 +31,8 @@ CHECKED
                          template whose rule accepts any base is the converse.
   * frame coverage     — rules with no frame, frames with no rule.
 
-NOT CHECKED (scheduler-owned, see scheduler/RULES.md and yaml_migration.md)
+NOT CHECKED (scheduler-owned; documented in rules.py's own docstrings and
+yaml_migration.md)
   deadness and chaining, operand-form constraints beyond the base register,
   register-class windows, order sensitivity, commutative operand fitting,
   relocation policy.

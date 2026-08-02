@@ -914,26 +914,24 @@ non-`None` string constitutes a rejection of that specific encoding.
 
 > **The frame set is defined in [`encoding.yaml`](encoding.yaml), which is
 > authoritative** for op-sets, immediate widths, field layout, and the codepoint
-> budget (read it rendered as [`encoding.md`](encoding.md)).
-> [`scheduler/RULES.md`](scheduler/RULES.md) is its companion, describing the
+> budget (read it rendered as [`encoding.md`](encoding.md)).  The
 > scheduler-side semantics each rule enforces — deadness, chaining, operand
-> forms, order-sensitivity — and should be read for *why* a pair is rejected
-> rather than for numeric limits, which it still restates in places and where it
-> has drifted (see `TODO.md`).  As of
-> writing `scheduler/rules.py` defines two dozen rules (`rsd-alu-pair`,
-> `chain-alu-pair`, the load/store-chain rules, the `*-branch` rules, `mem-pair`,
-> `arith-mem-pair`, the `dual-*-pair` family, `pre-inc-pair`, `prologue-pair`,
+> forms, order-sensitivity — are documented at each rule's definition in
+> `scheduler/rules.py`, which defines two dozen rules (`rsd-alu-pair`,
+> `chain-alu-pair`, the load/store-chain rules, the `*-branch` rules,
+> `mem-pair`, the `dual-*-pair` family, `pre-inc-pair`, `prologue-pair`,
 > `epilogue-pair`, ...).  A rule's `check(a, b)` raises `NotPair(reason)` to
 > reject a candidate and returns `None` to accept.  This section keeps a single,
 > deliberately simplified example purely to illustrate the rule *mechanism*; do
-> not treat its mnemonic set or framing as current.  Refer to RULES.md for what
-> each rule actually accepts and rejects.
+> not treat its mnemonic set or framing as current.  Read the yaml for what a
+> frame encodes and the rule's own code for what it accepts.
 
 The example below is a deliberately conservative starting point, chosen to
 establish the mechanics of the rule framework rather than to represent the
 encoding design.  The real `rsd-alu-pair` accepts a wider mnemonic set and an
 `li` form, and is expressed with mnemonic sets plus a `diagnose` callback rather
-than the inline mnemonic filter shown here — see RULES.md §3.1.
+than the inline mnemonic filter shown here — see `_rsd_alu_pair` in
+`scheduler/rules.py`.
 
 As a worked example, consider pairing two instructions where both have the form
 `{add, sub, and, or, xor, addw, subw} rsd, rs2` — i.e. both are two-register

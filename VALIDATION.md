@@ -36,7 +36,8 @@ code does that the plan doesn't mention.
   - *Plan drift*: the code is right (deliberate design) and the plan is stale —
     update the plan.
   - *Conformance gap*: `encoding.yaml` specifies X and the code (or PLAN, or
-    RULES.md) does Y.  The direction is predetermined — the code/prose changes.
+    other prose) does Y.  The direction is predetermined — the code/prose
+    changes.
     Amending the yaml to match the code instead is a **design change**, not a
     bug fix, and should be argued on encoding grounds (codepoint budget,
     immediate fit, corpus yield) rather than slipped in as reconciliation.

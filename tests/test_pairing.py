@@ -2,9 +2,10 @@
 Tests for scheduler/pairing.py — pairing rules and can_pair().
 
 Covers the full rule set defined in scheduler/rules.py (rsd-alu-pair,
-chain/load/store-chain, the *-branch rules, mem-pair, arith-mem-pair,
-dual-*-pair, pre-inc-pair, epilogue-pair, ...).  See scheduler/RULES.md
-for the authoritative description of each rule.
+chain/load/store-chain, the *-branch rules, mem-pair, dual-*-pair,
+pre-inc-pair, epilogue-pair, ...).  encoding.yaml is authoritative for
+op-sets, widths and layout; each rule's scheduler-side semantics are
+documented at its definition in rules.py.
 """
 
 import pytest

@@ -155,8 +155,9 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│immb[9:5]│g│imma[4:0]│  rs1b   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
-* `imma` is a 5-bit register column; `li` declares 7 bits, bought by
-  opcode duplication.
+* `imma` is a 5-bit register column; `li` declares 8 bits, bought by
+  three opcode doublings (census li fit 66.9% -> 85.3% of 2293,
+  ~13 pairs/codepoint for the extra 32).
 * TODO: could replace li with alu op and compare result with zero (mostly?).
 
 ## chain-bit-test-branch
@@ -191,15 +192,36 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * `immb` is the branch displacement, a 5-bit field.  Displacements
   are unresolved labels in the corpus, so their fit is unmeasured.
 
-## addi-branch-pair
+## inc-branch-pair
 
-    addi/addiw rsda, imma
-    beqz/bnez rsda, zero, 4*immb
+    inc/dec  rsda
+    bXX     rsda, rs2b, 4*immb
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[9:5]│g│imma[4:0]│  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│immb[9:5]│g│  rs2b   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
+
+* The step is +/-1, implied by the opcode (`inc`/`dec` =
+  `addi rsda, rsda, +/-1`): 88% of adjacent counter-branch sites
+  compare against a REGISTER, so the immediate column goes to
+  `rs2b` instead of a step field; `rs2b = x0` gives every vs-zero
+  form for free.  Full XLEN width only -- there are no `w` forms.
+* `_r` marks the operand-reversed spelling (the counter in rs2).
+  The two clusters are the best sixteen JOINT direction x mode
+  cells of the adjacent-site census, not a mode product: down-loops
+  are bltu/bgeu-heavy (pointer-vs-limit, both operand orders),
+  up-loops beq/bne with bge/bgeu sum-first.  Joint enumeration
+  covers 98.7% of adjacent sites against ~79% for the best
+  4-mode x 2-direction product at the same sixteen entries.
+* The scheduler also matches `addiw rsd, rsd, +/-1` and bills it
+  here.  That is optimistic for unsigned int counters on rv64
+  (defined wrap is not width-equivalent) in the same spirit as
+  RVC-eligibility; signed counters are provably width-equivalent
+  (overflow is UB), so a packet-targeted compiler emits `addi`.
+* `immb` is the branch displacement in packets.  Displacements are
+  unresolved labels in the corpus, so pairwise fit is unmeasured;
+  the label-distance study puts 10-bit fit near 100%.
 
 # Scaled-index addressing
 
@@ -241,24 +263,31 @@ Also chain rules with surviving first result, but also sometimes a second result
     load    rdb, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
-    load    rdb, k*immb(rsda)
+    load    rdb, 0(rsda)
 
     shXadd  rsda, rsda, rs2a
     store   rs2b, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
-    store   rs2b, k*immb(rsda)
+    store   rs2b, 0(rsda)
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs2b   │g│  rs2a   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│imma[4:0]│  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
-│h│immb[4:0]│g│imma[4:0]│  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │  rsda   │ opcode5 │1 0│
+│h│   rdb   │g│   imma[4:0|9:5]   │ fn3 │  rsda   │ opcode5 │1 0│
 
-* TODO: Try zero memory offset and all the load/store permutations instead
-* TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
+* The addi rows access AT the bumped pointer: at genuine
+  (non-prologue) surviving-sum sites the memory offset is zero
+  68-78% of the time, so the rows spend no immb and give the bump
+  the freed column instead -- a 10-bit width-scaled imma, which the
+  op declares at no extra codepoints.  Even so the bump population
+  is structurally wide (record-sized walks: 10-bit scaled fit is
+  39-59%); this is the affordable ceiling, not full coverage.
+* The shXadd rows keep the 5-bit scaled immb: their stride is the
+  register, so the offset field still earns its column.
 
 ## post-inc-pair
 
@@ -278,8 +307,12 @@ Also chain rules with surviving first result, but also sometimes a second result
 * No shXadd clusters: a post-increment by a register-held stride is a
   real idiom, but neither clang nor GCC emits it adjacent to the
   access (zero scheduled pairs on every corpus).
-* TODO: Try zero memory offset and all the load/store permutations instead
-* TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
+* Both fields earn their columns, unlike pre-inc: the access offset
+  imma is the position inside an unrolled window (small, 67-74%
+  within +/-16) and the stride immb is the window size (wide).
+  They decouple under unrolling -- stride = offset + width holds at
+  only 3-19% -- so neither a zero offset nor a delta encoding works
+  here.
 
 # Other stuff
 

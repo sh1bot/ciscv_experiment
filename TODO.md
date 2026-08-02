@@ -22,9 +22,6 @@ The planning documents name `encoding.yaml` as the source of truth (see
    `dual-indep-pair`, 8 in `chain-li-branch`, 10 in `li-czero-pair` and
    `mvload-jump-pair`.  The remaining question is whether the 8-10-bit tail
    deserves a dedicated frame or a lui-split, or is an accepted loss.
-6. **`scheduler/RULES.md`'s future** — regenerated from the yaml, reduced to
-   scheduler semantics only, or retired?  Its numeric limits have drifted from
-   both the yaml and the code (see A4).
 8. **Frame priority.**  `encoding_budget.py` and `encoding_verify.py` both
    `break` at the first accepting rule, so `RULES` list order determines every
    number they print.  Make it an explicit yaml property, or state in the docs
@@ -43,28 +40,6 @@ The planning documents name `encoding.yaml` as the source of truth (see
     in the slice its `rd` cannot reach — roughly 68 codepoints at zero opcode
     cost.  Caveat: the host's `rd` column must hold a register in every row,
     so frames whose `rd` carries `immb[4:0]` cannot host.
-
-## A2 — missing tooling
-
-- **Schema validation for `encoding.yaml`**: grid `bits` sum to 32, rows span
-  exactly 7 cells net of spans, row field names resolve to a grid column or
-  declared operand, op clusters agree with templates, frame names unique.
-  (Evidence it is needed: a row naming an unknown immediate field once cost a
-  frame its displacement field, and a six-column row was caught only by a
-  rendering exception.  Both are hard errors now, but only for those two
-  cases.)
-- **Regeneration gate**: `encoding.md` is generated and can silently drift
-  from the yaml; require a zero-diff re-render in `tests/test_conformance.py`.
-- **Cross-revision comparison**: a stats-diff across `encoding.yaml` revisions.
-
-## A4 — `scheduler/RULES.md` drift
-
-Depends on decision 6.  Two known-wrong classes: numeric limits that restate
-(and now contradict) the yaml's, and descriptions that predate width-scaled
-offsets.  Under single-source-of-truth the yaml keeps the numbers and RULES.md
-should reference them rather than restate them.  Also absent from RULES.md and
-PLAN.md entirely: the implicit chain-temp model (decision 4) and the `rd`
-sentinel reservation (decision 11).
 
 ## A5 — design constraints that live only in tooling or scheduler code
 
@@ -120,12 +95,12 @@ Remaining steps, in leverage order:
    call sites.  Replacing them with `width_of(rule, slot, mnemonic)` leaves one
    number instead of two.  Blocker: a rule's check does not know its own name;
    give `PairingRule` a back-reference and it falls out.
-2. **Schema validation** (A2 above).
-3. **Extend `rules_conform`'s probe reach.**  The unverified immediate
+2. **Extend `rules_conform`'s probe reach.**  The unverified immediate
    contracts are frames whose pair shape the probe cannot construct (e.g.
    `mem-pair`'s two same-mnemonic accesses one width apart).  Per-frame probe
-   hints in the yaml would close it.
-4. **Regeneration gate** (A2 above).
+   hints in the yaml would close it.  The unverified list grew to 21 when
+   mem-pair, pre-inc and post-inc gained declared contracts, so this is now
+   the largest gap between "conform passed" and "verified".
 
 ## A11 — the corpus is shaped by its compiler's cost model (third instance)
 
