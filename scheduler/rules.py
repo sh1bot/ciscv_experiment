@@ -490,34 +490,12 @@ _ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})
 ALL_BRANCH_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu", "beqz", "bnez"})
 
 
-def _sp_mem_check(insn: Instruction) -> None:
-    """sp-relative memory op with a nonnegative 10-bit scaled offset.
-
-    encoding.yaml draws `imma[4:0|9:5]*2` on the SP-relative rows of
-    load-chain-alu-pair and store-chain-alu-pair -- ten bits, not the eight
-    this used to allow."""
-    if insn.rs1 != 2:
-        raise NotPair("not-SP-base")
-    shift = insn.access_shift or 0
-    if not insn.uimm_fits(10, shift):
-        raise NotPair("big-imm")
-
-
 def _chain_mem_check(insn: Instruction, base_bits: int) -> None:
     """A chain-frame memory op: any base register (sp included, as x2 in the
     register column), width-scaled offset in the drawn `base_bits` field."""
     shift = insn.access_shift or 0
     if not insn.uimm_fits(base_bits, shift):
         raise NotPair("big-imm")
-
-
-def a_sp_mem(func: Callable):
-    """A-slot is an sp-relative memory op with an in-range 10-bit scaled offset."""
-    @wraps(func)
-    def check_a_sp_mem(a: Instruction, b: Instruction):
-        _sp_mem_check(a)
-        return func(a, b)
-    return check_a_sp_mem
 
 
 def a_chain_mem(bits: int):
@@ -633,20 +611,28 @@ def _load_branch_check(a: Instruction, b: Instruction,
     return None
 
 
+# Its own frame since the A9 split: sp implied, 10-bit offset, and the op set
+# mirrors RVC's c.lwsp/c.ldsp precedent (ld simply never matches on rv32).
+_SP_BRANCH_A_MN = frozenset({"lw", "ld", "lbu"})
+_SP_BRANCH_OFF_BITS = _w("load-sp-branch", "a", "lw")
+_BASE_BRANCH_OFF_BITS = _w("load-base-branch", "a", "lw")
+
+
 @a_base_not_from_auipc
 @must_chain
 def _load_sp_branch(a: Instruction, b: Instruction) -> None:
-    """sp-relative load (width-scaled uimm10 offset) -> beqz/bnez; rd kept alive."""
+    """sp-relative lw/ld/lbu (width-scaled uimm10 offset) -> beqz/bnez;
+    rd kept alive."""
     if a.rbase != 2:
         raise NotPair("not-SP-base")
-    _load_branch_check(a, b, 10)
+    _load_branch_check(a, b, _SP_BRANCH_OFF_BITS)
 
 
 @a_base_not_from_auipc
 @must_chain
 def _load_base_branch(a: Instruction, b: Instruction) -> None:
     """Any-base load (width-scaled uimm5 offset) -> beqz/bnez; rd kept alive."""
-    _load_branch_check(a, b, 5)
+    _load_branch_check(a, b, _BASE_BRANCH_OFF_BITS)
 
 
 # ---------------------------------------------------------------------------
@@ -1497,7 +1483,7 @@ RULES: list[PairingRule] = [
     ),
     PairingRule(
         name="load-sp-branch",
-        a_mnemonic_set=_ALL_LOAD_MN,
+        a_mnemonic_set=_SP_BRANCH_A_MN,
         b_mnemonic_set=_ZERO_BRANCH_MN,
         a_prerequisites=["reads_stack"],
         check=_load_sp_branch,

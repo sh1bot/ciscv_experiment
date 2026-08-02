@@ -498,20 +498,39 @@ doc:
       # Chain rules, but first op is result
 
   - frame:
-      name: "load-sp-branch, load-base-branch"
+      name: load-base-branch
       budget: 16
       level: 2
       templates:
-        - ["load    rda, k*imma(sp)", "beqz/bnez rda, zero, 4*immb"]
         - ["load    rda, k*imma(rs1a)", "beqz/bnez rda, zero, 4*immb"]
       ops:
         - {a: *loads, b: [beqz, bnez]}
       rows:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
-        - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
       notes: |
          * `immb` is the branch displacement, a 5-bit field.  Displacements
            are unresolved labels in the corpus, so their fit is unmeasured.
+
+  - frame:
+      name: load-sp-branch
+      # The sp side of the old combined frame (the last undiscriminated
+      # SP-relative row): with the base implicit, the freed rs1a
+      # column pays for the 10-bit offset this traffic needs (5-bit fit is
+      # only 66-69% on sp).  Ops mirror RVC's own split -- c.lwsp exists on
+      # both widths, c.ldsp on rv64 only -- so plain lw/ld rather than the
+      # switchable lx: unlike mem-pair-sp's ~100% natural-word traffic, the
+      # scheduled mix here is genuinely mixed (rv64: ld 63%, lw 22%,
+      # lbu 14%), and lbu's half of the block earns ~22 pairs/codepoint.
+      budget: 8
+      level: 2
+      templates:
+        - ["load    rda, k*imma(sp)", "beqz/bnez rda, zero, 4*immb"]
+      ops:
+        - {a: [lw, ld, lbu], b: [beqz, bnez]}
+      rows:
+        - ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"]
+      notes: |
+         * `immb` as in load-base-branch: unresolved, fit unmeasured.
 
   - frame:
       name: inc-branch-pair

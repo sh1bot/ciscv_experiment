@@ -173,10 +173,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 # Chain rules, but first op is result
 
-## load-sp-branch, load-base-branch
-
-    load    rda, k*imma(sp)
-    beqz/bnez rda, zero, 4*immb
+## load-base-branch
 
     load    rda, k*imma(rs1a)
     beqz/bnez rda, zero, 4*immb
@@ -185,10 +182,21 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│   rda   │g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
-│h│   rda   │g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│ (SP-relative)
 
 * `immb` is the branch displacement, a 5-bit field.  Displacements
   are unresolved labels in the corpus, so their fit is unmeasured.
+
+## load-sp-branch
+
+    load    rda, k*imma(sp)
+    beqz/bnez rda, zero, 4*immb
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│   rda   │g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│
+
+* `immb` as in load-base-branch: unresolved, fit unmeasured.
 
 ## inc-branch-pair
 

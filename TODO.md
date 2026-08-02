@@ -66,10 +66,10 @@ Recorded here so they are not lost; each needs a home in the design documents.
 - `level:` is undocumented — present on all frames, defined nowhere, and it
   drives markdown heading depth, so level-1 frames render as H1 siblings of
   section headers and break `encoding.md`'s outline.  Define it or decouple it.
-- Two frames carry two rule names in one comma-joined string, which consumers
-  split on `,` (`deref-chain-load-pair, base-chain-load-pair` and
-  `load-sp-branch, load-base-branch`).  `post-inc-pair` shows the better
-  pattern with an explicit `rules_py_names` list; the others should follow.
+- One frame still carries two rule names in one comma-joined string, which
+  consumers split on `,` (`deref-chain-load-pair, base-chain-load-pair`).
+  `post-inc-pair` shows the better pattern with an explicit `rules_py_names`
+  list.  (`load-sp-branch, load-base-branch` was resolved by the A9 split.)
 - `encoding_budget.py` iterates `RULES` from `rules.py` rather than the yaml,
   so its output is generated from a different source of truth than
   `encoding.md`.  Re-point it.
@@ -93,9 +93,9 @@ including the scaled and coupled-immediate shapes it could never reach.
 What remains, deliberately:
 
 - **Row-level narrowings are not per-op facts**: mvload-jump's direct-j row
-  narrows li to 5 bits and drops the load offset; load/store-chain's
-  SP-relative rows carry the 10-bit sp field (A9 will restructure those).
-  These stay as documented literals until contracts can attach to rows.
+  narrows li to 5 bits and drops the load offset.  (The other instance, the
+  SP-relative chain rows, dissolved with the A9 split.)  Stays a documented
+  literal until contracts can attach to rows.
 - **`chain-bit-test-branch a:andi` is unverifiable by interval compare**:
   its accepted set is powers of two and masks, not a range.  Covered by
   `tests/test_pairing.py` boundary tests instead.
@@ -157,15 +157,6 @@ Follow-on census findings (adjacent sites, musl-rv32 + sqlite-rv64):
   Dropping the w forms halves the block; the unprovable residue simply
   forgoes the pairing (solo `addiw` + branch), losing the optimisation,
   never correctness.
-
-## A9 — final sp/base split: `load-sp-branch` / `load-base-branch`
-
-The one frame still drawing an undiscriminated SP-relative row.  Its two rules
-already separate the traffic; the fix mirrors `mem-pair-sp`: give the sp side
-its own frame on the XLEN-switchable ops (`lx` covers 62–89% of its loads;
-measured mix `lw 89%/lbu 9%` on rv32, `ld 62%/lw 22%/lbu 16%` on rv64) and
-decide whether the narrower op set is worth the 10-bit offset field, which its
-traffic does need (5-bit fit is only 66–69%).
 
 ---
 
