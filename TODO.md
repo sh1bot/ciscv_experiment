@@ -132,6 +132,28 @@ Remaining steps, in leverage order:
    hints in the yaml would close it.
 4. **Regeneration gate** (A2 above).
 
+## A10 — `addi-branch-pair` schedules only unencodable pairs
+
+Found while measuring the chain-li/addi-branch fold: `_addi_branch_pair`
+never requires the branch to compare against ZERO, and its B set lists only
+the two-register spellings (`beq`..`bgeu`), not the aliases.  The measured
+consequence, over musl-rv32 + sqlite-rv64:
+
+  * 438 of 438 scheduled B slots compare the sum against a REGISTER
+    (`bge s6, a0`), which the row cannot encode -- it draws no rs2 field.
+    Every pair this frame reports is phantom.
+  * The population the frame was designed for (`addi rsda; beqz/bnez rsda`,
+    per its own template) is never matched, because `beqz`/`bnez`/`bltz`/
+    `bgez` are absent from the B set.  That true population is small:
+    ~45 adjacent occurrences per corpus.
+
+Options: fix to the designed vs-zero form (~90 honest pairs across two
+corpora, fits a block of 8-16); redesign with an rs2b field at the cost of
+halving the branch displacement to 5 bits (unmeasurable fit -- displacements
+are unresolved); or discard.  See the immediate-size analysis conversation:
+the register-compare population is real and valuable but needs a different
+row, and folding with chain-li-branch only serves the vs-zero premise.
+
 ## A9 — final sp/base split: `load-sp-branch` / `load-base-branch`
 
 The one frame still drawing an undiscriminated SP-relative row.  Its two rules
