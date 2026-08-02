@@ -4,10 +4,15 @@ Three registers.  §1 is every frame (or frame-shaped idea) this project
 considered and abandoned, with the reason and the commit or record that
 carries the evidence.  §2 cross-references the current roster against
 industry fusion/code-size proposals — most notably Qualcomm's October 2023
-code-size extension deck, the closest prior art to this whole project
-(32-bit instructions that each replace a two-instruction sequence, proposed
-as an alternative to C):
+code-size extension deck (provisional name **Zics**), the closest prior art
+to this whole project: 32-bit instructions that each replace a
+two-instruction sequence, proposed as an alternative to C, with
+AArch64-flavoured operations — `ldp`/`stp`-style load/store pair,
+pre/post-indexed addressing, conditional ops:
 <https://lists.riscv.org/g/tech-profiles/attachment/332/0/code_size_extension_rvi_20231006.pdf>.
+(Qualcomm's Xqci* vendor extensions are a DIFFERENT lineage — their
+microcontroller ISA — cited below only where an Xqci op independently
+documents the same idiom, not as the deck's contents.)
 §3 is the queue: suggested by that prior art, not yet measured here.
 
 Citations marked **[recall]** could not be re-fetched this session (the
@@ -48,13 +53,13 @@ Every surviving frame has at least one independent industry endorsement:
 
 | frame here | prior art | reference |
 |---|---|---|
-| `mem-pair`, `mem-pair-sp` | Qualcomm load/store-pair (Oct-2023 deck); NXP Zilsp / ratified-track Zilsd register-pair load/store; T-Head XTheadMemPair (`th.lwd/ldd/swd/sdd` **[recall]**); GCC aligned store-pair fusion | deck above; <https://github.com/NXP/riscv-zilsp>; <https://github.com/riscvarchive/riscv-zilsd/blob/main/zilsd.adoc>; <https://llvm.org/docs/RISCVUsage.html> |
-| `pre-inc-pair`, `post-inc-pair` | Qualcomm pre/post-indexed (writeback) addressing; T-Head XTheadMemIdx | deck above; <https://llvm.org/docs/RISCVUsage.html> |
+| `mem-pair`, `mem-pair-sp` | Qualcomm Zics `ldp`/`stp`-style load/store pair (Oct-2023 deck, AArch64 LDP/STP analogue); NXP Zilsp / ratified-track Zilsd register-pair load/store; T-Head XTheadMemPair (`th.lwd/ldd/swd/sdd` **[recall]**); GCC aligned store-pair fusion | deck above; <https://github.com/NXP/riscv-zilsp>; <https://github.com/riscvarchive/riscv-zilsd/blob/main/zilsd.adoc>; <https://llvm.org/docs/RISCVUsage.html> |
+| `pre-inc-pair`, `post-inc-pair` | Qualcomm Zics pre/post-indexed (writeback) addressing; T-Head XTheadMemIdx | deck above; <https://llvm.org/docs/RISCVUsage.html> |
 | `index-chain-mem-pair` (incl. scale-1 `add`) | Zba shNadd rationale ("extremely common… pointer arithmetic"); Celio 2016 fused indexed load (`add`+`ld`); GCC `RISCV_FUSE_LDINDEXED`; Qualcomm Xqcisls scaled-index load/store | <https://github.com/riscv/riscv-bitmanip/blob/main/bitmanip/zba.adoc>; <https://arxiv.org/abs/1607.02318>; <https://gcc.gnu.org/pipermail/gcc-patches/2022-November/605961.html>; <https://github.com/llvm/llvm-project/pull/117987> |
 | `chain-li-branch` | VRoom! fused compare-immediate-and-branch (`li` + bXX, exactly this frame) | <https://moonbaseotago.github.io/2023/03/05/instruction-fusion.html> |
 | `inc-branch-pair` | same family (fused compare-and-branch); no direct twin found — the direction×mode joint enumeration appears novel | ibid. |
 | `dual-arith2-pair` | ISA manual M-extension: `MULH*; MUL` and `DIV; REM` same-operand sequences named so "microarchitectures can then fuse these into a single operation" — the frame's premise verbatim | <https://github.com/riscv/riscv-isa-manual/blob/main/src/m-st-ext.adoc> |
-| `czero-select-pair`, `li-czero-pair` | Qualcomm conditional move/select/cond-load-imm (Xqcicm/Xqcics/Xqcicli); SiFive short-forward-branch predication | <https://github.com/llvm/llvm-project/pull/121752>, /119504, /121292; <https://reviews.llvm.org/D135814> |
+| `czero-select-pair`, `li-czero-pair` | Qualcomm Zics conditional move/select; the same idioms documented precisely in the separate Xqci vendor line (Xqcicm/Xqcics/Xqcicli); SiFive short-forward-branch predication | deck above; <https://github.com/llvm/llvm-project/pull/121752>, /119504, /121292; <https://reviews.llvm.org/D135814> |
 | `prologue-pair`, `epilogue-pair` | ratified Zcmp `cm.push`/`cm.popret` (10–15% on stack-heavy code); Qualcomm push/pop & frame-pointer proposal | <https://github.com/riscvarchive/riscv-code-size-reduction/blob/main/Zc-specification/Zc.adoc>; <https://lists.riscv.org/g/tech-unprivileged/attachment/812/0/Qualcomm%20RISC-V%20Push&Pop&FP%20Proposal.pdf> |
 | `dual-indep-pair` (mv+mv…) | Zcmp `cm.mva01s`/`cm.mvsa01` paired moves — ours is register-agnostic | Zc.adoc above |
 | `arith-jump-pair`, `mvload-jump-pair` | argument-setup-before-transfer; SiFive auipc/jalr CallImm patent family (US10996952B2) is the call-side cousin | <https://patents.google.com/patent/US10996952B2/en> |
