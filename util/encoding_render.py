@@ -109,6 +109,9 @@ def render(spec) -> str:
             f = node["frame"]
             out.append("#" * f.get("level", 2) + " " + f["name"])
             out.append("")
+            if f.get("does"):
+                out.append("*" + " ".join(str(f["does"]).split()) + "*")
+                out.append("")
             for i, pair in enumerate(f["templates"]):
                 if i:
                     out.append("")                 # blank line between template pairs

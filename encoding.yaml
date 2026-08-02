@@ -423,6 +423,7 @@ doc:
 
   - frame:
       name: alu-alu-chain
+      does: "Two ALU operations, the second consuming the first's result."
       budget: 256
       level: 2
       templates:
@@ -437,6 +438,7 @@ doc:
 
   - frame:
       name: load-alu-chain
+      does: "Load a value and immediately compute with it."
       # lwu dropped from the A slot: 2 loads x weight 2 x 16 = 64 codepoints,
       # down from 96, so the block halves 128 -> 64. That is what clears the
       # namespace over-reservation (1036 -> 972 of 1024) without touching the
@@ -467,6 +469,7 @@ doc:
 
   - frame:
       name: alu-store-chain
+      does: "Compute a value and store it."
       budget: 32
       level: 2
       templates:
@@ -479,6 +482,7 @@ doc:
 
   - frame:
       name: czero-or-chain
+      does: "Finish a conditional select: merge the surviving arm into the result."
       # The second half of a zicond select:
       #     czero.eqz t1, x, c
       #     czero.nez t2, y, c     <- A
@@ -512,6 +516,7 @@ doc:
 
   - frame:
       name: addi-store-chain
+      does: "Form a value -- constant, copy or sp-relative address -- and store it."
       # Carved out of alu-store-chain: compute an addi, then store it.
       #
       #     A: addi tmp, rs1a, imma      B: store tmp, k*immb(sp)  or  0(rbase)
@@ -552,6 +557,7 @@ doc:
 
   - frame:
       name: "deref-load-chain, base-load-chain"
+      does: "Pointer chase in two forms: which of the two loads carries the offset."
       budget: 64
       level: 2
       templates:
@@ -566,6 +572,7 @@ doc:
 
   - frame:
       name: li-branch-chain
+      does: "Compare a register against a constant and branch."
       budget: 64
       level: 2
       templates:
@@ -582,6 +589,7 @@ doc:
 
   - frame:
       name: bit-test-branch-chain
+      does: "Test a bit or bit-field and branch on the result."
       budget: 32
       level: 2
       templates:
@@ -597,6 +605,7 @@ doc:
 
   - frame:
       name: load-base-branch-pair
+      does: "Load a value and branch on whether it is zero; the value survives."
       budget: 16
       level: 2
       templates:
@@ -611,6 +620,7 @@ doc:
 
   - frame:
       name: load-sp-branch-pair
+      does: "Load a stack slot and branch on whether it is zero; the value survives."
       # The sp side of the old combined frame (the last undiscriminated
       # SP-relative row): with the base implicit, the freed rs1a
       # column pays for the 10-bit offset this traffic needs (5-bit fit is
@@ -632,6 +642,7 @@ doc:
 
   - frame:
       name: inc-branch-pair
+      does: "Step a loop counter by one and branch on the comparison."
       budget: 16
       level: 2
       templates:
@@ -675,6 +686,7 @@ doc:
 
   - frame:
       name: li-czero-chain
+      does: "Materialise a constant and conditionally zero it -- one arm of a select."
       # The other half of a zicond select: materialise one arm's constant, then
       # conditionally zero it. `li` is the chain temporary, so only two
       # registers are encoded (the condition and the destination), which leaves
@@ -749,6 +761,7 @@ doc:
 
   - frame:
       name: index-mem-chain
+      does: "Scaled-index addressing: compute `base + i*width` and access it."
       # A scales an index and adds it to a base; B accesses through the result,
       # which is then dead. The computed address is the CHAIN TEMPORARY and is
       # not encoded, which is what makes three register operands fit: rs1a (the
@@ -796,6 +809,7 @@ doc:
 
   - frame:
       name: pre-inc-pair
+      does: "Advance a pointer, then access through it (pre-increment)."
       budget: 8
       level: 2
       templates:
@@ -826,6 +840,7 @@ doc:
 
   - frame:
       name: post-inc-pair
+      does: "Access through a pointer, then advance it (post-increment)."
       rules_py_names: [post-inc-pair]   # rule names in rules.py this frame covers
       budget: 4
       level: 2
@@ -868,6 +883,7 @@ doc:
 
   - frame:
       name: mem-sp-pair
+      does: "Two adjacent stack accesses one word apart -- a spill or reload pair."
       # Separate from mem-base-pair because the layouts differ: with the base
       # implicit, the freed `rbase` column pays for a 10-bit shared offset,
       # and nothing in a shared opcode could tell the two row families apart
@@ -909,6 +925,7 @@ doc:
 
   - frame:
       name: mem-base-pair
+      does: "Two adjacent accesses through one base register, one data width apart."
       budget: 16
       level: 1
       templates:
@@ -958,6 +975,7 @@ doc:
 
   - frame:
       name: macro-op-pair
+      does: "Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them."
       budget: 16
       level: 1
       templates:
@@ -1018,6 +1036,7 @@ doc:
 
   - frame:
       name: indep-pair
+      does: "Two independent small moves or constants -- argument marshalling."
       # `li` is 6 bits: a 5-bit field plus one opcode repeat (the *li_6s
       # anchor), charged in both slots -- demand 11 -> 17, a 32-block, +169
       # pairs at ~10.6/codepoint.  Worth it only while the space is idle.
@@ -1067,6 +1086,7 @@ doc:
 
   - frame:
       name: rsd-alu-pair
+      does: "Two in-place ALU updates, each rewriting its own source register."
       budget: 256
       level: 2
       templates:
@@ -1093,6 +1113,7 @@ doc:
 
   - frame:
       name: prologue-pair
+      does: "Function prologue: reserve the stack frame and save the return address."
       budget: 2
       level: 2
       templates:
@@ -1104,6 +1125,7 @@ doc:
 
   - frame:
       name: epilogue-pair
+      does: "Function epilogue: release the stack frame and return."
       budget: 2
       level: 2
       templates:
@@ -1118,6 +1140,7 @@ doc:
 
   - frame:
       name: arith-jump-pair
+      does: "A last in-place computation, then a control transfer."
       budget: 64
       level: 2
       templates:
@@ -1132,6 +1155,7 @@ doc:
 
   - frame:
       name: setup-jump-pair
+      does: "Set up an argument or return value, then transfer control."
       # Set up a value, then transfer control. The counterpart to
       # arith-jump-pair: that frame's A slot is RSD (rd == rs1), so its rd field
       # is free for the sentinel. Here A's destination and source are DISTINCT

@@ -136,6 +136,11 @@ def validate(spec):
             errs.append(f"duplicate frame name: {name}")
         seen.add(name)
 
+        does = frame.get("does")
+        if not does or not str(does).strip():
+            errs.append(f"{name}: no `does:` — every frame states, in one line, "
+                        f"the essential operation it performs")
+
         budget = frame.get("budget")
         if not isinstance(budget, int) or budget < 1 or budget & (budget - 1):
             errs.append(f"{name}: budget {budget!r} is not a power of two")

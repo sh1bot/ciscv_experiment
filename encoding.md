@@ -84,6 +84,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## alu-alu-chain
 
+*Two ALU operations, the second consuming the first's result.*
+
     alu     tmp, rs1a, rs2a/imma
     alu     rdb, tmp, rs2b/immb
 
@@ -97,6 +99,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## load-alu-chain
 
+*Load a value and immediately compute with it.*
+
     load    tmp, k*imma(rs1a)
     alu     rdb, tmp, rs2b/immb
 
@@ -107,6 +111,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## alu-store-chain
+
+*Compute a value and store it.*
 
     alu     tmp, rs1a, rs2a/imma
     store   tmp, k*immb(rs1b)
@@ -119,6 +125,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## czero-or-chain
 
+*Finish a conditional select: merge the surviving arm into the result.*
+
     czero.X tmp, rs1a, rs2a
     or      rdb, tmp, rs2b
 
@@ -128,6 +136,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│  rs2b   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## addi-store-chain
+
+*Form a value -- constant, copy or sp-relative address -- and store it.*
 
     addi    tmp, rs1a, imma
     store   tmp, 0(rbase)
@@ -147,6 +157,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## deref-load-chain, base-load-chain
 
+*Pointer chase in two forms: which of the two loads carries the offset.*
+
     load    tmp, k*imma(rs1a)
     load    rdb, k*immb(tmp)
 
@@ -159,6 +171,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * TODO: decide how to balance imma and immb sizes.
 
 ## li-branch-chain
+
+*Compare a register against a constant and branch.*
 
     li      tmp, imma
     bXX     rs1b, tmp, 4*immb
@@ -175,6 +189,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## bit-test-branch-chain
 
+*Test a bit or bit-field and branch on the result.*
+
     andi    tmp, rs1a, imma
     beqz/bnez tmp, immb
 
@@ -190,6 +206,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## load-base-branch-pair
 
+*Load a value and branch on whether it is zero; the value survives.*
+
     load    rda, k*imma(rs1a)
     beqz/bnez rda, zero, 4*immb
 
@@ -203,6 +221,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 ## load-sp-branch-pair
 
+*Load a stack slot and branch on whether it is zero; the value survives.*
+
     load    rda, k*imma(sp)
     beqz/bnez rda, zero, 4*immb
 
@@ -214,6 +234,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
 
 ## inc-branch-pair
+
+*Step a loop counter by one and branch on the comparison.*
 
     inc/dec  rsda
     bXX     rsda, rs2b, 4*immb
@@ -252,6 +274,8 @@ temporary — it exists only because the ISA has that hole.
 
 ## li-czero-chain
 
+*Materialise a constant and conditionally zero it -- one arm of a select.*
+
     li      tmp, imma
     czero.X rdb, tmp, rs2b
 
@@ -261,6 +285,8 @@ temporary — it exists only because the ISA has that hole.
 │h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## index-mem-chain
+
+*Scaled-index addressing: compute `base + i*width` and access it.*
 
     shXadd  tmp, rs1a, rs2a
     load    rdb, k*immb(tmp)
@@ -279,6 +305,8 @@ temporary — it exists only because the ISA has that hole.
 Also chain rules with surviving first result, but also sometimes a second result.
 
 ## pre-inc-pair
+
+*Advance a pointer, then access through it (pre-increment).*
 
     shXadd  rsda, rsda, rs2a
     load    rdb, k*immb(rsda)
@@ -312,6 +340,8 @@ Also chain rules with surviving first result, but also sometimes a second result
 
 ## post-inc-pair
 
+*Access through a pointer, then advance it (post-increment).*
+
     load    rda, k*imma(rsda)
     addi    rsda, rsda, k*immb
 
@@ -339,6 +369,8 @@ Also chain rules with surviving first result, but also sometimes a second result
 
 # mem-sp-pair
 
+*Two adjacent stack accesses one word apart -- a spill or reload pair.*
+
     load    rda, k*imm(sp)
     load    rdb, k*imm+k(sp)
 
@@ -355,6 +387,8 @@ Also chain rules with surviving first result, but also sometimes a second result
 * offsets differ by one data width, as in mem-base-pair
 
 # mem-base-pair
+
+*Two adjacent accesses through one base register, one data width apart.*
 
     load    rda, k*imm(rbase)
     load    rdb, k*imm+k(rbase)
@@ -373,6 +407,8 @@ Also chain rules with surviving first result, but also sometimes a second result
   slots across musl-rv32 and sqlite-rv64.
 
 # macro-op-pair
+
+*Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them.*
 
     alu     rda, rs1a, rs2a
     alu     rdb, rs1a, rs2a
@@ -425,6 +461,8 @@ Also chain rules with surviving first result, but also sometimes a second result
 
 # indep-pair
 
+*Two independent small moves or constants -- argument marshalling.*
+
     mv      rda, rs1a
     mv/li   rdb, rs2b/immb
 
@@ -439,6 +477,8 @@ Also chain rules with surviving first result, but also sometimes a second result
 │h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
 
 ## rsd-alu-pair
+
+*Two in-place ALU updates, each rewriting its own source register.*
 
     alu rsda, rsda, rs2a/imma
     alu rsdb, rsdb, rs2b/immb
@@ -464,6 +504,8 @@ patterns as possible to tamp down the cost.
 
 ## prologue-pair
 
+*Function prologue: reserve the stack frame and save the return address.*
+
     addi    sp, -16*imm
     store   rs1b, 16*imm-k(sp)
 
@@ -473,6 +515,8 @@ patterns as possible to tamp down the cost.
 │h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
 ## epilogue-pair
+
+*Function epilogue: release the stack frame and return.*
 
     addi    sp, 16*imm
     jr      rs1b
@@ -485,6 +529,8 @@ patterns as possible to tamp down the cost.
 # Other desperate measures
 
 ## arith-jump-pair
+
+*A last in-place computation, then a control transfer.*
 
     alu     rsda, rsda, rs2a/imma
     jr/jalr rs1b
@@ -502,6 +548,8 @@ patterns as possible to tamp down the cost.
 │h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
 ## setup-jump-pair
+
+*Set up an argument or return value, then transfer control.*
 
     mv      rda, rs1a
     jr      rs1b
