@@ -14,6 +14,7 @@ from functools import wraps
 from isa.instruction import Instruction
 from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
 from scheduler.imm_contracts import width_of as _yaml_width
+from scheduler.imm_contracts import rd_column_slots as _rd_slots
 
 
 def _w(rule: str, slot: str, op: str) -> int:
@@ -1607,6 +1608,41 @@ RULES: list[PairingRule] = [
         check=_mvload_jump_pair,
     ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# The rd = x0/x2 sentinel (A1.11)
+# ---------------------------------------------------------------------------
+# encoding.yaml reserves those two bit patterns in the `rd` column: they select
+# the prologue / epilogue / jump marker formats (drawn "0 0 0 1 0") instead of
+# naming a register.  That is what lets those frames be identified without an
+# opcode of their own, so every frame that writes a REAL register into that
+# column owes the reservation -- a pair whose destination is x0 or x2 has no
+# encoding there and must not be scheduled.
+#
+# Applied here, over the whole table, rather than written into each check: the
+# frames that owe it are exactly the frames whose rows draw a destination in
+# the rd column, which the yaml already says (imm_contracts.rd_column_slots).
+# A rule need not know it is subject to this, and cannot forget it.
+_SENTINEL_REGS = frozenset({0, 2})          # x0, x2 (sp)
+
+
+def _guard_sentinel(rule: "PairingRule") -> None:
+    slots = _rd_slots(rule.name)
+    if not slots:
+        return
+    inner = rule.check
+    def checked(a: Instruction, b: Instruction):
+        for slot in slots:
+            insn = a if slot == "a" else b
+            if insn.rd in _SENTINEL_REGS:
+                raise NotPair("rd-is-sentinel")
+        return inner(a, b) if inner else None
+    rule.check = wraps(inner)(checked) if inner else checked
+
+
+for _rule in RULES:
+    _guard_sentinel(_rule)
 
 A_SLOT_DISQUALIFIERS: list[str] = [
     "is_unknown",

@@ -70,6 +70,54 @@ def _contracts():
     return out
 
 
+@lru_cache(maxsize=1)
+def _rd_column():
+    """{rule_name: (slots,)} — which slots' DESTINATION register a frame draws
+    in the `rd` column, and so must keep clear of the x0/x2 sentinel (A1.11).
+
+    The sentinel is what lets `prologue`/`epilogue`/`arith-jump` be selected
+    by a bit pattern in that column instead of by an opcode of their own, so
+    every frame that puts a real register there owes the reservation.  Frames
+    whose rd column carries an immediate or the literal sentinel owe nothing:
+    they appear here with no slots."""
+    spec = yaml.safe_load(open(_YAML))
+    grid = spec["grid"]
+    rdcol = grid["columns"].index("rd")
+    out = {}
+    for node in spec["doc"]:
+        frame = node.get("frame") if isinstance(node, dict) else None
+        if not frame:
+            continue
+        names = (frame.get("rules_py_names")
+                 or [x.strip() for x in frame["name"].split(",")])
+        slots = set()
+        for row in frame.get("rows") or []:
+            cells = row["c"] if isinstance(row, dict) else row
+            pos = 0
+            for cell in cells:
+                body, _, n = cell.rpartition("*")
+                span = int(n) if n.isdigit() else 1
+                if span == 1:
+                    body = cell
+                if pos <= rdcol < pos + span:
+                    stem = body.split("[")[0]
+                    # rda/rsda -> slot a, rdb/rsdb -> slot b.  Only DESTINATION
+                    # operands matter: a source in this column is read, not
+                    # written, and cannot collide with the sentinel's meaning.
+                    if stem.startswith(("rd", "rsd")) and stem[-1] in "ab":
+                        slots.add(stem[-1])
+                    break
+                pos += span
+        for rn in names:
+            out[rn] = tuple(sorted(slots))
+    return out
+
+
+def rd_column_slots(rule):
+    """Slots whose destination register this frame encodes in the rd column."""
+    return _rd_column().get(rule, ())
+
+
 def width_of(rule, slot, mnemonic):
     """Declared immediate width in bits, or None if the frame gives this op no
     immediate. `mnemonic` is the yaml op name (`li`, not `addi`)."""
