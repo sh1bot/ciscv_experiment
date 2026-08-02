@@ -19,17 +19,12 @@ The planning documents name `encoding.yaml` as the source of truth (see
    compiler's own register, required dead.  These differ for code using x31.
 5. **Wide `li`.**  Over 61033 `li` in five corpora: 68.8% fit 5 bits, 74.1%
    fit 6, 90.1% fit 8, 97.4% fit 10.  Current widths: 6 bits in
-   `dual-indep-pair`, 7 in `chain-li-branch`, 10 in `li-czero-pair` and
+   `dual-indep-pair`, 8 in `chain-li-branch`, 10 in `li-czero-pair` and
    `mvload-jump-pair`.  The remaining question is whether the 8-10-bit tail
    deserves a dedicated frame or a lui-split, or is an accepted loss.
 6. **`scheduler/RULES.md`'s future** — regenerated from the yaml, reduced to
    scheduler semantics only, or retired?  Its numeric limits have drifted from
    both the yaml and the code (see A4).
-7. **Pairing-rate metric** — pairs *accepted*, or accepted *and encodable*?
-   Nearly closed: `encoding_verify` puts 99.9% of checkable immediates inside
-   their declared field.  The residual is `post-inc-pair` at 95.5%, where
-   `rules.py` and the verifier disagree about the offset scale `k` on cases
-   like `imm=96`; settle which side is right rather than patching either.
 8. **Frame priority.**  `encoding_budget.py` and `encoding_verify.py` both
    `break` at the first accepting rule, so `RULES` list order determines every
    number they print.  Make it an explicit yaml property, or state in the docs

@@ -717,8 +717,17 @@ doc:
       templates:
         - ["load    rda, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
         - ["store   rs2a, k*imma(rsda)", "addi    rsda, rsda, k*immb"]
+      # The stride is declared UNSIGNED, settling the A1.7 disagreement:
+      # rules.py checked it as uimm5-with-remap (strides 1..32 x k, zero
+      # remapped to 32 since a zero stride is meaningless) while the verifier,
+      # finding a bare op, inferred addi's natural signedness and flagged
+      # strides 17..32 x k.  The census sides with unsigned -- post-inc
+      # strides are forward walks (16, 32, 48, 128...), essentially never
+      # negative -- and unsigned-with-remap covers double the useful range.
+      # Split per width cluster so each declares its true scale.
       ops:
-        - {a: [ld, lw, sd, sw],     b: [addi]}
+        - {a: [ld, sd], b: [{op: addi, imm: {bits: 5, signed: false, scale: 8}}]}
+        - {a: [lw, sw], b: [{op: addi, imm: {bits: 5, signed: false, scale: 4}}]}
       rows:
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rda"]
@@ -727,8 +736,12 @@ doc:
          * No shXadd clusters: a post-increment by a register-held stride is a
            real idiom, but neither clang nor GCC emits it adjacent to the
            access (zero scheduled pairs on every corpus).
-         * TODO: Try zero memory offset and all the load/store permutations instead
-         * TODO: decide how to balance imma and immb sizes (proper coordination switches pre/post incr).
+         * Both fields earn their columns, unlike pre-inc: the access offset
+           imma is the position inside an unrolled window (small, 67-74%
+           within +/-16) and the stride immb is the window size (wide).
+           They decouple under unrolling -- stride = offset + width holds at
+           only 3-19% -- so neither a zero offset nor a delta encoding works
+           here.
 
   - md: |
       # Other stuff
