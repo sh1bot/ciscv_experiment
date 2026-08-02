@@ -200,9 +200,7 @@ opsets:
   # ones that most need the compression, so x4 it is.)
   addi4spn_u6: &addi4spn_u6 {op: addi4spn, imm: {bits: 6, signed: false, scale: 4}}
 
-  # A 6-bit `li`: a 5-bit field plus ONE opcode repeat. Declared rather than
-  # drawn across g/h -- see the dual-indep-pair header for why that distinction
-  # is the whole difference between paying for the bit and not.
+  # A 6-bit `li`: a 5-bit field plus one opcode repeat.
 
 
 # Equivalencies: surface forms the scheduler should accept as matching a frame
@@ -269,9 +267,35 @@ doc:
        * the value of `k` in instruction templates is the size of the
          corresponding load or store data width.  The value of `X` in `shXadd`
          mnemonics is the corresponding bit shift.
-       * When `imma` or `immb` are required to be 6-bit immediates, the extra
-         bits are stored in bits `g` and `h` respectively.  Otherwise these
-         bits are used to extend the range of the `funct3` field.
+       * IMMEDIATE FIELDS ARE FIVE BITS — one register column — or ten from
+         two columns.  An op needing more range says so with `imm: {bits: N}`
+         and pays by duplicating immediate-form opcode entries: each bit above
+         the drawn field doubles that op's codepoints (see the width-annotated
+         entries in `opsets`).  There is no other widening mechanism; `g` and
+         `h` are opcode bits like any other.
+
+  - md: |
+      # Enumeration policy (intent only)
+
+      How codepoints are ASSIGNED — which bit patterns select which frames and
+      ops — is a matter of decoder convenience, and we hold preferences for it.
+      These are strictly enumeration policy: they change nothing about demand,
+      budgets, or immediate widths, and no tool may read them as capacity.
+
+       * Specific selector bits, `g` and `h` among them, have preferential
+         uses.  In particular, when a frame's op-select bits enumerate the
+         duplicated immediate-form entries of a width-annotated op, we prefer
+         to place those entries so the extension bits of the immediate land in
+         `g` (A-slot ops) and `h` (B-slot ops).  That is a naming of which
+         opcode bits carry the duplication — the codepoints are already paid —
+         so a decoder can route them straight into the immediate mux.
+       * Frame identifiers are ordered so their leading bits track the real
+         RISC-V `opcode[6:2]` of the A slot (see `util/encoding_assign.py`),
+         letting an A-slot decoder branch on bits it already examines.
+       * Block sizes round up to powers of two and blocks are allocated in
+         descending size, keeping every frame's identifier a contiguous prefix.
+
+      Further ordering and rounding policies belong here as they are decided.
 
   - reserved:
       - where: rd field
@@ -452,10 +476,8 @@ doc:
       rows:
         - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1b", "fn3", "immb[4:0]"]
       notes: |
-         * `imma` is a 5-bit register column and `li` declares 6 bits, so the
-           sixth is bought by repeating the opcode. An earlier note treated the
-           low selector bit as spare immediate range; it is not -- every
-           selector word runs to depth 10, so both low bits are opcode. TODO A7.
+         * `imma` is a 5-bit register column; `li` declares 7 bits, bought by
+           opcode duplication.
          * TODO: could replace li with alu op and compare result with zero (mostly?).
 
   - frame:
@@ -486,11 +508,8 @@ doc:
         - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
         - {c: ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"], tag: SP-relative}
       notes: |
-         * `immb` is the branch displacement and is drawn 5 bits wide. An
-           earlier note treated the two low selector bits as spare range for it;
-           they are not (depth 10/10, so both are opcode). Displacements are
-           unresolved labels in the corpus, so nothing here measures the cost of
-           that correction -- see TODO A7.
+         * `immb` is the branch displacement, a 5-bit field.  Displacements
+           are unresolved labels in the corpus, so their fit is unmeasured.
 
   - frame:
       name: addi-branch-pair
@@ -550,7 +569,7 @@ doc:
       # would forfeit ~40% of the hits for nothing.
       #
       # The `addi rsd,rsd,imm` form was costed at the widths this shape could
-      # afford (3 registers leaves 5 bits, 7 with g/h): ~7 adjacencies at 6 bits
+      # afford (3 registers leaves a 5-bit field): ~7 adjacencies at 6 bits
       # and ~15 at 7, of 155 on sqlite-rv64. Its addends are wide because they
       # are offsets into a running value, not constants. Not viable.
       #
@@ -729,9 +748,8 @@ doc:
         - {a: [sd], b: [sd]}
       rows:
         - ["h", "rda",  "g", "imm[4:0]",   "rbase", "fn3", "rdb"]
-        - ["h", "rs2b", "i", "rs2a",        "rbase", "fn3", "imm[4:0]"]
+        - ["h", "rs2b", "g", "rs2a",        "rbase", "fn3", "imm[4:0]"]
       notes: |
-         * For row two, `i` extends `imm` by one bit (consistent with `imma` extension but in a B-type frame).
          * both opcodes in a pair must be identical operations
          * `lb`, `lh` and `lwu` were CUT. Across musl-rv32 and sqlite-rv64 they
            account for 12 of 37816 scheduled slots -- `lb` never appears at all.
@@ -815,31 +833,10 @@ doc:
 
   - frame:
       name: dual-indep-pair
-      # ONE immediate here is 6 bits, not 5, and it is paid for in the
-      # canonical way: the FIELD is a 5-bit register column, and the extra bit
-      # of range comes from REPEATING THE OPCODE -- `li` declares
-      # `imm: {bits: 6}` (the *li_6s anchor) against a 5-bit base, so
-      # `_slot_weight` charges it 2 codepoints instead of 1, in BOTH slots.
-      # Demand 11 -> 17, so the block doubles to 32: sixteen codepoints for
-      # +169 pairs, about 10.6 per codepoint. That is a poor rate against the
-      # frames we keep, and worth paying only because nothing is competing for
-      # the space -- 28 codepoints were spare and idle. Revisit if that changes.
-      # Only 68.8% of the corpus's `li` fit 5 bits, against 74.1% at 6.
-      #
-      # NOTE THE ROWS DRAW A PLAIN 5-BIT immb. The sixth bit is NOT also
-      # spelled into the layout -- that would be the same bit bought twice,
-      # once by repeating the opcode and once by widening the field. Two
-      # earlier revisions of this frame got this wrong in both directions: one
-      # drew `immb[6:0]*3` with `li` left bare, taking 7 bits for nothing
-      # (a bare op inherits the row's whole span, since `_slot_weight` charges
-      # only a declared width); the next declared 6 bits AND kept a 6-bit drawn
-      # field, paying for the bit and drawing it too. Declare the width on the
-      # op; leave the row at a register column.
-      #
-      # 7 bits is affordable only at 2 repeats: demand 23, which needs a
-      # 32-block, +16 codepoints against 12 spare. So 6 is the ceiling here
-      # today, and the decision to cap this group when it outgrew its old home
-      # stands.
+      # `li` is 6 bits: a 5-bit field plus one opcode repeat (the *li_6s
+      # anchor), charged in both slots -- demand 11 -> 17, a 32-block, +169
+      # pairs at ~10.6/codepoint.  Worth it only while the space is idle.
+      # 7 bits would double the charge again (demand 23); not taken.
       #
       # Only ONE of the pair may be wide: row 2 draws immb for B but imma[4:0]
       # for A. Not a real loss -- pairs with two wide immediates are rare, and
@@ -1033,8 +1030,6 @@ doc:
         - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "rdb"]
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "rs2b"]
       notes: |
-         * B's memory offset MUST BE ZERO. An earlier note treated the two low
-           selector bits as a 2-bit `immb`; they are opcode bits (depth 10/10)
-           and the rows have no column to spare. Declaring a 2-bit offset on the
-           eleven B ops instead would cost 4x each: demand 55 -> 220, a
-           256-block. See TODO A7.
+         * B's memory offset MUST BE ZERO -- the rows draw no `immb` field.
+           A 2-bit offset declared on the eleven B ops would cost 4x each
+           (demand 55 -> 220, a 256-block); not worth it.

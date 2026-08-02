@@ -27,9 +27,10 @@ def test_rules_conform_to_encoding_yaml():
 
 
 def test_codepoint_accounting_has_no_complaints():
-    """No frame may take immediate range it has not paid for: no bare op on a
-    widened field, no unrecognised immediate field name, no claim on a g/h bit
-    the selector word does not leave free."""
+    """No frame may take immediate range it has not paid for: no immediate
+    field parked in the g/h opcode bits, no unrecognised field name.  A field
+    is its register columns; wider ranges are bought by opcode duplication and
+    nothing else."""
     r = _run("util/encoding_assign.py")
     out = r.stdout + r.stderr
     assert "Codepoint-accounting complaints" not in out, out[:4000]

@@ -851,7 +851,7 @@ def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
     if a.mnemonic == "addi":
         # imma[4:0], and `addi` declares no extension: a 5-bit signed field,
         # excluding 0 (encode a zero immediate as a move from x0 instead).
-        # This accepted [-64, 64] until the g/h audit — two bits it never had.
+        # This accepted [-64, 64] until the width audit — two bits it never had.
         if a.imm is None or a.imm == 0 or not (-16 <= a.imm <= 15):
             raise NotPair("A-big-imm")
     if not _arith_mem_small_offset_ok(b):
@@ -1074,7 +1074,7 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     if not a.is_li:
         raise NotPair("A not li form (must be addi rd, x0, imm)")
     # encoding.yaml declares li at 6 bits: a 5-bit imma column plus one opcode
-    # repeat.  This accepted 8 until the g/h audit -- the extra two bits were
+    # repeat.  This accepted 8 until the width audit -- the extra two bits were
     # taken from selector bits that are not free (TODO A7).
     if not a.imm_fits(7):
         raise NotPair("immediate out of 7-bit signed range [-64..63]")

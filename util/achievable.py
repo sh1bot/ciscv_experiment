@@ -38,7 +38,7 @@ for node in spec['doc']:
     f = node.get('frame')
     if not f or not f.get('ops') or not f.get('rows'): continue
     for slot in ('a','b'):
-        try: base, full = imm_field_bits(f, grid, slot)
+        try: base = imm_field_bits(f, grid, slot)
         except Exception: continue
         if not base: continue
         carries = any(op_name(e) not in REG_FORM_OPS

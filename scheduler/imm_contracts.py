@@ -55,7 +55,7 @@ def _contracts():
         per_slot = {}
         for slot in ("a", "b"):
             try:
-                base, _ = imm_field_bits(frame, grid, slot)
+                base = imm_field_bits(frame, grid, slot)
             except Exception:
                 base = 0
             widths = {}

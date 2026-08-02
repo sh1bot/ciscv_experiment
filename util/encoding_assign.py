@@ -31,9 +31,9 @@ Two "nice-to-have" biases are applied when they don't cost feasibility:
     base ISA opcodes do (bit 5 clear ~ immediate/I-type, set ~ register/R-type;
     bit 6 ~ arithmetic vs control). A hardware A-slot decoder can therefore
     branch on the same bits it already uses.
-  * when a frame's word stops before g/h, those freed bits are labelled as the
-    A-slot (g) and B-slot (h) wide-immediate extension bits — the "raised for
-    the immediate form" convention from encoding.yaml's Overview.
+  * enumeration preferences — which selector bits serve which purposes, block
+    ordering, rounding — are intent only, documented in encoding.yaml's
+    "Enumeration policy" note.  Nothing here reads them as capacity.
 
 For each frame the tool prints its bare form, then walks the frame's asm
 templates and, for each, reprints the matching encoding row TWICE — once for the
@@ -64,11 +64,9 @@ MARKER = "1 0"
 # can claim either bit, which is why the canonical form buys extra range by
 # repeating the opcode instead.  Checked in main(); they were dead constants
 # for a long time and the claim went unaudited.
-GH_FREE_DEPTH = 8               # word must stop at <= this depth to leave g & h free
-H_FREE_DEPTH = 9                # ... to leave just h free
-
 # Grid column indices (encoding.yaml grid.columns): the g bit is column 2, the
-# h bit column 0. Used to spot an immediate parked in g/h.
+# h bit column 0.  They are opcode bits; the renderer substitutes the selector
+# word's actual bit character where a row names them.
 COL_H, COL_G = 0, 2
 
 # --- RISC-V A-slot format classification (nice-to-have #1) -----------------
@@ -130,32 +128,6 @@ def a_format(frame):
     return "mixed"
 
 
-# --- immediate demand on g / h (nice-to-have #2) ---------------------------
-def wants_gh(frame):
-    """(wants_g, wants_h): does the frame try to carry a wide immediate in the
-    g (A-slot) / h (B-slot) bit? True when a row parks an immediate token in
-    that column, or the notes say g/h extend/provide an immediate."""
-    wg = wh = False
-    for row in frame["rows"]:
-        cells = row["c"] if isinstance(row, dict) else row
-        pos = 0
-        for cell in cells:
-            body, span = _cell(cell)
-            name = body.split("[")[0]
-            if name.startswith("imm"):
-                if pos <= COL_G < pos + span:
-                    wg = True
-                if pos <= COL_H < pos + span:
-                    wh = True
-            pos += span
-    note = frame.get("notes", "") or ""
-    if re.search(r"`g`[^.]*(extend|provide)|(extend|provide)[^.]*`g`", note):
-        wg = True
-    if re.search(r"`h`[^.]*(extend|provide)|(extend|provide)[^.]*`h`", note):
-        wh = True
-    return wg, wh
-
-
 def opsel_bits(demand):
     return max(0, math.ceil(math.log2(demand))) if demand and demand > 1 else 0
 
@@ -187,8 +159,7 @@ def allocate_blocks(frames):
 
 def word_chars(frame):
     """The 10 selector bits MSB->LSB as display chars:
-       '0'/'1' identifier, 'o' op-select, then free bits labelled 'g'/'h'
-       (wide-immediate extension) or '.' (unused)."""
+       '0'/'1' identifier, 'o' op-select, '.' free/unused."""
     idl, opsel = frame["id_len"], frame["opsel"]
     w = []
     for pos in range(WBITS - 1, -1, -1):          # bit 9 (MSB) .. 0
@@ -198,13 +169,7 @@ def word_chars(frame):
         elif depth <= idl + opsel:
             w.append("o")
         else:
-            # a free bit toward g/h
-            if pos == 1 and frame["wg"]:
-                w.append("g")
-            elif pos == 0 and frame["wh"]:
-                w.append("h")
-            else:
-                w.append(".")
+            w.append(".")
     return w
 
 
@@ -221,7 +186,7 @@ def frame_rows(spec):
 
 def _tokens(cells, w):
     """Per operand-column cell: (display_text, span, pos, body) with the
-    selector bits injected — fn3 as its 3 bits, a discrete g/h/i cell as its
+    selector bits injected — fn3 as its 3 bits, a discrete g/h cell as its
     bit, everything else as its span-stripped label."""
     fn3 = " ".join(w[5:8])
     g_char, h_char = w[8], w[9]
@@ -230,7 +195,7 @@ def _tokens(cells, w):
         body, span = _cell(cell)
         if body == "fn3":
             text = fn3
-        elif span == 1 and pos == COL_G and body in ("g", "i"):
+        elif span == 1 and pos == COL_G and body == "g":
             text = g_char
         elif span == 1 and pos == COL_H and body == "h":
             text = h_char
@@ -246,11 +211,11 @@ _FIXED = re.compile(r"[01 ]+$")
 
 def _shared_cell(body, pos):
     """A cell that belongs to the joint packet, not to one slot: the opcode
-    bits (fn3), the g/h/i extension bits, and any fixed bit pattern (incl. the
+    bits (fn3), the g/h opcode bits, and any fixed bit pattern (incl. the
     prologue/epilogue/jump sentinel)."""
     if body == "fn3":
         return True
-    if pos == COL_G and body in ("g", "i"):
+    if pos == COL_G and body == "g":
         return True
     if pos == COL_H and body == "h":
         return True
@@ -369,34 +334,22 @@ def main():
         base = opcode_demand(f.get("ops"))          # a×b combos, before ext
         d = opcode_codepoints(f, spec["grid"])      # real codepoints, ext-aware
         budget = f.get("budget") or d               # reserve current fill if none
-        wg, wh = wants_gh(f)
         fmt = a_format(f)
         frames.append({
             "name": f["name"], "spec": f, "demand": d, "base": base,
             "budget": budget, "opsel": opsel_bits(budget),
-            "wg": wg, "wh": wh, "fmt": fmt, "a_rank": _FMT_RANK[fmt],
+            "fmt": fmt, "a_rank": _FMT_RANK[fmt],
         })
 
     complaints = []
     for f in frames:
         complaints += lint_frame(f["spec"], spec["grid"])
-        need = GH_FREE_DEPTH if (f["wg"] and f["wh"]) else (
-            H_FREE_DEPTH if (f["wg"] or f["wh"]) else None)
-        f["gh_need"] = need
 
     order, reserved, W = allocate_blocks(frames)
     overflow = reserved > (1 << WBITS)
     widths = list(spec["grid"]["display"]) + [9, 3]
     header = header_lines(widths)
 
-    for f in frames:
-        need = f.get("gh_need")
-        if need is not None and min(W, WBITS) > need:
-            complaints.append(
-                f"{f['name']}: claims a g/h immediate bit, which needs the "
-                f"selector word to stop at depth <= {need}; it is at "
-                f"{min(W, WBITS)}, so the bit is an opcode bit and the claim is "
-                f"unfunded.")
     if complaints:
         print("## Codepoint-accounting complaints\n")
         for c in complaints:
@@ -407,7 +360,6 @@ def main():
     print(f"Selector word = opcode5(5):funct3(3):g:h = {WBITS} bits, "
           f"{1<<WBITS} codepoints, read MSB->LSB.")
     print("'0'/'1' = frame identifier (constant), 'o' = op-select, "
-          "'g'/'h' = trailing low bit free to hold an extended A/B immediate, "
           "'.' = free/unused.\n")
     print(f"Reserved {reserved}/{1<<WBITS} codepoints across {len(frames)} frames "
           f"({100*reserved/(1<<WBITS):.0f}%), each frame a fixed block sized to its\n"

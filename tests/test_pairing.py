@@ -116,7 +116,7 @@ class TestArithMemImmediate:
     """arith-mem-pair A-slot addi immediate must be in [-16, 15], excluding 0.
 
     The row draws imma[4:0] and `addi` declares no extension, so the field is
-    five bits.  It accepted [-64, 64] until the g/h audit (TODO A7) — two bits
+    five bits.  It accepted [-64, 64] until the width audit — two bits
     taken from selector bits that were never free."""
 
     def _pair(self, imm):

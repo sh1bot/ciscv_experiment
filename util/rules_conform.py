@@ -327,23 +327,6 @@ def bits_to_range(bits, signed):
     return 0, (1 << bits) - 1
 
 
-def allowed_ranges(frame, bits, signed):
-    """Every immediate range the frame's declared width could legitimately mean.
-
-    A frame may widen an immediate with the `g` and `h` bits, and which slot's
-    immediate they widen is not settled (TODO A1 item 1: three mechanisms
-    coexist in the yaml). So when a frame claims either bit, accept the
-    declared width OR the widened ones rather than guessing — a rule outside
-    even the widest reading is unambiguously wrong, which is the finding worth
-    reporting."""
-    from util.encoding_assign import wants_gh
-    try:
-        ext = sum(wants_gh(frame))
-    except Exception:
-        ext = 0
-    return [bits_to_range(bits + k, signed) for k in range(ext + 1)]
-
-
 def main():
     verbose = "--verbose" in sys.argv
     frames = load_frames()
@@ -362,7 +345,6 @@ def main():
     reached = unreachable = 0
     bases_checked = 0
     unverified: list = []
-    ambiguous: list = []
     base_done: set = set()
     for rn, rule in rules.items():
         frame = frames.get(rn)
@@ -413,7 +395,7 @@ def main():
             for slot in ("a", "b"):
                 if base not in frame_slot_ops(frame, slot):
                     continue
-                wants = allowed_ranges(frame, bits, c.get("signed", True))
+                want = bits_to_range(bits, c.get("signed", True))
                 got = accepted_range(rule, frame, mn, slot)
                 if got is None:
                     unreachable += 1
@@ -423,21 +405,9 @@ def main():
                                      f"(other constraints may gate it)")
                     continue
                 reached += 1
-                if got == wants[0]:
-                    continue
-                if got in wants:
-                    # Reconcilable only by reading g/h as immediate extension
-                    # bits, which is TODO A1 item 1 and not settled. Surfaced,
-                    # not passed silently, and not counted as a disagreement.
-                    ambiguous.append(
-                        f"{rn} {slot}:{mn} yaml declares {bits}b {wants[0]}, "
-                        f"rules.py accepts {got} — agrees only if g/h widen it "
-                        f"by {wants.index(got)}")
-                    continue
-                widths = "/".join(str(bits + k) for k in range(len(wants)))
-                notes.append(f"{slot}: {mn} yaml {widths}b = "
-                             f"{' or '.join(map(str, wants))}, "
-                             f"rules.py accepts {got}")
+                if got != want:
+                    notes.append(f"{slot}: {mn} yaml {bits}b = {want}, "
+                                 f"rules.py accepts {got}")
         if multi and verbose:
             print(f"· {rn}: frame '{frame['name']}' covers "
                   f"{frame['rules_py_names']}; op sets not compared per-rule")
@@ -451,11 +421,6 @@ def main():
 
     total = reached + unreachable
     print(f"\n{problems} frame(s) disagree with encoding.yaml.")
-    if ambiguous:
-        print(f"{len(ambiguous)} width(s) agree only under an unsettled reading "
-              f"of g/h (TODO A1 item 1):")
-        for a in ambiguous:
-            print(f"  ? {a}")
     if total:
         print(f"COVERAGE: {reached} of {total} declared immediate contracts were "
               f"actually verified ({100 * reached // total}%); {unreachable} could "
