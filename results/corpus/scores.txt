@@ -1,13 +1,20 @@
-corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)
--------------------------------------------------------------------------------
-godot            ! -noalias has 97790 instructions, scheduled file has 90172 — not the same build
-godot              90172   13229    76943     85.3%     76.4%   111.6%    62.3%
-musl-rv32         119026   25652    93374     78.4%     74.9%   104.7%    85.9%
-musl-rv64         102040   21874    80166     78.6%     72.7%   108.0%    78.6%
-sqlite-rv32       192768   44214   148554     77.1%     72.1%   106.9%    82.2%
-sqlite-rv64       189677   41631   148046     78.1%     72.1%   108.3%    78.6%
-testcase0          21876    4315    17561     80.3%     81.6%    98.3%   107.4%
+corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
+------------------------------------------------------------------------------------------
+testcase0          21876    4117    17759     81.2%     81.6%    99.4%   102.5%        -99
+godot              90172   13226    76946     85.3%     76.3%   111.8%    61.9%      +8142
+musl-rv32         119026   27124    91902     77.2%     74.9%   103.1%    90.8%      +2747
+musl-rv64         102040   21595    80445     78.8%     72.7%   108.4%    77.6%      +6221
+sqlite-rv32       192768   43740   149028     77.3%     72.1%   107.2%    81.3%     +10030
+sqlite-rv64       189677   40410   149267     78.7%     72.1%   109.2%    76.3%     +12545
+cpp-rv32          420866   88948   331918     78.9%     71.1%   110.9%    73.2%     +32505
+cpp-rv64          411687   83701   327986     79.7%     71.4%   111.7%    71.0%     +34237
+------------------------------------------------------------------------------------------
+TOTAL to parity                                                                    +106328
 
 packet % and real RVC are size against a 4-byte-per-instruction baseline;
 vs RVC under 100% means packets are smaller. P/(C/2) is progress toward the
 break-even point where pairs exceed half the compressed-instruction count.
+
+'to parity' is that same gap expressed in PAIRS: how many more this corpus
+needs before packets beat real RVC. Negative means already past, by that
+margin. It is the number to watch — every other column is a ratio.

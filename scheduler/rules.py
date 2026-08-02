@@ -488,19 +488,9 @@ def _sp_mem_check(insn: Instruction) -> None:
 
 
 def _chain_mem_check(insn: Instruction, base_bits: int) -> None:
-    """A chain-frame memory op, either SP-relative or against a base register.
-
-    encoding.yaml gives both frames TWO templates: `load tmp, k*imma(rs1a)` and
-    `load tmp, k*imma(sp)`. Rows 1-2 draw the base register `rs1a` explicitly;
-    rows 3-4 drop it for the implicit sp and spend the freed bits on a wider
-    offset. rules.py previously applied the SP-only check unconditionally and
-    refused every base-register form the encoding already reserves."""
+    """A chain-frame memory op: any base register (sp included, as x2 in the
+    register column), width-scaled offset in the drawn `base_bits` field."""
     shift = insn.access_shift or 0
-    # No sp-wide path: encoding.yaml's SP-relative rows for these frames were
-    # dropped (TODO A9).  Their sp offsets fit the base field 79-100% of the
-    # time, so an sp access simply uses the base form with x2 in the register
-    # column -- which costs a fraction of what a second row layout costs in
-    # codepoints, since nothing in the opcode distinguishes the two.
     if not insn.uimm_fits(base_bits, shift):
         raise NotPair("big-imm")
 
@@ -515,7 +505,7 @@ def a_sp_mem(func: Callable):
 
 
 def a_chain_mem(bits: int):
-    """A-slot memory op: sp with a 10-bit offset, or any base with `bits`."""
+    """A-slot memory op: any base register, `bits`-wide scaled offset."""
     def dec(func: Callable):
         @wraps(func)
         def check(a: Instruction, b: Instruction):
@@ -526,7 +516,7 @@ def a_chain_mem(bits: int):
 
 
 def b_chain_mem(bits: int):
-    """B-slot memory op: sp with a 10-bit offset, or any base with `bits`."""
+    """B-slot memory op: any base register, `bits`-wide scaled offset."""
     def dec(func: Callable):
         @wraps(func)
         def check(a: Instruction, b: Instruction):
@@ -534,15 +524,6 @@ def b_chain_mem(bits: int):
             return func(a, b)
         return check
     return dec
-
-
-def b_sp_mem(func: Callable):
-    """B-slot is an sp-relative memory op with an in-range 8-bit scaled offset."""
-    @wraps(func)
-    def check_b_sp_mem(a: Instruction, b: Instruction):
-        _sp_mem_check(b)
-        return func(a, b)
-    return check_b_sp_mem
 
 
 # a.rd (the chain register) is dead after B and not encoded in the packet, so it
@@ -577,9 +558,7 @@ def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
 # a full 5-bit field.
 _ADDI_STORE_MN = frozenset({"sb", "sh", "sw", "sd"})
 _ADDI_STORE_BITS = 10                        # signed immediate field
-# The frame draws ONE row now: the SP-relative variant was dropped (TODO A9)
-# because its offsets fit the base field 100% of the time on both corpora.  The
-# remaining row spends its bits on rbase, so B carries no offset at all.
+# The single row spends its bits on rbase, so B carries no offset at all.
 
 
 def _addi_store_pair(a: Instruction, b: Instruction) -> None:
@@ -752,11 +731,8 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 # shift is tied to the width by the tuple table (sh3add with 8-byte accesses,
 # sh2add with 4-byte).
 
-# lb/lh/lwu cut: 12 of 37816 scheduled slots across musl-rv32 and sqlite-rv64,
-# and `lb` never appeared at all.  Eight ops fit a 16-block; the freed 16
-# codepoints buy chain-li-branch its seventh bit, worth more.  arith-mem-pair
-# reuses this set for its B slot, which is fine -- those three are equally
-# absent there.
+# No lb/lh/lwu: they accounted for 12 of 37816 scheduled slots.  arith-mem-pair
+# reuses this set for its B slot.
 _MEM_PAIR_MN = frozenset({"lbu", "lhu", "lw", "ld", "sb", "sh", "sw", "sd"})
 
 
@@ -833,13 +809,7 @@ def _mem_pair_sp(a: Instruction, b: Instruction) -> None:
 
 
 def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
-    """B-slot: the offset must be ZERO.
-
-    Both rows spend all seven columns on registers and A's immediate, so there
-    is no `immb` field.  A note used to say the two low selector bits supplied a
-    2-bit offset; they are opcode bits (every word runs to depth 10), and giving
-    the eleven B ops a real 2-bit field would cost 4x each — demand 55 -> 220,
-    a 256-block.  See TODO A7."""
+    """B-slot: the offset must be ZERO — the rows draw no `immb` field."""
     return insn.imm == 0
 
 
@@ -851,7 +821,6 @@ def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
     if a.mnemonic == "addi":
         # imma[4:0], and `addi` declares no extension: a 5-bit signed field,
         # excluding 0 (encode a zero immediate as a move from x0 instead).
-        # This accepted [-64, 64] until the width audit — two bits it never had.
         if a.imm is None or a.imm == 0 or not (-16 <= a.imm <= 15):
             raise NotPair("A-big-imm")
     if not _arith_mem_small_offset_ok(b):
@@ -1073,9 +1042,8 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
         raise NotPair("A not li form (must be addi rd, x0, imm)")
-    # encoding.yaml declares li at 6 bits: a 5-bit imma column plus one opcode
-    # repeat.  This accepted 8 until the width audit -- the extra two bits were
-    # taken from selector bits that are not free (TODO A7).
+    # encoding.yaml declares li at 7 bits: a 5-bit imma column plus two
+    # doublings on the opcode list.
     if not a.imm_fits(7):
         raise NotPair("immediate out of 7-bit signed range [-64..63]")
     return None
@@ -1295,8 +1263,7 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
         raise NotPair("bad-tuple")
-    # B's offset rides the width-scaled immb[4:0] field every row draws; it is
-    # not required to be zero (rules.py used to demand that).
+    # B's offset rides the width-scaled immb[4:0] field every row draws.
     if b.has_mem_operand and not b.uimm_fits(5, b.access_shift or 0):
         raise NotPair("B-big-imm")
     # A's stride rides imma[4:0], scaled by the access width — `addi rsda, rsda,

@@ -1,5 +1,11 @@
 # Immediate widths: what each frame can afford, and what it needs
 
+> **HISTORICAL SNAPSHOT.**  This table predates the width-honesty pass and the
+> mem-pair sp/base split: every width it lists as `bare` is now declared, the
+> ranges it flags in `rules.py` are fixed, and `mem-pair`'s sp traffic lives in
+> its own `mem-pair-sp` frame.  The *method* stands; regenerate the numbers
+> with `util/achievable.py` and `util/needed.py` before relying on any.
+
 Two measurements, per frame and slot.
 
 **Achievable** — the field is drawn from register columns (5 bits, or 10 from

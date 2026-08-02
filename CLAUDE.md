@@ -10,8 +10,11 @@ budget live there, and it is the single point of iteration (render with
 `python3 util/encoding_render.py`; see `yaml_migration.md` for the migration).
 `scheduler/rules.py` is the runtime enforcement of those frames and
 `scheduler/RULES.md` documents its scheduler-side semantics (deadness, chaining,
-order-sensitivity); numeric limits are yaml-owned. This migration is in progress,
-so some docs still describe the older rules-as-source model — see `TODO.md`.
+order-sensitivity); numeric limits are yaml-owned, and
+`tests/test_conformance.py` gates yaml/rules agreement on every commit. The
+migration is in progress — `scheduler/RULES.md` still restates numbers it
+should reference (TODO A4), and `rules.py` still hand-copies widths that
+`scheduler/imm_contracts.py` can derive (TODO A8).
 
 ## Measurement caveats — remind the user about these when relevant
 

@@ -313,9 +313,13 @@ all; `imm_expr` only catches pre-link `%hi`/`%lo` syntax.
   (§3). A frame listing 16 mnemonics including `addi` costs **20 tokens**, hence
   20 × 20 = **400 codepoints**, not 256. This has bitten at least once.
 - An op's slot cost is `2^ext` where `ext = max(0, width − base_field)`. With a
-  5-bit base field, a 6-bit immediate costs 2 slots and a 7-bit costs 4.
+  5-bit base field, a 6-bit immediate costs 2 slots and a 7-bit costs 4. The
+  base field is 5 bits per register column the immediate consumes (10 from
+  two); there is no other widening mechanism — `g`/`h` are opcode bits.
 - Frame cost is `Σ weight(a) × Σ weight(b)`, so a symmetric frame with a 16-slot
-  list costs 256.
+  list costs 256. EXCEPT when the frame draws one SHARED `imm` field serving
+  both slots (mem-pair): one field, one extension, so a cluster costs
+  `|a| × |b| × 2^maxext`, not the product of per-slot extensions.
 - Register-form ops always cost 1.
 - Total namespace is 1024 (`opcode5:funct3:g:h`).
 
