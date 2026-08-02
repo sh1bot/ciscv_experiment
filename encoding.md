@@ -489,21 +489,3 @@ patterns as possible to tamp down the cost.
   See results/corpus/README.md.
 * On the direct-`j` rows a load has no offset field (offsets are zero
   in 98.2% of chained cases anyway) and `li` narrows to 5 bits.
-
-# arith-mem-pair
-
-    alu     rsda, rsda, rs2a/imma
-    load    rdb, k*immb(rs1b)
-
-    alu     rsda, rsda, rs2a/imma
-    store   rs2b, k*immb(rs1b)
-
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │  rs2b   │ opcode5 │1 0│
-
-* B's memory offset MUST BE ZERO -- the rows draw no `immb` field.
-  A 2-bit offset declared on the eleven B ops would cost 4x each
-  (demand 55 -> 220, a 256-block); not worth it.

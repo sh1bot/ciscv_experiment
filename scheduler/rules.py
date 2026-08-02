@@ -767,14 +767,6 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
 # No producer-consumer relationship required — they share no operands.
 # The dep graph prevents scheduling A before B when a true dependency exists.
 #
-# A slot: add/sub/and/or/addi  rd, rd, rs2_or_imm
-#         rd and rs1 in x0..x15; addi imm in -64..64 inclusive, excluding 0
-# B slot: any load or store with non-negative offset aligned to access width
-#         and fitting a 2-bit scaled field (0, 1×w, 2×w, 3×w)
-
-_ARITH_MEM_A_MN = frozenset({"add", "sub", "and", "or", "addi"})
-_ARITH_MEM_B_MN = _MEM_PAIR_MN
-
 # The union over both bases; `_mem_pair_sp` enforces which is the natural word
 # for the base actually being scheduled.  A set rather than None so the rule is
 # not eligible for -- and does not annotate -- unrelated instructions.
@@ -806,26 +798,6 @@ def _mem_pair_sp(a: Instruction, b: Instruction) -> None:
     for insn in (a, b):
         if not insn.uimm_fits(10, shift):
             raise NotPair("big-imm")
-
-
-def _arith_mem_small_offset_ok(insn: Instruction) -> bool:
-    """B-slot: the offset must be ZERO — the rows draw no `immb` field."""
-    return insn.imm == 0
-
-
-@a_is_rsd
-@must_not_chain
-@uses_low_regs_here("a.rd", "a.rs1")  # deliberately relax a.rs2 (shared with imm5)
-def _arith_mem_pair(a: Instruction, b: Instruction) -> None:
-    """RSD arith (x0..x15, small imm) paired with small-offset mem op."""
-    if a.mnemonic == "addi":
-        # imma[4:0], and `addi` declares no extension: a 5-bit signed field,
-        # excluding 0 (encode a zero immediate as a move from x0 instead).
-        if a.imm is None or a.imm == 0 or not (-16 <= a.imm <= 15):
-            raise NotPair("A-big-imm")
-    if not _arith_mem_small_offset_ok(b):
-        raise NotPair("B-big-imm")
-    return None
 
 
 _DUAL_TUPLES: dict = {
@@ -1483,13 +1455,6 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_MEM_PAIR_MN,
         b_mnemonic_set=_MEM_PAIR_MN,
         check=_mem_pair,
-    ),
-    PairingRule(
-        name="arith-mem-pair",
-        a_mnemonic_set=_ARITH_MEM_A_MN,
-        b_mnemonic_set=_ARITH_MEM_B_MN,
-        a_prerequisites=["is_rsd"],
-        check=_arith_mem_pair,
     ),
     PairingRule(
         name="dual-arith2-pair",

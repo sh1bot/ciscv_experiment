@@ -112,39 +112,6 @@ class TestJumpSlotPairs:
         assert j.b_slot_ok is True and ret.b_slot_ok is True
 
 
-class TestArithMemImmediate:
-    """arith-mem-pair A-slot addi immediate must be in [-16, 15], excluding 0.
-
-    The row draws imma[4:0] and `addi` declares no extension, so the field is
-    five bits.  It accepted [-64, 64] until the width audit — two bits
-    taken from selector bits that were never free."""
-
-    def _pair(self, imm):
-        a = make_addi(10, 10, imm)   # addi a0, a0, imm — RSD, x10 in window
-        b = make_lw(11, 12, 0)       # lw a1, 0(a2) — independent, zero offset
-        return can_pair(a, b)
-
-    def test_upper_bound_15_pairs(self):
-        assert self._pair(15) is None
-
-    def test_lower_bound_neg16_pairs(self):
-        assert self._pair(-16) is None
-
-    def test_zero_rejected(self):
-        assert self._pair(0) is not None
-
-    def test_above_range_rejected(self):
-        assert self._pair(16) is not None
-
-    def test_below_range_rejected(self):
-        assert self._pair(-17) is not None
-
-    def test_unresolved_immediate_rejected(self):
-        a = make_addi(10, 10, None)
-        a.imm_expr = "%lo(sym)"
-        b = make_lw(11, 12, 0)
-        assert can_pair(a, b) is not None
-
 
 def make_tail():
     return make_insn("tail", branch_target="foo")
