@@ -601,3 +601,53 @@ One structural alternative, unmeasured: a SAME-BASE variant (`rs1a == rs1b`)
 frees five bits for the offsets.  It splits the corpora hard -- 58% of musl's
 copies share a base against 5% of sqlite's -- so it would serve struct-copy
 code and do nothing for sqlite.
+
+## alu-alu-chain resized to 8 ops per axis (2026-08)
+
+The frame was the roster's worst value: 256 codepoints for 2502 pairs on
+musl-rv32 + sqlite-rv64, 9.8 per codepoint.  Measured alternatives, block
+sizes exact (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256):
+
+| ops/axis | block | frame pairs | total vs 16x16 | pairs/cp |
+|--:|--:|--:|--:|--:|
+| **8** | **64** | 2009 | **-461** | **31.9** |
+| 11 | 128 | ~2330 | -172 | 18.2 |
+| 16 | 256 | 2502 | — | 9.8 |
+
+As the marginal cost of KEEPING space: 128 -> 256 buys 172 pairs (1.3/cp),
+64 -> 128 buys 289 (4.5/cp).  Both under the portfolio floor near 6, so the
+block is 64 and the frame becomes one of the better earners.
+
+**The axes are decoupled, and that is worth ~8%.**  The best SYMMETRIC set of
+the same weight (exhaustive search) reaches 1691 census pairs against 1830
+for the asymmetric pair — because a symmetric set is forced to carry `sltu`
+(which only ever produces) and `or` (which only ever consumes), wasting a
+slot on each axis.  A produces values, B consumes them.
+
+**What `sltu` feeds.**  Nearly every occurrence is spelled `snez`
+(`sltu rd, x0, rs`) or `seqz` (`sltiu rd, rs, 1`), so its one bit is a
+PREDICATE, and it is spent three ways: 52% into `add`/`addi` (branchless
+conditional increment, `count += (x < y)`), 31% into `or`/`and`/`xor`
+(combining predicates), 14% into `slli` (shifting the flag into a bit
+position).  A comparison is never a consumer, which is exactly why the
+asymmetry pays.
+
+### Re-optimising on uniquely-owned value changes nothing
+
+Attributed hits overstate a frame's worth: some of its pairs would be
+re-formed by other frames, or its instructions would find other partners.
+Two measurements separate the notions.
+
+* **Exact-pair uniqueness: 100%.**  Every pair alu-alu-chain wins is a shape
+  no other rule accepts — the rule set is disjoint at the pair level.
+* **Schedule-level uniqueness: 58%.**  Deleting the frame outright costs
+  1455 packets, not 2502, because the freed instructions re-pair with
+  DIFFERENT neighbours.
+
+Re-running the op-set search weighted by that recoverability (a pair counts
+only insofar as its instructions end up solo once the frame is gone) returns
+**exactly the same A and B sets**, covering 73% of unique value just as they
+covered 73% of attributed pairs.  The recoverable mass is spread
+proportionally across the op mix rather than concentrated in particular ops,
+so the shipped set is not an artifact of counting attributed hits.
+
