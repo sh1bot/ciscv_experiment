@@ -300,6 +300,14 @@ doc:
 
       Further ordering and rounding policies belong here as they are decided.
 
+      **Decoder alignment is an OBJECTIVE, not a coincidence** (A1.10):
+      `encoding_assign.py` orders frames by A-slot RISC-V format so leading
+      identifier bits track real `opcode[6:2]`.  Hold it while it can be held;
+      if a future assignment cannot satisfy it AND fit the namespace, fitting
+      wins and the alignment degrades to a nicety for that frame — say so
+      explicitly at the point where it is given up, rather than quietly
+      reordering.
+
   - reserved:
       - where: rd field
         regs: [x0, x2]
@@ -307,7 +315,14 @@ doc:
         note: >-
           When rd names a register it may not be x0 or x2 (sp); those two bit
           patterns are sentinels selecting the prologue / epilogue / jump
-          marker formats (drawn "0 0 0 1 0").
+          marker formats (drawn "0 0 0 1 0").  DECIDED (A1.11): this is
+          enforced, not merely declared -- rules.py rejects rd in {x0, x2}
+          wherever a row draws a register there.  The payoff is hosting: a
+          sentinel-selected frame can ride inside another rd-bearing frame's
+          opcode word, in the slice that frame's rd cannot reach, at zero
+          opcode cost.  A frame may host only if its rd column holds a
+          REGISTER in every row -- a frame whose rd carries immb[4:0] has no
+          unreachable slice to lend.
     note: >-
       No general register block is reserved at present. Earlier drafts held out
       a contiguous block — the high registers x16..x31, or the low x0..x3 — to
@@ -318,7 +333,14 @@ doc:
   - md: |
       # Chain rules
 
-       * One defined output register, plus x31 becomes undefined.
+       * One defined output register, plus the chain temporary becomes
+         undefined.  The temporary is a FIXED architectural register, not
+         "any dead register" (A1.4): the compiler must know which register a
+         packet may corrupt, and an exception taken mid-packet has to put the
+         intermediate somewhere it can be saved and restored.  Which register
+         is not yet settled -- x31 is the default, but RVE (the 16-register
+         variant) has no x31 and would need another, x7 being the candidate.
+         An implementation is free not to corrupt anything.
        * First instruction produces result for use by second instruction
        * Generally second operation produces result, but second op may have no output
          (eg., store, branch) meaning result comes from first, or there's no result at all.

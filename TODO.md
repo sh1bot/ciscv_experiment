@@ -14,32 +14,47 @@ The planning documents name `encoding.yaml` as the source of truth (see
 
 ## A1 — open design decisions
 
-4. **Is the chain temp architecturally x31, or any dead register?**  The yaml
-   says "x31 becomes undefined"; `yaml_migration.md` says `tmp` is the
-   compiler's own register, required dead.  These differ for code using x31.
+4. **Which register is the chain temp?**  DECIDED in part: it is a FIXED
+   architectural register, not "any dead register" — the compiler must know
+   which register a packet may corrupt, and an exception taken mid-packet
+   needs somewhere to save the intermediate from.  An implementation that
+   corrupts nothing is conforming.  Still open: WHICH register.  x31 is the
+   default, but RVE (16 registers) has no x31 and needs another — x7 is the
+   candidate.  Settle before any ABI claim; `yaml_migration.md`'s
+   "compiler's own register, required dead" wording is now superseded.
 5. **Wide `li`.**  Over 61033 `li` in five corpora: 68.8% fit 5 bits, 74.1%
    fit 6, 90.1% fit 8, 97.4% fit 10.  Current widths: 6 bits in
    `dual-indep-pair`, 8 in `chain-li-branch`, 10 in `li-czero-pair` and
    `mvload-jump-pair`.  The remaining question is whether the 8-10-bit tail
    deserves a dedicated frame or a lui-split, or is an accepted loss.
-8. **Frame priority.**  `encoding_budget.py` and `encoding_verify.py` both
-   `break` at the first accepting rule, so `RULES` list order determines every
-   number they print.  Make it an explicit yaml property, or state in the docs
-   that attribution order is significant and defined in `rules.py`.
+8. **Frame priority.**  DECIDED: default to YAML ORDER, but make it
+   experimentally flexible — the scheduler should let a rule be promoted or
+   demoted so the effect on attribution and totals can be observed.  Today
+   `encoding_budget.py` and `encoding_verify.py` both `break` at the first
+   accepting rule, so `RULES` list order silently determines every number
+   they print (this is why the arith-mem kill measured against a shifting
+   attribution snapshot).  To build: derive rule order from the yaml, and add
+   a priority override (CLI and/or API) that reorders without editing either
+   source.
 9. **Pseudo-op canonicalization placement** (`li`/`mv`/`addi4spn`, P1–P5 in
    `yaml_migration.md`, explicitly TBD).  Defined today in three places:
    predicates in `isa/instruction.py`, `encoding_budget.subform()`, and the
    yaml's op vocabulary.  The yaml's op names are meaningless without them.
-10. **Hardware-decoder opcode alignment** — `encoding_assign.py` orders frames
-    by A-slot RISC-V format so leading identifier bits track real `opcode[6:2]`.
-    Stated objective, or incidental nice-to-have?  (The yaml's "Enumeration
-    policy" note now records it as intent.)
-11. **`rd = x0/x2` sentinel — enforce it?**  Declared `status: active` in the
-    yaml, but `rules.py` never checks it.  If enforced, `arith-jump`/
-    `prologue`/`epilogue` could ride inside any rd-bearing frame's opcode word
-    in the slice its `rd` cannot reach — roughly 68 codepoints at zero opcode
-    cost.  Caveat: the host's `rd` column must hold a register in every row,
-    so frames whose `rd` carries `immb[4:0]` cannot host.
+10. **Hardware-decoder opcode alignment** — DECIDED: an OBJECTIVE, held
+    until it cannot be achieved, at which point it degrades to a nicety for
+    the frame that broke it — and that concession is stated explicitly at the
+    point it is made, never by quiet reordering.  Recorded in the yaml's
+    "Enumeration policy" note.
+11. **`rd = x0/x2` sentinel** — DECIDED: ENFORCE.  `rules.py` must reject
+    `rd` in {x0, x2} wherever a row draws a register there, which makes the
+    sentinel real and unlocks hosting: a sentinel-selected frame
+    (`arith-jump`/`prologue`/`epilogue`) can ride inside another rd-bearing
+    frame's opcode word in the slice that frame's `rd` cannot reach —
+    roughly 68 codepoints at zero opcode cost.  A frame may host only if its
+    `rd` column holds a register in EVERY row; frames whose `rd` carries
+    `immb[4:0]` have no unreachable slice to lend.  To build: the rd check in
+    rules.py, host eligibility in `encoding_assign.py`, and a remeasure (the
+    check can only cost pairs; the codepoints are the return).
 
 ## A5 — design constraints that live only in tooling or scheduler code
 
