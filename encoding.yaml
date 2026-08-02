@@ -904,9 +904,10 @@ doc:
       templates:
         - ["load    rda, k*imm(sp)", "load    rdb, k*imm+k(sp)"]
         - ["store   rs2a, k*imm(sp)", "store   rs2b, k*imm+k(sp)"]
-      ops:
-        - {a: [{op: lx, imm: {bits: 10, signed: false}}], b: [{op: lx, imm: {bits: 10, signed: false}}]}
-        - {a: [{op: sx, imm: {bits: 10, signed: false}}], b: [{op: sx, imm: {bits: 10, signed: false}}]}
+      ops:            # same_op: the diagonal, as in mem-base-pair
+        - a: [{op: lx, imm: &sp10 {bits: 10, signed: false}}, {op: sx, imm: *sp10}]
+          b: [{op: lx, imm: *sp10}, {op: sx, imm: *sp10}]
+          same_op: true
       # A8.2 probe hints: twin sp-based accesses one natural word apart.
       # Deltas are the rv32 word — the default base the conformance run uses
       # before any input settles XLEN; under an rv64-set run these hints
@@ -935,15 +936,22 @@ doc:
       # sixth bit is bought once per cluster (2 codepoints each, 16 total).
       # Census: base-offset fit 87.8% -> 94.1% of 10326; the earlier narrowing
       # to 5 was set from censored data.
+      # `same_op` states the diagonal in the DATA: A and B must be the same
+      # opcode, so this is 8 combinations, not 8x8.  Enumerating eight
+      # singleton clusters priced the same but said the constraint only by how
+      # the clusters were split -- a reader (or a tidy-up) could not tell it
+      # from a free cross product.  The templates' generic `load`/`store`
+      # placeholders are exactly that trap, which is why it is declared here.
       ops:
-        - {a: [{op: lbu, imm: &mp6 {bits: 6, signed: false}}], b: [{op: lbu, imm: *mp6}]}
-        - {a: [{op: lhu, imm: *mp6}], b: [{op: lhu, imm: *mp6}]}
-        - {a: [{op: lw, imm: *mp6}], b: [{op: lw, imm: *mp6}]}
-        - {a: [{op: ld, imm: *mp6}], b: [{op: ld, imm: *mp6}]}
-        - {a: [{op: sb, imm: *mp6}], b: [{op: sb, imm: *mp6}]}
-        - {a: [{op: sh, imm: *mp6}], b: [{op: sh, imm: *mp6}]}
-        - {a: [{op: sw, imm: *mp6}], b: [{op: sw, imm: *mp6}]}
-        - {a: [{op: sd, imm: *mp6}], b: [{op: sd, imm: *mp6}]}
+        - a: [{op: lbu, imm: &mp6 {bits: 6, signed: false}},
+              {op: lhu, imm: *mp6}, {op: lw, imm: *mp6}, {op: ld, imm: *mp6},
+              {op: sb, imm: *mp6}, {op: sh, imm: *mp6}, {op: sw, imm: *mp6},
+              {op: sd, imm: *mp6}]
+          b: [{op: lbu, imm: *mp6},
+              {op: lhu, imm: *mp6}, {op: lw, imm: *mp6}, {op: ld, imm: *mp6},
+              {op: sb, imm: *mp6}, {op: sh, imm: *mp6}, {op: sw, imm: *mp6},
+              {op: sd, imm: *mp6}]
+          same_op: true
       # Conformance probe hints (A8.2): the standard probe shapes cannot
       # construct twin same-base accesses one width apart, so the widths
       # above were unverifiable without these.  lockstep: scanning one offset

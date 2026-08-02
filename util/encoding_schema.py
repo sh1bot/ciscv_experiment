@@ -170,6 +170,17 @@ def validate(spec):
             cells = row["c"] if isinstance(row, dict) else row
             _check_row(frame, cells, len(cols), ops_in_templates, errs)
         for cluster in frame.get("ops") or []:
+            if "same_op" in cluster:
+                if not isinstance(cluster["same_op"], bool):
+                    errs.append(f"{name}: same_op must be a bool")
+                elif cluster["same_op"]:
+                    a = {op_name(x) for x in cluster.get("a") or []}
+                    b = {op_name(y) for y in cluster.get("b") or []}
+                    if a != b:
+                        errs.append(
+                            f"{name}: same_op cluster has different A and B op "
+                            f"sets (only {sorted(a & b)} can ever pair; "
+                            f"A-only {sorted(a - b)}, B-only {sorted(b - a)})")
             for slot in ("a", "b"):
                 for entry in cluster.get(slot) or []:
                     _check_contract(name, entry, errs)

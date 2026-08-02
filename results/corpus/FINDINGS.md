@@ -522,3 +522,43 @@ unchanged, because freeing the registers only bought half a point.
 8.6%/7.7% fewer instructions, pair rate up 0.7-1.0pp, vsRVC flat (107.9->107.7,
 102.7->102.3). Smaller code pairs slightly better and RVC compresses it
 slightly worse; the two nearly cancel.
+
+## §4 candidates REMEASURED (2026-08, post-honesty-pass)
+
+The §4 table above was measured before the width-honesty pass, before
+`index-mem-chain` existed, and against a different attribution order.  Both
+surviving candidates were re-run as scratch rules against the current tree,
+each ALONE (joint runs hide which frame a pair really came from) on
+musl-rv32 + sqlite-rv64.  Baseline 27192 / 40851.
+
+| candidate | musl-rv32 | sqlite-rv64 | net pairs | codepoints | pairs/cp |
+|---|--:|--:|--:|--:|--:|
+| 3 alu -> load via dead temp | +186 | +564 | **+750** | ~+24 | ~31 |
+| 5 mem-copy (load -> store via dead temp) | +313 | +541 | **+854** | 4-16 | 53-213 |
+| both together | +484 | +1093 | +1577 | | |
+
+750 + 854 = 1604 against 1577 measured jointly, so the two overlap by only
+27 pairs — they are effectively independent and can be judged separately.
+
+**Candidate 3 is not what its name says.**  Of its A slots only 2 (musl) and
+16 (sqlite) are `addi`, so this is NOT the foldable `addi t,b,k; ld d,0(t)`
+population `index-mem-chain` deliberately excludes.  It is `add`/`shXadd`
+where the shift does NOT match the access width — indexing a byte array with
+a word-scaled index, struct-array walks, and so on.  So the real proposal is
+"relax `index-mem-chain`'s width matching from the diagonal to the full
+cross product": 4 shifts x 8 memory ops = 32 codepoints against the 8 it
+reserves now, i.e. **+24 codepoints for ~750 pairs (~31/cp)**, comfortably
+above the ~6 portfolio floor.
+
+**Candidate 5 survives intact and is the better buy.**  A load whose value is
+stored straight back out through a dead temporary — a memory copy — is served
+by no current frame, and the fields fit exactly: rbase_a + imma + rbase_b +
+immb = 20 bits, with the temp unencoded.  Widths match 90% (musl) / 71%
+(sqlite) of the time, so the diagonal alone (lbu-sb, lhu-sh, lw-sw, ld-sd, 4
+codepoints) captures most of it; the full 4x4 cross product costs 16 and
+picks up the width-changing copies (`ld` -> `sw` truncation is 113 pairs on
+sqlite alone).  At 4 codepoints this is ~200 pairs/cp — the best return
+measured in this project.
+
+Both fit inside the 106 spare codepoints with room left over.  Neither has
+been drawn into `encoding.yaml`; these are measurements, not decisions.

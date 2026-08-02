@@ -345,12 +345,27 @@ def op_contracts(frame):
     return out
 
 
+def cluster_combos(c):
+    """(opA, opB) combinations one cluster allows.
+
+    Normally the cross product: any A op with any B op.  `same_op: true` makes
+    it the DIAGONAL instead — A and B must be the same opcode, as in
+    mem-base-pair, where a load may only be paired with the same width of load.
+    Enumerating the diagonal as N singleton clusters prices the same, but says
+    the constraint only by how the clusters happen to be split; the flag says
+    it in the data, so it survives anyone tidying the list."""
+    a, b = c.get("a", []), c.get("b", [])
+    if c.get("same_op"):
+        return len({op_name(x) for x in a} & {op_name(y) for y in b})
+    return len(a) * len(b)
+
+
 def opcode_demand(ops):
-    """BASE (opA, opB) combos a frame's ops allow: Σ over clusters of a×b.
+    """BASE (opA, opB) combos a frame's ops allow: Σ over clusters.
     Ignores immediate width — see opcode_codepoints for the ext-aware count."""
     if not ops:
         return None
-    return sum(len(c.get("a", [])) * len(c.get("b", [])) for c in ops)
+    return sum(cluster_combos(c) for c in ops)
 
 
 # Every immediate field name the layout may use. A row naming anything else is
@@ -510,10 +525,20 @@ def opcode_codepoints(frame, grid):
         for c in ops:
             a, b = c.get("a", []), c.get("b", [])
             ext = max([_ext(e, base) for e in list(a) + list(b)] or [0])
-            total += max(len(a), 1) * max(len(b), 1) * (1 << ext)
+            total += max(cluster_combos(c), 1) * (1 << ext)
         return total
-    return sum(_slot_weight(c.get("a", []), base_a)
-               * _slot_weight(c.get("b", []), base_b) for c in ops)
+    total = 0
+    for c in ops:
+        if c.get("same_op"):
+            # Diagonal: one entry per shared opcode, each paying its own ext
+            # once (the same op in both slots is one opcode, not two).
+            by_a = {op_name(x): x for x in c.get("a", [])}
+            total += sum(1 << max(_ext(by_a[n], base_a), _ext(y, base_b))
+                         for y in c.get("b", []) if (n := op_name(y)) in by_a)
+        else:
+            total += (_slot_weight(c.get("a", []), base_a)
+                      * _slot_weight(c.get("b", []), base_b))
+    return total
 
 
 def budget_status(cp, budget):
