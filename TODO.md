@@ -132,6 +132,62 @@ Remaining steps, in leverage order:
    hints in the yaml would close it.
 4. **Regeneration gate** (A2 above).
 
+## A11 — the corpus is shaped by its compiler's cost model (third instance)
+
+Non-unit loop steps are substantially disguised pointer bumps.  Measured over
+four corpora: unit-step counters are memory bases only 5.9% of the time, but
+power-of-two-step counters are 26.1% (a floor — the scan sees one basic
+block), and where a stepped counter IS a base, the step relates to the access
+width 93% of the time (76 sites step == width, 110 step = N x width from
+unrolling).  Compilers strength-reduce to pointer bumps because plain RISC-V
+charges an instruction for indexed addressing; under this encoding
+`shXadd+load` is one packet (`index-chain-mem-pair`) and `inc + bXX` is one
+packet, so element counting costs the same packets and the reduction buys
+nothing.  The non-unit tail is therefore reachable value behind a compiler
+tuning, joining the RVC register-clustering tax and the clang/GCC gap as
+cost-model artefacts in the corpus.  Test: rebuild with LSR/ivopts damped
+(`-mllvm -disable-lsr` / `-fno-ivopts`) and remeasure the step census and
+`index-chain-mem-pair`.
+
+Related measured design input, from the same session: a unit-step
+increment/decrement-and-branch frame (`inc/dec[w] rsd ; bXX rsd, rs2b, L`,
+10-bit packet displacement, rs2b=x0 giving the vs-zero forms free) captures
+~330 scheduled pairs on musl-rv32+sqlite-rv64 with ~100% displacement fit,
+and FOUR compare modes — beq, bne, blt(sum,r), bge(sum,r) — cover 81% of the
+demand in a 16-block at ~16 pairs/cp.  The four unsigned modes add 16% for
+another 16 codepoints (~4/cp, below floor); sum-second signed compares are
+under 3% and never worth encoding.
+
+**Test result (musl-1.2.5 rv32 `-O2` no-C, `-mllvm -disable-lsr`, against the
+matched `musl-norvc-rv32`): the hypothesis holds and the retuning is free.**
+Instructions 118445 vs 118755 (LSR off is 0.26% SMALLER), total pairs 26801
+vs 26913 (flat), but adjacent `inc/dec+bXX` sites rise 345 -> 397, unit-step
+sites 125 -> 185 (+48%), and the unit-step frame's scheduled pairs 99 -> 191
+(+93%).  Power-of-two-step share stays flat (~8%): the migrated mass came out
+of the wide-step tail, i.e. LSR's strength-reduced pointer forms.  Damping
+induction-variable rewriting doubles the unit-step frame's population at no
+size cost.
+
+Follow-on census findings (adjacent sites, musl-rv32 + sqlite-rv64):
+
+* **Do not widen the step set to +/-2,4,8**: it adds only 8-9 points of
+  site coverage (~30 sites/corpus) for a 4x block (16 -> 64, +48 cp),
+  ~1.3 pairs/cp — and the nolsr result says that population is better
+  migrated by tuning than encoded.
+* **Compare mode strongly correlates with step direction**: down-loops are
+  bltu/bgeu-heavy (64% of musl down-sites; pointer-vs-limit, both operand
+  orders), up-loops are beq/bne + bge/bgeu.  Enumerating the 16-block as
+  the best 16 JOINT (direction x mode) cells instead of a 4-mode x 2-dir
+  product raises adjacent-site coverage from ~79% to 98.7% at identical
+  cost — non-product clusters are already expressible in the yaml.
+* **inc vs incw**: on rv64, `addiw` is 42-69% of unit sites.  Signed
+  counters are provably width-equivalent (overflow is UB) and a cost model
+  that prices `incw` as unpairable would migrate them to `addi`; unsigned
+  32-bit counters have defined wrap and are NOT provable in general.
+  Dropping the w forms halves the block; the unprovable residue simply
+  forgoes the pairing (solo `addiw` + branch), losing the optimisation,
+  never correctness.
+
 ## A10 — `addi-branch-pair` schedules only unencodable pairs
 
 Found while measuring the chain-li/addi-branch fold: `_addi_branch_pair`
