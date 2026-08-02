@@ -10,24 +10,37 @@ already past).
 RVC figures are REAL, taken from the `-noalias` disassemblies, not the
 `rvc_eligible` estimator (which is a ceiling — see CLAUDE.md).  Every pair
 counted is encodable as drawn: widths declared and enforced, codepoints paid
-(`encoding_assign` reports zero accounting complaints at 1018/1024 reserved).
-The one remaining optimism is branch/jump displacements, which are unresolved
-labels in the corpus and are not range-checked.
+(`encoding_assign` reports zero accounting complaints at 978/1024 reserved,
+46 spare), and `encoding_verify` puts every checkable frame at or near 100%
+encodable.  The one remaining optimism is branch/jump displacements, which
+are unresolved labels in the corpus and are not range-checked (plus the
+declared `measures_also` fold of rv64 `addiw` counters into
+`inc-branch-pair`).
 
 ```
 corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------
-testcase0          21876    4117    17759     81.2%     81.6%    99.4%   102.5%        -99
-godot              90172   13226    76946     85.3%     76.3%   111.8%    61.9%      +8142
-musl-rv32         119026   27124    91902     77.2%     74.9%   103.1%    90.8%      +2747
-musl-rv64         102040   21595    80445     78.8%     72.7%   108.4%    77.6%      +6221
-sqlite-rv32       192768   43740   149028     77.3%     72.1%   107.2%    81.3%     +10030
-sqlite-rv64       189677   40410   149267     78.7%     72.1%   109.2%    76.3%     +12545
-cpp-rv32          420866   88948   331918     78.9%     71.1%   110.9%    73.2%     +32505
-cpp-rv64          411687   83701   327986     79.7%     71.4%   111.7%    71.0%     +34237
+testcase0          21876    4105    17771     81.2%     81.6%    99.5%   102.2%        -87
+godot              90172   13243    76929     85.3%     76.3%   111.8%    62.0%      +8125
+musl-rv32         119026   27193    91833     77.2%     74.9%   103.0%    91.0%      +2678
+musl-rv64         102040   21641    80399     78.8%     72.7%   108.3%    77.8%      +6175
+sqlite-rv32       192768   44013   148755     77.2%     72.1%   107.0%    81.9%      +9757
+sqlite-rv64       189677   40852   148825     78.5%     72.1%   108.9%    77.1%     +12103
+cpp-rv32          420866   88706   332160     78.9%     71.1%   110.9%    73.0%     +32747
+cpp-rv64          411687   83454   328233     79.7%     71.4%   111.7%    70.8%     +34484
 ------------------------------------------------------------------------------------------
-TOTAL to parity                                                                    +106328
+TOTAL to parity                                                                    +105982
 ```
+
+This table matches the pre-audit one to within 0.1 points per corpus and
++346 total pairs — but 40 fewer codepoints are spent (978 against 1018),
+and everything dishonest inside the old numbers has been replaced with
+verified range: the unfunded g/h widenings are gone, `arith-mem-pair` and
+the phantom `addi-branch-pair` are gone (the latter's rule scheduled only
+register-compares its row could not encode), and the reclaimed codepoints
+funded `inc-branch-pair`, the mem-pair/arith-jump sixth bits, and
+`chain-li-branch` at eight.  Same size, honest books, 46 codepoints in
+hand.
 
 testcase0 (Rust/C rv32) is past parity; everything else is behind it, C++ the
 furthest.  GCC-built twins score 1.3–6 points worse than clang's — see
