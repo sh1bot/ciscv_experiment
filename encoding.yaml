@@ -514,15 +514,40 @@ doc:
            are unresolved labels in the corpus, so their fit is unmeasured.
 
   - frame:
-      name: addi-branch-pair
-      budget: 32
+      name: inc-branch-pair
+      budget: 16
       level: 2
       templates:
-        - ["addi/addiw rsda, imma", "beqz/bnez rsda, zero, 4*immb"]
+        - ["inc/dec  rsda", "bXX     rsda, rs2b, 4*immb"]
       ops:
-        - {a: [*addi_6s, *addiw_6s], b: *branches}
+        - {a: [inc], b: [beq, bne, blt, bltu, bltu_r, bge, bgeu, bgeu_r]}
+        - {a: [dec], b: [beq, bne, blt, bltu, bltu_r, bge_r, bgeu, bgeu_r]}
+      # Mnemonics the scheduler may MATCH here beyond what the frame encodes
+      # (measurement optimism, declared rather than left to drift).
+      measures_also: {a: [addiw]}
       rows:
-        - ["h", "immb[9:5]", "g", "imma[4:0]", "rsda", "fn3", "immb[4:0]"]
+        - ["h", "immb[9:5]", "g", "rs2b", "rsda", "fn3", "immb[4:0]"]
+      notes: |
+         * The step is +/-1, implied by the opcode (`inc`/`dec` =
+           `addi rsda, rsda, +/-1`): 88% of adjacent counter-branch sites
+           compare against a REGISTER, so the immediate column goes to
+           `rs2b` instead of a step field; `rs2b = x0` gives every vs-zero
+           form for free.  Full XLEN width only -- there are no `w` forms.
+         * `_r` marks the operand-reversed spelling (the counter in rs2).
+           The two clusters are the best sixteen JOINT direction x mode
+           cells of the adjacent-site census, not a mode product: down-loops
+           are bltu/bgeu-heavy (pointer-vs-limit, both operand orders),
+           up-loops beq/bne with bge/bgeu sum-first.  Joint enumeration
+           covers 98.7% of adjacent sites against ~79% for the best
+           4-mode x 2-direction product at the same sixteen entries.
+         * The scheduler also matches `addiw rsd, rsd, +/-1` and bills it
+           here.  That is optimistic for unsigned int counters on rv64
+           (defined wrap is not width-equivalent) in the same spirit as
+           RVC-eligibility; signed counters are provably width-equivalent
+           (overflow is UB), so a packet-targeted compiler emits `addi`.
+         * `immb` is the branch displacement in packets.  Displacements are
+           unresolved labels in the corpus, so pairwise fit is unmeasured;
+           the label-distance study puts 10-bit fit near 100%.
 
   - md: |
       # Scaled-index addressing

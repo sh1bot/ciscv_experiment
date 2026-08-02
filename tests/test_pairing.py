@@ -1171,9 +1171,10 @@ class TestChainLiBranch:
         assert _rule_reason("chain-li-branch", a, b) is not None
 
 
-class TestAddiBranchPair:
-    """A = RSD addi/addiw (in-place counter); B = comparison branch; rd may
-    stay alive (loop-counter idiom)."""
+class TestIncBranchPair:
+    """A = inc/dec (addi rsd, rsd, +/-1); B = comparison branch reading the
+    counter; rd may stay alive (loop-counter idiom).  The allowed branch
+    modes depend on step direction — the frame enumerates joint cells."""
 
     def test_basic_pairs(self):
         a = make_insn("addi", rd=10, rs1=10, imm=1)       # addi a0, a0, 1
@@ -1190,12 +1191,36 @@ class TestAddiBranchPair:
         """rsda is a full 5-bit column in this frame's row."""
         a = make_insn("addi", rd=16, rs1=16, imm=1)
         b = make_insn("blt", rs1=16, rs2=11, branch_target="L")
-        assert _rule_reason("addi-branch-pair", a, b) is None
+        assert _rule_reason("inc-branch-pair", a, b) is None
 
-    def test_immediate_over_8bit_no_pair(self):
-        a = make_insn("addi", rd=10, rs1=10, imm=200)
+    def test_non_unit_step_no_pair(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=4)
         b = make_insn("blt", rs1=10, rs2=11, branch_target="L")
-        assert _rule_reason("addi-branch-pair", a, b) is not None
+        assert _rule_reason("inc-branch-pair", a, b) is not None
+
+    def test_addiw_folds_into_inc(self):
+        """addiw sites are matched and billed as the full-width op."""
+        a = make_insn("addiw", rd=10, rs1=10, imm=-1)
+        b = make_insn("bne", rs1=10, rs2=11, branch_target="L")
+        assert _rule_reason("inc-branch-pair", a, b) is None
+
+    def test_zero_compare_alias_pairs(self):
+        """beqz is beq with rs2b = x0 — free in the row."""
+        a = make_insn("addi", rd=10, rs1=10, imm=-1)
+        b = make_insn("bnez", rs1=10, rs2=0, branch_target="L")
+        assert _rule_reason("inc-branch-pair", a, b) is None
+
+    def test_direction_gates_mode(self):
+        """bge sum-first is an up-loop cell; the down cluster carries the
+        reversed spelling instead."""
+        up = make_insn("addi", rd=10, rs1=10, imm=1)
+        down = make_insn("addi", rd=10, rs1=10, imm=-1)
+        bge_sf = make_insn("bge", rs1=10, rs2=11, branch_target="L")
+        bge_ss = make_insn("bge", rs1=11, rs2=10, branch_target="L")
+        assert _rule_reason("inc-branch-pair", up, bge_sf) is None
+        assert _rule_reason("inc-branch-pair", up, bge_ss) is not None
+        assert _rule_reason("inc-branch-pair", down, bge_sf) is not None
+        assert _rule_reason("inc-branch-pair", down, bge_ss) is None
 
 
 class TestChainBitTestBranch:

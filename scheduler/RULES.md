@@ -704,16 +704,25 @@ blt  a0, a1, .L     ; branch doesn't use t0 → "B does not use A's result"
 
 ---
 
-### 3.13 `addi-branch-pair`
+### 3.13 `inc-branch-pair`
 
-The loop-counter / pointer-stride idiom: bump a register in place, then a
+The loop-counter idiom: bump a register in place by exactly one, then a
 comparison branch reads it. Unlike `chain-li-branch`, the register is *not*
-required to be dead (a loop counter usually lives on).
+required to be dead (a loop counter usually lives on). The step is implied by
+the opcode (`inc`/`dec`), so the row spends no immediate column on it and
+encodes the compare register instead; `rs2b = x0` gives the vs-zero forms.
 
 * **A mnemonics:** `{addi, addiw}`; **A prerequisite:** `["is_rsd"]`.
-* **B mnemonics:** the comparison branches `{beq, bne, blt, bge, bltu, bgeu}`.
-* **`check` (`_addi_branch_pair`):** `a` is RSD; `a.rd` in `x0`–`x15`; immediate
-  fits **8-bit signed**; `b` uses `a.rd` as `rs1` or `rs2`.
+  `addiw` is matched and billed as the full-width op — optimistic for
+  unsigned rv64 counters, provable for signed (see the frame note in
+  `encoding.yaml`).
+* **B mnemonics:** the comparison branches and their zero-compare aliases
+  `{beq, bne, blt, bge, bltu, bgeu, beqz, bnez, bltz, bgez, blez}`.
+* **`check` (`_inc_branch_pair`):** `a` is RSD with immediate exactly ±1;
+  `b` reads `a.rd`; the (branch, operand-position) mode must be in the
+  direction's cluster — the frame enumerates joint direction×mode cells
+  (`_INC_MODES` / `_DEC_MODES`), not a mode product. `bgtz` (counter as
+  second operand of `blt`) is in neither cluster.
 
 **Matches**
 
@@ -731,8 +740,13 @@ blt  a0, a2, .L
 ```
 
 ```asm
-addi a6, a6, 1      ; a6 = x16, outside x0..x15
-blt  a6, a7, .L
+addi a0, a0, 4      ; step is not ±1 → "A-not-unit-step"
+blt  a0, a1, .L
+```
+
+```asm
+addi a0, a0, 1      ; up-loop, but bge reads the counter second —
+bge  a1, a0, .L     ; that cell belongs to the down cluster
 ```
 
 ---
@@ -993,7 +1007,7 @@ ret
 | `arith-mem-pair` | RSD arith | load/store | independent | A regs x0–x15; B offset 0..3×w |
 | `dual-*-pair` | tuple op | tuple op | shared inputs | per-family (see §3.11) |
 | `chain-li-branch` | li | cmp-branch | A→B, dead | imm8 signed |
-| `addi-branch-pair` | addi/addiw RSD | cmp-branch | A→B, alive | rd x0–x15; imm8 signed |
+| `inc-branch-pair` | addi/addiw RSD ±1 | cmp-branch | A→B, alive | step ±1; direction-gated modes |
 | `chain-bit-test-branch` | andi/slli/srli | zero-branch | A→B, dead | andi pow2 / shift-expressible |
 | `pre-inc-pair` | RSD addi/sh2add/add | ld/sd/lw/sw/slt | A→B, alive | B mem offset 0 |
 | `prologue-pair` | addi sp (−N) | sw/sd ra | A→B (alloc then save) | sp adj nimm7×16; ra at frame top |

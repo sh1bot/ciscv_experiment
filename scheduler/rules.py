@@ -1022,29 +1022,58 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# addi-branch-pair
+# inc-branch-pair
 # ---------------------------------------------------------------------------
-# Loop-counter / pointer-stride pattern: addi/addiw updates a register in
-# place (RSD form), then a comparison branch uses that register as one of its
-# two operands, after which the register is dead.
+# Loop-counter idiom: bump a register in place by exactly one, then a
+# comparison branch reads it.  The counter usually stays alive (no deadness
+# requirement).  The allowed (branch, operand-position) set depends on the
+# step direction -- see _INC_MODES/_DEC_MODES and the frame in encoding.yaml.
 #
-# A slot: addi/addiw  rd, rd, imm6   (RSD form, signed 6-bit imma)
-# B slot: beq/bne/blt/bge/bltu/bgeu  rd, rs, label
-#      or beq/bne/blt/bge/bltu/bgeu  rs, rd, label
+# A slot: addi/addiw  rd, rd, +/-1   (RSD form; step implied by opcode)
+# B slot: comparison branch with rd as either operand (aliases included)
 
-_ADDI_BRANCH_A_MN = frozenset({"addi", "addiw"})
-_ADDI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
+_INC_BRANCH_A_MN = frozenset({"addi", "addiw"})
+_INC_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu",
+                              "beqz", "bnez", "bltz", "bgez", "blez"})
+
+# Alias spellings the parser leaves on the mnemonic (operands are already
+# normalised into rs1/rs2, with x0 for the zero side).
+_BRANCH_CANON = {"beqz": "beq", "bnez": "bne", "bltz": "blt",
+                 "bgez": "bge", "blez": "bge", "bgtz": "blt"}
+
+# The frame enumerates the best sixteen JOINT direction x mode cells of the
+# adjacent-site census, not a mode product: down-loops are bltu/bgeu-heavy,
+# up-loops beq/bne with bge/bgeu sum-first.  A mode is (canonical branch,
+# position of the counter); eq/ne are operand-symmetric.
+_INC_MODES = frozenset({("beq", "any"), ("bne", "any"),
+                        ("bltu", "first"), ("bltu", "second"),
+                        ("bge", "first"), ("bgeu", "first"),
+                        ("bgeu", "second"), ("blt", "first")})
+_DEC_MODES = frozenset({("beq", "any"), ("bne", "any"),
+                        ("bltu", "first"), ("bltu", "second"),
+                        ("bgeu", "first"), ("bgeu", "second"),
+                        ("bge", "second"), ("blt", "first")})
 
 
-@must_chain
-def _addi_branch_pair(a: Instruction, b: Instruction) -> None:
-    """addi/addiw RSD + comparison branch consuming the result."""
+@must_chain_either
+def _inc_branch_pair(a: Instruction, b: Instruction) -> None:
+    """inc/dec (addi rsd, rsd, +/-1) + comparison branch reading the counter.
+
+    `addiw` is matched and billed as the full-width op: optimistic for
+    unsigned int counters on rv64 (defined wrap), provable for signed ones
+    (overflow is UB) -- see the frame note in encoding.yaml."""
     if not a.is_rsd:
         raise NotPair("A-is-not-rsd")
-    if a.rd not in _RSD_ALU_REGS:
-        raise NotPair("A-big-reg")
-    if a.imm is None or not (-32 <= a.imm <= 31):   # imma[5:0], signed
-        raise NotPair("A-big-imm")
+    if a.imm not in (1, -1):
+        raise NotPair("A-not-unit-step")
+    mn = _BRANCH_CANON.get(b.mnemonic, b.mnemonic)
+    if mn in ("beq", "bne"):
+        mode = (mn, "any")
+    else:
+        mode = (mn, "first" if b.rs1 == a.rd else "second")
+    modes = _INC_MODES if a.imm == 1 else _DEC_MODES
+    if mode not in modes:
+        raise NotPair("mode-not-in-direction-set")
     return None
 
 
@@ -1482,11 +1511,11 @@ RULES: list[PairingRule] = [
         check=_chain_li_branch,
     ),
     PairingRule(
-        name="addi-branch-pair",
-        a_mnemonic_set=_ADDI_BRANCH_A_MN,
-        b_mnemonic_set=_ADDI_BRANCH_B_MN,
+        name="inc-branch-pair",
+        a_mnemonic_set=_INC_BRANCH_A_MN,
+        b_mnemonic_set=_INC_BRANCH_B_MN,
         a_prerequisites=["is_rsd"],
-        check=_addi_branch_pair,
+        check=_inc_branch_pair,
     ),
     PairingRule(
         name="chain-bit-test-branch",

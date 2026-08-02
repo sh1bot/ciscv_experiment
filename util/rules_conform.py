@@ -62,8 +62,11 @@ from util.encoding_render import op_name, op_contracts
 # mnemonic rather than opcodes of their own.
 PSEUDO_BASE = {"li": "addi", "mv": "addi", "addi4spn": "addi",
                "addi_rsd": "addi", "addi_other": "addi",
+               "inc": "addi", "dec": "addi",
                "j": "jal", "j_near": "jal", "ret": "jalr",
-               "beqz": "beq", "bnez": "bne"}
+               "beqz": "beq", "bnez": "bne", "bltz": "blt", "bgez": "bge",
+               "blez": "bge", "bgtz": "blt",
+               "bltu_r": "bltu", "bge_r": "bge", "bgeu_r": "bgeu"}
 
 # Register numbers the probes use. Nothing here may be x0 (rules read x0 as a
 # sentinel) or x2 (sp, which is what the base-class probe is trying to vary).
@@ -199,6 +202,8 @@ def _mk(op, rd, rs1, rs2, imm):
         rs1 = SP
     elif op == "addi_rsd":
         rs1 = rd
+    elif op in ("inc", "dec"):
+        rs1, imm = rd, (1 if op == "inc" else -1)
     elif op == "j":
         rd = 0
     elif op == "ret":
@@ -365,6 +370,10 @@ def main():
             want = frame_slot_ops(frame, slot)
             if symmetric:
                 want = frame_slot_ops(frame, "a") | frame_slot_ops(frame, "b")
+            # `measures_also` declares mnemonics the rule may MATCH beyond
+            # what the frame encodes (measurement optimism, e.g. addiw billed
+            # as full-width inc) — declared in the yaml, honoured here.
+            want |= set((frame.get("measures_also") or {}).get(slot, []))
             got = getattr(rule, attr)
             if not want or got is None:
                 continue
