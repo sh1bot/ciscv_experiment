@@ -6,7 +6,7 @@ over a shared variable and the access width k, e.g.  k*imm,  k*imm+k,  -16*imm,
 16*imm-k,  -k*imma,  4*immb.  When the A and B lines of a pair name the SAME
 variable, the frame has a cross-instruction relation: the two immediates are two
 views of one underlying value (a shared frame size, a ±stride, adjacent memory
-offsets). This is the arithmetic rules.py hard-codes (e.g. mem-pair's
+offsets). This is the arithmetic rules.py hard-codes (e.g. mem-base-pair's
 abs(a.imm-b.imm)==width, prologue's b.imm+width+a.imm==0).
 
 We parse those expressions into a linear form  value = m*var + b  (m and b each

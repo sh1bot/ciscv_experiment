@@ -23,31 +23,31 @@ tool iterates `rules.py`, not the yaml (TODO A6 — re-point it).
 rule                      match pairs  L90  L95  L99 bits95 immA95 immB95
 -------------------------------------------------------------------------
 rsd-alu-pair               6983    84   18   32   59      5      7      7
-chain-alu-pair             3272   174   69   94  142      7      6      5
-load-chain-alu-pair        1474    31   13   16   23      4      5      6
-addi-store-pair             882    14    6    7   11      3      9      0
-store-chain-alu-pair       1541    32   13   16   24      4      6      5
-load-sp-branch              560     8    5    5    6      3      8      0
-load-base-branch           3768    11    5    6    7      3      5      0
-deref-chain-load-pair       331     8    3    4    6      2      5      0
-base-chain-load-pair        642     8    2    3    6      2      0      7
-mem-pair-sp               14728     2    2    2    2      1      9      9
-mem-pair                  15841     8    3    4    6      2      5      5
+alu-alu-chain             3272   174   69   94  142      7      6      5
+load-alu-chain        1474    31   13   16   23      4      5      6
+addi-store-chain             882    14    6    7   11      3      9      0
+alu-store-chain       1541    32   13   16   24      4      6      5
+load-sp-branch-pair              560     8    5    5    6      3      8      0
+load-base-branch-pair           3768    11    5    6    7      3      5      0
+deref-load-chain       331     8    3    4    6      2      5      0
+base-load-chain        642     8    2    3    6      2      0      7
+mem-sp-pair               14728     2    2    2    2      1      9      9
+mem-base-pair                  15841     8    3    4    6      2      5      5
 arith-mem-pair              182    23   14   17   22      5      5      0
-dual-arith2-pair             26     3    2    2    3      1      0      0
-post-inc-addi-pair         2033     4    2    2    3      1      4      9
-dual-indep-pair           11883    11    4    5    7      3      7      5
-chain-li-branch            1692     6    4    5    6      3      7      0
+macro-op-pair             26     3    2    2    3      1      0      0
+post-inc-pair         2033     4    2    2    3      1      4      9
+indep-pair           11883    11    4    5    7      3      7      5
+li-branch-chain            1692     6    4    5    6      3      7      0
 addi-branch-pair            377    12    8    9   12      4      6      0
-chain-bit-test-branch       995     6    2    3    5      2      7      0
+bit-test-branch-chain       995     6    2    3    5      2      7      0
 prologue-pair              1883     2    2    2    2      1     10      7
 epilogue-pair              1997     2    1    1    2      0     10      0
-czero-select-pair          1107     2    2    2    2      1      0      0
-li-czero-pair               369     2    2    2    2      1      9      0
-index-chain-mem-pair        643     8    4    6    7      3      0      0
+czero-or-chain          1107     2    2    2    2      1      0      0
+li-czero-chain               369     2    2    2    2      1      9      0
+index-mem-chain        643     8    4    6    7      3      0      0
 pre-inc-pair                403     8    6    7    8      3      8      3
 arith-jump-pair            2832    22    5    8   13      3      5      0
-mvload-jump-pair           2826    13    6    7   12      3      4      0
+setup-jump-pair           2826    13    6    7   12      3      4      0
 -------------------------------------------------------------------------
 TOTAL (sum over frames)                203  267  398
 
@@ -58,40 +58,40 @@ Opcode namespace: opcode5(5)+funct3(3) = 256 base leaves (x4 via g,h = 1024 max)
 
 Frames whose immediate demand (p95) exceeds a 5-bit+g+h (7-bit) field
   -> need a dedicated wide/sp-relative immediate variant:
-    addi-store-pair          immA95=9 immB95=0
-    load-sp-branch           immA95=8 immB95=0
-    mem-pair-sp              immA95=9 immB95=9
-    post-inc-addi-pair       immA95=4 immB95=9
+    addi-store-chain          immA95=9 immB95=0
+    load-sp-branch-pair           immA95=8 immB95=0
+    mem-sp-pair              immA95=9 immB95=9
+    post-inc-pair       immA95=4 immB95=9
     prologue-pair            immA95=10 immB95=7
     epilogue-pair            immA95=10 immB95=0
-    li-czero-pair            immA95=9 immB95=0
+    li-czero-chain            immA95=9 immB95=0
     pre-inc-pair             immA95=8 immB95=3
 
 Register-field pressure (share of matches with all regs <= x15):
   <95% -> a 4-bit register cut would cost real coverage
     rsd-alu-pair              68.8%  <- 4-bit cut costly
-    chain-alu-pair            69.5%  <- 4-bit cut costly
-    load-chain-alu-pair       59.1%  <- 4-bit cut costly
-    addi-store-pair           86.7%  <- 4-bit cut costly
-    store-chain-alu-pair      55.3%  <- 4-bit cut costly
-    load-sp-branch            91.8%  <- 4-bit cut costly
-    load-base-branch          61.8%  <- 4-bit cut costly
-    deref-chain-load-pair     66.8%  <- 4-bit cut costly
-    base-chain-load-pair      59.5%  <- 4-bit cut costly
-    mem-pair-sp               52.4%  <- 4-bit cut costly
-    mem-pair                  39.6%  <- 4-bit cut costly
+    alu-alu-chain            69.5%  <- 4-bit cut costly
+    load-alu-chain       59.1%  <- 4-bit cut costly
+    addi-store-chain           86.7%  <- 4-bit cut costly
+    alu-store-chain      55.3%  <- 4-bit cut costly
+    load-sp-branch-pair            91.8%  <- 4-bit cut costly
+    load-base-branch-pair          61.8%  <- 4-bit cut costly
+    deref-load-chain     66.8%  <- 4-bit cut costly
+    base-load-chain      59.5%  <- 4-bit cut costly
+    mem-sp-pair               52.4%  <- 4-bit cut costly
+    mem-base-pair                  39.6%  <- 4-bit cut costly
     arith-mem-pair            56.6%  <- 4-bit cut costly
-    dual-arith2-pair          65.4%  <- 4-bit cut costly
-    post-inc-addi-pair        43.1%  <- 4-bit cut costly
-    dual-indep-pair           28.8%  <- 4-bit cut costly
-    chain-li-branch           84.9%  <- 4-bit cut costly
+    macro-op-pair          65.4%  <- 4-bit cut costly
+    post-inc-pair        43.1%  <- 4-bit cut costly
+    indep-pair           28.8%  <- 4-bit cut costly
+    li-branch-chain           84.9%  <- 4-bit cut costly
     addi-branch-pair          55.7%  <- 4-bit cut costly
-    chain-bit-test-branch     93.2%  <- 4-bit cut costly
+    bit-test-branch-chain     93.2%  <- 4-bit cut costly
     prologue-pair            100.0%
     epilogue-pair            100.0%
-    czero-select-pair         72.9%  <- 4-bit cut costly
-    li-czero-pair             84.3%  <- 4-bit cut costly
-    index-chain-mem-pair      51.5%  <- 4-bit cut costly
+    czero-or-chain         72.9%  <- 4-bit cut costly
+    li-czero-chain             84.3%  <- 4-bit cut costly
+    index-mem-chain      51.5%  <- 4-bit cut costly
     pre-inc-pair              70.7%  <- 4-bit cut costly
     arith-jump-pair           78.2%  <- 4-bit cut costly
-    mvload-jump-pair          56.7%  <- 4-bit cut costly
+    setup-jump-pair          56.7%  <- 4-bit cut costly

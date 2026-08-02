@@ -38,7 +38,7 @@ yaml_migration.md)
   relocation policy.
 
 THE BUG THIS USED TO MISS, kept as a warning: encoding.yaml's
-load-chain-alu-pair draws rows 1-2 with an explicit `rs1a` base field and rows
+load-alu-chain draws rows 1-2 with an explicit `rs1a` base field and rows
 3-4 as the SP-relative variant, while rules.py applied @a_sp_mem
 unconditionally and refused every non-sp base. It cost ~1250 pairs and the tool
 reported the frame clean, because a register class is not an immediate width.
@@ -292,7 +292,7 @@ def hint_builders(frame, slot, mnemonic):
 
     The standard SHAPES place every register differently, so a pair shape they
     cannot construct — twin accesses off the SAME base, an immediate coupled
-    to its partner's (mem-pair's one-width delta), a meaningless zero seed
+    to its partner's (mem-base-pair's one-width delta), a meaningless zero seed
     (post-inc's nonzero stride) — leaves its rule unreachable and its widths
     unverified.  A hint spells out one valid pair explicitly: full operand
     tuples per slot, seed immediates, and `lockstep: true` when the partner
@@ -320,7 +320,7 @@ def hint_builders(frame, slot, mnemonic):
         from functools import partial
         out.append(partial(build, delta=oseed - seed))
         if lock:
-            # The mirrored coupling: a symmetric rule (mem-pair accepts the
+            # The mirrored coupling: a symmetric rule (mem-base-pair accepts the
             # pair in either offset order) reaches its top value only with
             # the partner BELOW the scanned slot.
             out.append(partial(build, delta=seed - oseed))
@@ -376,7 +376,7 @@ def _mem_scale(op):
 def base_class_note(siblings, frame, slot):
     """Compare the frame's declared base-register class for `slot` against what
     the rules accept. `siblings` is every rule the frame maps to — a frame such
-    as `load-sp-branch, load-base-branch` splits the two base classes across
+    as `load-sp-branch-pair, load-base-branch-pair` splits the two base classes across
     two rules, so the comparison is against their union. Returns a complaint
     string, or None."""
     kinds = template_bases(frame, slot)

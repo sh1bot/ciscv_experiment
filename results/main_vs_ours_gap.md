@@ -1,5 +1,10 @@
 # Gap Analysis: main branch vs claude/beautiful-dijkstra-AqK0r
 
+> **Historical record.** Frame/rule names below are as they stood at the
+> time of this comparison and are NOT updated by later renames; see
+> `results/corpus/FRAMES.md` for the current names and the graveyard.
+
+
 Comparison method: run both schedulers on the same assembly file, extract
 (function, instruction_A, instruction_B) pairs from each, match as unordered
 pairs within the same function.  Branch-target collisions within large

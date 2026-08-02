@@ -48,7 +48,7 @@ and it is a property of the ISA, not the flags.
 - **The setup-call frame** (once ranked the biggest opportunity, ~14k pairs)
   was withdrawn on measurement: only 3.5–6.3% of `jal` displacements fit 8
   bits, against 74–83% for `j`.
-- **`index-chain-mem-pair` costed as a 10-codepoint bundle** — wrong; 94% of
+- **`index-mem-chain` costed as a 10-codepoint bundle** — wrong; 94% of
   the mass is `lbu`+`sb`, two codepoints.
 - **`FINDINGS.md` §1** is refuted by its own §5 and should be read that way.
 
@@ -59,12 +59,12 @@ and it is a property of the ISA, not the flags.
 | Claim | Then | Now |
 |---|---|---|
 | A1.2 codepoint overflow | "1036 > 1024, `encoding_assign.py` exits non-zero" | 1004/1024 reserved, 20 spare, exit 0 |
-| A1.3 `mvload-jump-pair` has no frame | spec gap, 936 pairs | frame exists (`encoding.yaml:816`); `rules_conform` reports no unframed rule |
+| A1.3 `setup-jump-pair` has no frame | spec gap, 936 pairs | frame exists (`encoding.yaml:816`); `rules_conform` reports no unframed rule |
 | A1.7 accepted vs encodable | "79.7% of matched pairs carry an immediate that fits" | **99.2%** (82272 of 82946 checkable, over musl-rv64 + sqlite-rv64 + musl-rv32) |
-| A6 comma-joined frame names | three frames | two (`deref-chain-load-pair, base-chain-load-pair` and `load-sp-branch, load-base-branch`) |
-| A6 budget/assign contradiction | budget said "all 21 frames fit", assign disagreed | both now say it fits; the frame sets agree (`dual-mem-shadd-pair` is gone, `mvload-jump-pair` is in both) |
-| B14 dead `mem_pair` branch | unreachable branch in `_dual_shared_ok` | the string no longer occurs in `rules.py` |
-| ACCOUNTING §5 shared anchor | "`chain-alu-pair` and `rsd-alu-pair` share one `*rsd_alu` anchor" | separate anchors since the carve-out (`chain_alu`, `rsd_alu`, `rsd_alu_j`) |
+| A6 comma-joined frame names | three frames | two (`deref-load-chain, base-load-chain` and `load-sp-branch-pair, load-base-branch-pair`) |
+| A6 budget/assign contradiction | budget said "all 21 frames fit", assign disagreed | both now say it fits; the frame sets agree (`dual-mem-shadd-pair` is gone, `setup-jump-pair` is in both) |
+| B14 dead `mem_base_pair` branch | unreachable branch in `_dual_shared_ok` | the string no longer occurs in `rules.py` |
+| ACCOUNTING §5 shared anchor | "`alu-alu-chain` and `rsd-alu-pair` share one `*rsd_alu` anchor" | separate anchors since the carve-out (`alu_chain`, `rsd_alu`, `rsd_alu_j`) |
 
 ### Still true
 
@@ -125,7 +125,7 @@ frame                     matched  checkable   fit
 pre-inc-pair                 1021        650  35.1%   addi_rsd imm=-1506 needs 12b vs 5b field
 post-inc-pair                3152       3152  93.1%   addi_rsd imm=176   needs 6b vs 5b field
 arith-mem-pair                458        344  93.6%   addi_rsd imm=-64   needs 7b vs 5b field
-dual-indep-pair             17071       4339  99.7%   addi_rsd imm=192   needs 9b vs 5b field
+indep-pair             17071       4339  99.7%   addi_rsd imm=192   needs 9b vs 5b field
 TOTAL                      109770      82946  99.2%
 ```
 
@@ -143,7 +143,7 @@ contract and these fields get their width from the ROW layout instead. That is
 the next gap of the same shape as the `@a_sp_mem` one: a constraint the yaml
 states in a form the checker does not read.
 
-### `chain-li-branch` A immediate
+### `li-branch-chain` A immediate
 
 `rules_conform` now reports it accepts −128..127 against a declared 6 bits,
 reconcilable only if `g`/`h` widen it by two — which is TODO A1 item 1, still

@@ -2,7 +2,7 @@
 Tests for scheduler/pairing.py — pairing rules and can_pair().
 
 Covers the full rule set defined in scheduler/rules.py (rsd-alu-pair,
-chain/load/store-chain, the *-branch rules, mem-pair, dual-*-pair,
+chain/load/store-chain, the *-branch rules, mem-base-pair, dual-*-pair,
 pre-inc-pair, epilogue-pair, ...).  encoding.yaml is authoritative for
 op-sets, widths and layout; each rule's scheduler-side semantics are
 documented at its definition in rules.py.
@@ -61,7 +61,7 @@ def make_call():
 
 
 class TestJumpSlotPairs:
-    """arith-jump-pair / mvload-jump-pair: pack a productive instruction with a
+    """arith-jump-pair / setup-jump-pair: pack a productive instruction with a
     trailing unconditional control transfer (ret / jr / j / indirect jalr)."""
 
     def _ret(self):   return make_insn("jalr", rd=0, rs1=1, imm=0)   # ret
@@ -82,15 +82,15 @@ class TestJumpSlotPairs:
 
     def test_mv_then_ret(self):
         a = make_insn("addi", rd=10, rs1=11, imm=0)     # mv a0,a1
-        assert "mvload-jump-pair" in self._rules(a, self._ret())
+        assert "setup-jump-pair" in self._rules(a, self._ret())
 
     def test_small_load_then_jr(self):
         a = make_insn("lw", rd=10, rs1=11, imm=8)       # lw a0,8(a1): 8==2*width
-        assert "mvload-jump-pair" in self._rules(a, self._jr())
+        assert "setup-jump-pair" in self._rules(a, self._jr())
 
     def test_large_offset_load_not_paired(self):
         a = make_insn("lw", rd=10, rs1=11, imm=128)     # 128 > 31*4, the field max
-        assert "mvload-jump-pair" not in self._rules(a, self._ret())
+        assert "setup-jump-pair" not in self._rules(a, self._ret())
 
     def test_call_not_a_jump_slot(self):
         a = make_add(10, 10, 11)
@@ -211,7 +211,7 @@ class TestDualOpPair:
     def test_a_clobbers_shared_source_no_pair(self):
         """A-slot op writing a shared source corrupts B's read.
 
-        min/max chosen so no chain/rsd rule applies — isolates dual-arith2-pair.
+        min/max chosen so no chain/rsd rule applies — isolates macro-op-pair.
         """
         a = make_insn("min", rd=12, rs1=12, rs2=13)   # rd == shared rs1
         b = make_insn("max", rd=11, rs1=12, rs2=13)
@@ -334,10 +334,10 @@ class TestDualOpPair:
         value instead of the pointer, so this is not a post-increment.
 
         It is still a legitimate load-chain pair — B consumes the loaded value —
-        and load-chain-alu-pair claims it now that non-sp bases are allowed."""
+        and load-alu-chain claims it now that non-sp bases are allowed."""
         a = make_insn("ld", rd=12, rs1=12, imm=0)
         b = make_insn("addi", rd=12, rs1=12, imm=8)
-        assert _rule_reason("post-inc-addi-pair", a, b) is not None
+        assert _rule_reason("post-inc-pair", a, b) is not None
 
     def test_lw_addi_width4(self):
         a = make_insn("lw", rd=10, rs1=12, imm=0)
@@ -406,7 +406,7 @@ class TestDualOpPair:
         assert can_pair(a, b) is None
         assert _rule_reason("pre-inc-pair", a, b) is None
 
-    # --- mem_pair ---
+    # --- mem_base_pair ---
 
     def test_mem_pair_ld_ld_pairs(self):
         """Two sp-relative ld, offsets differ by 8 (data width)."""
@@ -435,40 +435,40 @@ class TestDualOpPair:
         assert can_pair(a, b) is None
 
     def test_mem_pair_general_base_pairs(self):
-        """mem_pair works with any shared base register, not just sp."""
+        """mem_base_pair works with any shared base register, not just sp."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("ld", rd=11, rs1=12, imm=8)
         assert can_pair(a, b) is None
 
     def test_mem_pair_different_base_no_pair(self):
-        """mem_pair requires the same base register on both ops."""
+        """mem_base_pair requires the same base register on both ops."""
         a = make_insn("ld", rd=10, rs1=12, imm=0)
         b = make_insn("ld", rd=11, rs1=13, imm=8)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_offset_gap_wrong_no_pair(self):
         """Offsets differ by 24, not the 8-byte ld width.
-        A's offset is nonzero so base-chain-load-pair (zero A offset) is out."""
+        A's offset is nonzero so base-load-chain (zero A offset) is out."""
         a = make_insn("ld", rd=10, rs1=2, imm=8)
         b = make_insn("ld", rd=11, rs1=2, imm=32)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_same_dest_no_pair(self):
-        """A's offset is nonzero so base-chain-load-pair (zero A offset) is out."""
+        """A's offset is nonzero so base-load-chain (zero A offset) is out."""
         a = make_insn("ld", rd=10, rs1=2, imm=8)
         b = make_insn("ld", rd=10, rs1=2, imm=16)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_mixed_widths_no_pair(self):
-        """ld and lw are different mnemonics — not a recognised mem_pair tuple.
-        A's offset is nonzero so base-chain-load-pair (zero A offset) is out."""
+        """ld and lw are different mnemonics — not a recognised mem_base_pair tuple.
+        A's offset is nonzero so base-load-chain (zero A offset) is out."""
         a = make_insn("ld", rd=10, rs1=2, imm=8)
         b = make_insn("lw", rd=11, rs1=2, imm=16)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_sp_8bit_offset_pairs(self):
         """sp-relative natural-word pair with an 8-bit scaled offset pairs --
-        this is mem-pair-sp, whose implicit base pays for a 10-bit field.
+        this is mem-sp-pair, whose implicit base pays for a 10-bit field.
         `ld` is the natural word only on RV64, so the base must be set."""
         import scheduler.rules as _r
         old = _r.XLEN
@@ -806,7 +806,7 @@ class TestNoApplicableRule:
         assert can_pair(lw, add) is not None
 
     def test_alu_store_does_not_pair(self):
-        # sw stores x13, not the add's result x10, so store-chain-alu-pair
+        # sw stores x13, not the add's result x10, so alu-store-chain
         # (which requires the store value to be A's destination) does not apply.
         add = make_add(10, 11, 12)
         sw = make_sw(rs1=2, rs2=13)
@@ -966,13 +966,13 @@ class TestLoadChainAluPair:
         as well as the sp form — and rows 1-2 draw the base register."""
         a = make_ld(10, 12, imm=64)   # base x12, not sp
         b = make_add(10, 10, 11)
-        assert _rule_reason("load-chain-alu-pair", a, b) is None
+        assert _rule_reason("load-alu-chain", a, b) is None
 
     def test_base_reg_offset_over_6bit_no_pair(self):
         # base-register rows: ld@6s scaled by 8 reaches 63*8 = 504
         a = make_ld(10, 12, imm=512)
         b = make_add(10, 10, 11)
-        assert _rule_reason("load-chain-alu-pair", a, b) is not None
+        assert _rule_reason("load-alu-chain", a, b) is not None
 
     def test_offset_over_10bit_no_pair(self):
         # SP rows draw imma[4:0|9:5]: 10 bits scaled by 8 reaches 1023*8 = 8184
@@ -1005,7 +1005,7 @@ class TestStoreChainAluPair:
         as well as the sp form — and rows 1-2 draw the base register."""
         a = make_add(10, 11, 12)
         b = make_sd(rs1=14, rs2=10, imm=64)  # base x14: 64/8 = 8, fits immb[4:0]
-        assert _rule_reason("store-chain-alu-pair", a, b) is None
+        assert _rule_reason("alu-store-chain", a, b) is None
 
     def test_offset_over_10bit_no_pair(self):
         # SP rows draw immb[9:5]/immb[4:0]: 10 bits scaled by 8 reaches 8184
@@ -1155,7 +1155,7 @@ class TestLoadBaseBranch:
         a = make_insn("lw", rd=10, rs1=11, imm=8)
         a.base_from_auipc = True                          # GOT-relative → excluded
         b = make_insn("bnez", rs1=10, branch_target="L")
-        assert _rule_reason("load-base-branch", a, b) is not None
+        assert _rule_reason("load-base-branch-pair", a, b) is not None
 
 
 class TestChainLiBranch:
@@ -1175,13 +1175,13 @@ class TestChainLiBranch:
     def test_immediate_over_8bit_no_pair(self):
         a = make_insn("addi", rd=10, rs1=0, imm=200)      # 200 > int8 max 127
         b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
-        assert _rule_reason("chain-li-branch", a, b) is not None
+        assert _rule_reason("li-branch-chain", a, b) is not None
 
     def test_value_escapes_no_pair(self):
         a = make_insn("addi", rd=10, rs1=0, imm=5)
         b = make_insn("beq", rs1=10, rs2=11, branch_target="L")
         b.live_out = frozenset({10})                      # rtmp still live after B
-        assert _rule_reason("chain-li-branch", a, b) is not None
+        assert _rule_reason("li-branch-chain", a, b) is not None
 
 
 class TestIncBranchPair:
@@ -1252,12 +1252,12 @@ class TestChainBitTestBranch:
     def test_andi_non_pow2_no_pair(self):
         a = make_insn("andi", rd=10, rs1=10, imm=6)       # 6 not pow2/shift-expressible
         b = make_insn("bnez", rs1=10, branch_target="L")
-        assert _rule_reason("chain-bit-test-branch", a, b) is not None
+        assert _rule_reason("bit-test-branch-chain", a, b) is not None
 
     def test_beq_requires_zero_rs2_no_pair(self):
         a = make_insn("andi", rd=10, rs1=10, imm=8)
         b = make_insn("beq", rs1=10, rs2=11, branch_target="L")  # not a zero-test
-        assert _rule_reason("chain-bit-test-branch", a, b) is not None
+        assert _rule_reason("bit-test-branch-chain", a, b) is not None
 
 
 class TestProloguePair:

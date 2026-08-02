@@ -38,8 +38,8 @@ and everything dishonest inside the old numbers has been replaced with
 verified range: the unfunded g/h widenings are gone, `arith-mem-pair` and
 the phantom `addi-branch-pair` are gone (the latter's rule scheduled only
 register-compares its row could not encode), and the reclaimed codepoints
-funded `inc-branch-pair`, the mem-pair/arith-jump sixth bits, and
-`chain-li-branch` at eight.  Same size, honest books, 46 codepoints in
+funded `inc-branch-pair`, the mem-base-pair/arith-jump sixth bits, and
+`li-branch-chain` at eight.  Same size, honest books, 46 codepoints in
 hand.
 
 testcase0 (Rust/C rv32) is past parity; everything else is behind it, C++ the
@@ -105,7 +105,7 @@ needs displacements computed from an actual packet layout, a whole-file
 analysis the rule interface cannot express.  It is the largest known gap
 between the reported pair count and an encodable one.
 
-## Why dual-arith2-pair is kept at ~4 pairs per codepoint
+## Why macro-op-pair is kept at ~4 pairs per codepoint
 
 Pairs are not what it is for.  Every one of its clusters is two halves of ONE
 computation over the same operands — mul low/high, div quotient/remainder,
@@ -131,7 +131,7 @@ not the frame.  Do not cut it on pairing-rate evidence.
   mid-size blocks).
 - `IMMEDIATES.md` — the per-frame immediate width study (achievable vs
   needed).  HISTORICAL: its table predates the width-honesty pass and the
-  mem-pair sp/base split; regenerate with `util/achievable.py` /
+  mem-base-pair sp/base split; regenerate with `util/achievable.py` /
   `util/needed.py` before relying on a number.
 - `FINDINGS.md` — subagent review findings; §5 refutes §1, read it that way.
 - `scores.txt`, `baseline.txt`, `rule-hits*.txt`, `scheduler-runs.txt` — raw

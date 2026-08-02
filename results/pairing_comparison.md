@@ -1,5 +1,10 @@
 # Pairing Rule Comparison: main vs claude/beautiful-dijkstra-AqK0r
 
+> **Historical record.** Frame/rule names below are as they stood at the
+> time of this comparison and are NOT updated by later renames; see
+> `results/corpus/FRAMES.md` for the current names and the graveyard.
+
+
 Generated against `tests/testcase0.s` (Rust, 22k insns) and `tests/godot.s` (C++, 98k insns).
 
 "Pairs to RVC parity" = (RVC-eligible / 2) − pairs won.  Each pair compresses

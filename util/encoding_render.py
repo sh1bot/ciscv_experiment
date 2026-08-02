@@ -491,10 +491,10 @@ def opcode_codepoints(frame, grid):
     slot weight sums 2^ext per op. Factors per slot because the A and B
     immediates extend their range independently.
 
-    UNLESS the frame draws ONE shared `imm` serving both slots (mem-pair). Then
+    UNLESS the frame draws ONE shared `imm` serving both slots (mem-base-pair). Then
     there is only one field, so its extension is bought once: the cluster costs
     `|a| * |b| * 2^maxext`, not `2^ext(a) * 2^ext(b)`. Billing a shared field
-    per slot squares a cost that was never paid twice — on mem-pair that is the
+    per slot squares a cost that was never paid twice — on mem-base-pair that is the
     difference between 16 codepoints and 48."""
     ops = frame.get("ops")
     if not ops:

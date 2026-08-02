@@ -24,8 +24,8 @@ The planning documents name `encoding.yaml` as the source of truth (see
    "compiler's own register, required dead" wording is now superseded.
 5. **Wide `li`** — CLOSED: an ACCEPTED LOSS.  Over 61033 `li` in five
    corpora: 68.8% fit 5 bits, 74.1% fit 6, 90.1% fit 8, 97.4% fit 10, against
-   widths of 6 (`dual-indep`), 8 (`chain-li-branch`), 10 (`li-czero`,
-   `mvload-jump`).  A `lui`+`addi` pair frame is endorsed by four independent
+   widths of 6 (`indep`), 8 (`li-branch-chain`), 10 (`li-czero`,
+   `setup-jump`).  A `lui`+`addi` pair frame is endorsed by four independent
    sources (FRAMES.md §3) but cannot work here: 32 bits of constant against a
    20-bit operand budget.  Base RISC-V's own split of wide constants was made
    on sound grounds — if a 15-bit form were worth having, it would already
@@ -57,7 +57,7 @@ The planning documents name `encoding.yaml` as the source of truth (see
     rows draw a destination in the rd column) at zero measured cost —
     musl-rv32 27191 -> 27192, sqlite-rv64 40850 -> 40851, both attribution
     reshuffles.  `encoding_assign.py` then hosts the three sentinel frames
-    inside `chain-alu-pair`'s block, two guest identities per lent codepoint:
+    inside `alu-alu-chain`'s block, two guest identities per lent codepoint:
     **986 -> 918 reserved, spare 38 -> 106**.
 
 ## A5 — design constraints that live only in tooling or scheduler code
@@ -86,9 +86,9 @@ Recorded here so they are not lost; each needs a home in the design documents.
   drives markdown heading depth, so level-1 frames render as H1 siblings of
   section headers and break `encoding.md`'s outline.  Define it or decouple it.
 - One frame still carries two rule names in one comma-joined string, which
-  consumers split on `,` (`deref-chain-load-pair, base-chain-load-pair`).
+  consumers split on `,` (`deref-load-chain, base-load-chain`).
   `post-inc-pair` shows the better pattern with an explicit `rules_py_names`
-  list.  (`load-sp-branch, load-base-branch` was resolved by the A9 split.)
+  list.  (`load-sp-branch-pair, load-base-branch-pair` was resolved by the A9 split.)
 - `encoding_budget.py` iterates `RULES` from `rules.py` rather than the yaml,
   so its output is generated from a different source of truth than
   `encoding.md`.  Re-point it.
@@ -111,11 +111,11 @@ Every numeric width in `rules.py` now derives from the yaml at import
 including the scaled and coupled-immediate shapes it could never reach.
 What remains, deliberately:
 
-- **Row-level narrowings are not per-op facts**: mvload-jump's direct-j row
+- **Row-level narrowings are not per-op facts**: setup-jump's direct-j row
   narrows li to 5 bits and drops the load offset.  (The other instance, the
   SP-relative chain rows, dissolved with the A9 split.)  Stays a documented
   literal until contracts can attach to rows.
-- **`chain-bit-test-branch a:andi` is unverifiable by interval compare**:
+- **`bit-test-branch-chain a:andi` is unverifiable by interval compare**:
   its accepted set is powers of two and masks, not a range.  Covered by
   `tests/test_pairing.py` boundary tests instead.
 - Mnemonic SETS and mode tables (`_INC_MODES`/`_DEC_MODES` restate
@@ -130,13 +130,13 @@ block), and where a stepped counter IS a base, the step relates to the access
 width 93% of the time (76 sites step == width, 110 step = N x width from
 unrolling).  Compilers strength-reduce to pointer bumps because plain RISC-V
 charges an instruction for indexed addressing; under this encoding
-`shXadd+load` is one packet (`index-chain-mem-pair`) and `inc + bXX` is one
+`shXadd+load` is one packet (`index-mem-chain`) and `inc + bXX` is one
 packet, so element counting costs the same packets and the reduction buys
 nothing.  The non-unit tail is therefore reachable value behind a compiler
 tuning, joining the RVC register-clustering tax and the clang/GCC gap as
 cost-model artefacts in the corpus.  Test: rebuild with LSR/ivopts damped
 (`-mllvm -disable-lsr` / `-fno-ivopts`) and remeasure the step census and
-`index-chain-mem-pair`.
+`index-mem-chain`.
 
 Related measured design input, from the same session: a unit-step
 increment/decrement-and-branch frame (`inc/dec[w] rsd ; bXX rsd, rs2b, L`,

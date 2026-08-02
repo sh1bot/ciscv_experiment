@@ -29,13 +29,13 @@ that carry a price: duplication purchases, and caps that measurably starve.
 ```
 frame                     entries bought   what for            return
 rsd-alu-pair                 +156          addi@7, li@7 x2     ~5.5 pairs/cp
-load-chain-alu-pair           +34          ld/lw@6, addi@6     ~5.6 pairs/cp
-chain-alu-pair                +31          addi@6 x2           FREE (block unchanged)
-chain-li-branch               +18          li@7                ~20 pairs/cp
+load-alu-chain           +34          ld/lw@6, addi@6     ~5.6 pairs/cp
+alu-alu-chain                +31          addi@6 x2           FREE (block unchanged)
+li-branch-chain               +18          li@7                ~20 pairs/cp
 addi-branch-pair              +12          addi/addiw@6        ~2 pairs/cp
-chain-bit-test-branch         +12          andi/slli/srli@6    ~12 pairs/cp
-dual-indep-pair               +11          li@6, addi4spn@6    ~10 pairs/cp
-store-chain-alu-pair           +2          addi@6              FREE (block unchanged)
+bit-test-branch-chain         +12          andi/slli/srli@6    ~12 pairs/cp
+indep-pair               +11          li@6, addi4spn@6    ~10 pairs/cp
+alu-store-chain           +2          addi@6              FREE (block unchanged)
 ```
 
 "FREE" means the frame's block is the same size with or without the extension
@@ -61,7 +61,7 @@ store-chain-alu-pair           +2          addi@6              FREE (block uncha
   population; hold unless 128 codepoints are needed for something measured
   better.
 
-* **`load-chain-alu-pair` +34 — borderline, held.**  ~190 pairs, ~5.6/cp
+* **`load-alu-chain` +34 — borderline, held.**  ~190 pairs, ~5.6/cp
   forgone if dropped (reclaims 32).  At the portfolio margin either way.
 
 ### Too little — starved, and cheap to fix (measured, not censused)
@@ -72,7 +72,7 @@ codepoints (~39/cp).**
 
 * **`arith-jump-pair` imm ops 5 → 6: FREE.**  Demand 40 → 64 inside its
   existing 64-block.  Census 73.7% → 79.7% of 4861.
-* **`mem-pair` base offset 5 → 6: +8 codepoints** (block 8 → 16).  Census
+* **`mem-base-pair` base offset 5 → 6: +8 codepoints** (block 8 → 16).  Census
   87.8% → 94.1% of 10326.  The post-split narrowing to 5 was itself set from
   censored data; the true base population wants the sixth bit.
 * **`post-inc-pair` stride 5 → 6: +4 codepoints** (block 4 → 8).  Census
@@ -89,7 +89,7 @@ exceed the 6 spare, and `addi-branch`'s reclaim of 16 covers them with room
 left over — the one egregious over-provision pays for every verified
 under-provision.
 
-* **`chain-li-branch` li 7 → 8 is the best big-ticket buy left**: +32
+* **`li-branch-chain` li 7 → 8 is the best big-ticket buy left**: +32
   codepoints (block 32 → 64) for census 66.9% → 85.3% of 2293, roughly +420
   pairs at ~13/cp.  Priced, not recommended — it needs a block nothing
   currently funds.
@@ -99,7 +99,7 @@ under-provision.
 * **`pre-inc-pair` A stride**: 26.4% at 5 bits and still 56.2% at TWELVE.
   Pre-increment addends are offsets into running values, not small constants.
   The frame needs a redesign or acceptance, not bits.
-* **`store-chain-alu-pair` A value**: 42.6% at 5, 68.5% at 12 — stored
+* **`alu-store-chain` A value**: 42.6% at 5, 68.5% at 12 — stored
   constants are wide.  Its @6 extension is free, keep it; nothing else helps.
 * **`addi-branch-pair` A**: see above — the tail is the problem.
 * **`arith-mem-pair` B offset**: the rows draw no `immb` field at all, and
@@ -110,15 +110,15 @@ under-provision.
 
 ### Right-sized (the concession list — natural fields, no purchase, good fit)
 
-`load-base-branch` (100.0% at its 5 bits — perfectly cut), `index-chain-mem`
-(97.9%), `deref/base-chain-load` (96.8–100% at 10), `mem-pair-sp` (100% at
-10, and needs all ten: 41% at 5), `mvload-jump` (100% at 10),
-`addi-store` A (98.2% at 10), `prologue` (98.5%), `epilogue` (100%),
-`li-czero` (94.9% at 10), `dual-indep` (99.8% at its declared 6),
-`chain-alu` (@6 free), `chain-bit-test` (@6 earning ~12/cp; the 7th bit
+`load-base-branch-pair` (100.0% at its 5 bits — perfectly cut), `index-mem-chain`
+(97.9%), `deref/base-load-chain` (96.8–100% at 10), `mem-sp-pair` (100% at
+10, and needs all ten: 41% at 5), `setup-jump` (100% at 10),
+`addi-store-chain` A (98.2% at 10), `prologue` (98.5%), `epilogue` (100%),
+`li-czero` (94.9% at 10), `indep` (99.8% at its declared 6),
+`alu-alu-chain` (@6 free), `bit-test-branch-chain` (@6 earning ~12/cp; the 7th bit
 would cost +32 for ~5.5/cp — skip).
 
-`load-sp-branch` is excluded from verdicts: its sp/base split (TODO A9) will
+`load-sp-branch-pair` is excluded from verdicts: its sp/base split (TODO A9) will
 change both its field and its population.
 
 ## Summary

@@ -43,7 +43,7 @@ frames are being sized:
 | `sd` | 9,387 | 0 | 0% |
 
 So `lw`'s apparent popularity is mostly an artefact of including a 32-bit file.
-Frames whose op clusters list `ld/lw/sd/sw` — `post-inc-pair`, `mem-pair`,
+Frames whose op clusters list `ld/lw/sd/sw` — `post-inc-pair`, `mem-base-pair`,
 `pre-inc-pair` — are being sized against a blend that matches no single target.
 
 **Remeasured on the current 17-file corpus (2.57M instructions, 47.3% RV32 by
@@ -220,16 +220,16 @@ Top ops by slot occupancy:
 slots are 40.9% unary (19196/46932), chain slots 12.6% (2803/22312). The
 asymmetry stands at 3.2x, but both ends moved a long way from 65.4%/2.9%, and
 the *conclusion* below — that one shared op set serves both badly — has since
-been acted on: the carve-out gave the frames separate `chain_alu` and `rsd_alu`
+been acted on: the carve-out gave the frames separate `alu_chain` and `rsd_alu`
 anchors, so they no longer share one.
 
 This is a structural fact, not a sampling artefact: a chain frame's whole
 purpose is to feed A's result into B's input, so an op that ignores that input
 wastes the link. A unary op in a chain slot leaves an encoded register field
 unused. Independent pairs have no link to waste, so they can lean into unary
-ops — which is also why `dual-indep-pair` exists.
+ops — which is also why `indep-pair` exists.
 
-**Consequence for `encoding.yaml`:** `chain-alu-pair` and `rsd-alu-pair`
+**Consequence for `encoding.yaml`:** `alu-alu-chain` and `rsd-alu-pair`
 currently share one anchored list (`*rsd_alu`). That list must serve two
 populations with almost no overlap, so it necessarily serves both badly.
 Splitting the anchors is a prerequisite for either frame being well-sized.
@@ -292,7 +292,7 @@ how many were discounted. Two live examples:
 
 - `li` + sp-relative store: 539 pairs raw, but 276 need a full 12-bit constant.
   The achievable population is **263**, and 11 bits covers all of it.
-- chain-alu's immediate demand above the 5-bit base: 223 slots raw, **182**
+- alu-alu-chain's immediate demand above the 5-bit base: 223 slots raw, **182**
   achievable.
 
 Do NOT read the disassembler's `# symbol+offset` comments as evidence that a
@@ -319,7 +319,7 @@ all; `imm_expr` only catches pre-link `%hi`/`%lo` syntax.
   two); there is no other widening mechanism — `g`/`h` are opcode bits.
 - Frame cost is `Σ weight(a) × Σ weight(b)`, so a symmetric frame with a 16-slot
   list costs 256. EXCEPT when the frame draws one SHARED `imm` field serving
-  both slots (mem-pair): one field, one extension, so a cluster costs
+  both slots (mem-base-pair): one field, one extension, so a cluster costs
   `|a| × |b| × 2^maxext`, not the product of per-slot extensions.
 - Register-form ops always cost 1.
 - Total namespace is 1024 (`opcode5:funct3:g:h`).
@@ -382,7 +382,7 @@ surface the §1 ISA mismatch instead of averaging over it.
 | 6 | Split the `*rsd_alu` anchor into chain and dual lists | §5 | measured; yaml change pending |
 | 7 | Cross-*program* held-out scoring | §9 | OPEN |
 | 8 | Do ops outside the target ISA subset (`czero.*`, `andn`, `maxu`) belong in op-set searches at all? | — | OPEN |
-| 9 | Zicond (`czero.eqz`/`czero.nez`) looks worth its own frame with its own partner set, not a slot in chain-alu | §6 | OPEN — to explore |
+| 9 | Zicond (`czero.eqz`/`czero.nez`) looks worth its own frame with its own partner set, not a slot in alu-alu-chain | §6 | OPEN — to explore |
 | 10 | Carve `li` + store out of store-chain: ~410 capturable sites for ~2-4 codepoints, imm8 + base + offset | §6 | measured (outlier-corrected); frame not yet written |
 | 11 | Corpus is one function away from unrepresentative — `KeyMappingX11::initialize()` alone is 55.5% of constant-stores. Worth a standing per-function concentration report, or a third corpus. | §1, §6 | OPEN |
 

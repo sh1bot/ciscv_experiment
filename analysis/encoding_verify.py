@@ -251,7 +251,7 @@ def main():
                             c = cap_for(cap, is_sp_mem(insn))
                             # An op may declare a range wider than the drawn
                             # field; the surplus rides the opcode list at 2^ext
-                            # codepoints (see encoding.yaml, chain_alu). Its
+                            # codepoints (see encoding.yaml, alu_chain). Its
                             # declared width is then the real capacity.
                             decl = contract_for(con, insn).get("bits")
                             if decl:

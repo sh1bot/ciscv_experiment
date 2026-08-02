@@ -109,37 +109,37 @@ _RSD_SHIFT_MN = frozenset({"slli", "srli"})
 _RSD_SHIFT_BITS = _w("rsd-alu-pair", "a", "slli")
 _RSD_JUMP_SHIFT_BITS = _w("arith-jump-pair", "a", "slli")
 
-# The ALU set shared by the three CHAIN frames — encoding.yaml `chain_alu`.
+# The ALU set shared by the three CHAIN frames — encoding.yaml `alu_chain`.
 # Chain slots write `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1 an
 # encoded field, so li/mv/addi4spn are register choices rather than opcodes and
 # fold into `addi` -- which is why only addi earns extra range here.
 # rsd-alu-pair and arith-jump-pair keep _RSD_ALU_MN (different population).
-_CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
+_ALU_ALU_CHAIN_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
                            "xor", "xori", "maxu", "sltu", "sltiu",
                            "slli", "srli", "srliw"})
-_CHAIN_IMM_BITS = {mn: _w("chain-alu-pair", "b", mn)          # signed
+_ALU_ALU_CHAIN_IMM_BITS = {mn: _w("alu-alu-chain", "b", mn)          # signed
                    for mn in ("addi", "andi", "xori", "sltiu")}
-_CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
-_CHAIN_SHIFT_HI = (1 << _w("chain-alu-pair", "b", "slli")) - 1
+_ALU_ALU_CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
+_ALU_ALU_CHAIN_SHIFT_HI = (1 << _w("alu-alu-chain", "b", "slli")) - 1
 
 
-def _chain_imm_in_range(insn: Instruction) -> None:
+def _alu_alu_chain_imm_in_range(insn: Instruction) -> None:
     """Immediate / shift range for a chain-frame ALU op, per encoding.yaml's
-    `chain_alu` op contracts. addi carries a signed 6-bit field (it is also the
+    `alu_chain` op contracts. addi carries a signed 6-bit field (it is also the
     li/mv form, so zero is encodable, and it is where the wide constants are);
     andi the 5-bit base range; shifts an unsigned 5-bit amount."""
-    bits = _CHAIN_IMM_BITS.get(insn.mnemonic)
+    bits = _ALU_ALU_CHAIN_IMM_BITS.get(insn.mnemonic)
     if bits is not None:
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-immediate")
         if not (-(1 << (bits - 1)) <= imm <= (1 << (bits - 1)) - 1):
             raise NotPair("big-imm")
-    elif insn.mnemonic in _CHAIN_SHIFT_MN:
+    elif insn.mnemonic in _ALU_ALU_CHAIN_SHIFT_MN:
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-shift-amount")
-        if not (0 <= imm <= _CHAIN_SHIFT_HI):
+        if not (0 <= imm <= _ALU_ALU_CHAIN_SHIFT_HI):
             raise NotPair("big-imm")
 
 
@@ -147,7 +147,7 @@ def a_chain_imm_ok(func: Callable):
     """A-slot immediate is in the chain-frame encodable range."""
     @wraps(func)
     def check_a_chain_imm(a: Instruction, b: Instruction):
-        _chain_imm_in_range(a)
+        _alu_alu_chain_imm_in_range(a)
         return func(a, b)
     return check_a_chain_imm
 
@@ -156,7 +156,7 @@ def b_chain_imm_ok(func: Callable):
     """B-slot immediate is in the chain-frame encodable range."""
     @wraps(func)
     def check_b_chain_imm(a: Instruction, b: Instruction):
-        _chain_imm_in_range(b)
+        _alu_alu_chain_imm_in_range(b)
         return func(a, b)
     return check_b_chain_imm
 
@@ -440,14 +440,14 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 
     Distinct destinations: rsd-alu-pair exists to pack two independent, both-live
     ALU results.  If a.rd == b.rd then either B consumes A (a producer/consumer
-    chain — handled, more capably, by chain-alu-pair, whose shared register need
+    chain — handled, more capably, by alu-alu-chain, whose shared register need
     not be in x0..x15) or B does not (making A's write dead).  Either way this
     rule should not claim the pair; require distinct destinations.
     """
 
 
 # ---------------------------------------------------------------------------
-# chain-alu-pair
+# alu-alu-chain
 # ---------------------------------------------------------------------------
 
 @chain_uses_low_regs
@@ -455,7 +455,7 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 @no_escape
 @a_chain_imm_ok
 @b_chain_imm_ok
-def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
+def _alu_alu_chain(a: Instruction, b: Instruction) -> None:
     """A computes a value that B immediately consumes; that value is dead after B.
 
     A has free choice of rd and rs1.  B must use A's rd as its rs1 input
@@ -471,11 +471,11 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# load-chain-alu-pair / store-chain-alu-pair
+# load-alu-chain / alu-store-chain
 # ---------------------------------------------------------------------------
-# Two variants of chain-alu-pair where one slot is an sp-relative memory access
+# Two variants of alu-alu-chain where one slot is an sp-relative memory access
 # carrying an 8-bit scaled offset.  The ALU slot draws from the same table
-# (_RSD_ALU_MN) and uses the same register/immediate checks as chain-alu-pair,
+# (_RSD_ALU_MN) and uses the same register/immediate checks as alu-alu-chain,
 # so all three rules evolve together as the allowed-op set is tuned.
 #
 #   load-chain:  A = sp-relative load (8-bit scaled offset); B = ALU op that
@@ -484,7 +484,7 @@ def _chain_alu_pair(a: Instruction, b: Instruction) -> None:
 #   store-chain: A = ALU op; B = sp-relative store (8-bit scaled offset) that
 #                writes A's result to the stack.  The result is dead after B.
 
-_SP_LOAD_MN  = frozenset({"lw", "ld"})   # lwu dropped: see encoding.yaml load-chain-alu-pair
+_SP_LOAD_MN  = frozenset({"lw", "ld"})   # lwu dropped: see encoding.yaml load-alu-chain
 _SP_STORE_MN = frozenset({"sw", "sd"})
 _ALL_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 _ZERO_BRANCH_MN = frozenset({"beqz", "bnez"})
@@ -529,21 +529,21 @@ def b_chain_mem(bits: int):
 @no_escape
 @a_chain_mem(6)
 @b_chain_imm_ok
-def _load_chain_alu_pair(a: Instruction, b: Instruction) -> None:
+def _load_alu_chain(a: Instruction, b: Instruction) -> None:
     """A loads from the stack; B (ALU) consumes the loaded value, which is then dead."""
     return None
 
 
 # ---------------------------------------------------------------------------
-# addi-store-pair
+# addi-store-chain
 # ---------------------------------------------------------------------------
-# encoding.yaml `addi-store-pair`: compute an addi, then store the result.
+# encoding.yaml `addi-store-chain`: compute an addi, then store the result.
 #
 #     A: addi tmp, rs1a, imma      B: store tmp, k*immb(sp)  or  0(rbase)
 #
 # tmp is dead at the store, so it is never encoded -- which is what frees room
-# for a 10-bit immediate alongside a full 5-bit rs1a. chain_alu cannot match
-# that: widening its addi costs chain-alu codepoints quadratically, while here
+# for a 10-bit immediate alongside a full 5-bit rs1a. alu_chain cannot match
+# that: widening its addi costs alu-alu-chain codepoints quadratically, while here
 # no second register field competes for the space.
 #
 # A subsumes li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) -- those are
@@ -556,7 +556,7 @@ _ADDI_STORE_BITS = 10                        # signed immediate field
 # The single row spends its bits on rbase, so B carries no offset at all.
 
 
-def _addi_store_pair(a: Instruction, b: Instruction) -> None:
+def _addi_store_chain(a: Instruction, b: Instruction) -> None:
     """A computes an addi; B stores the result, after which it is dead."""
     if a.imm is None:
         raise NotPair("MALFORMED: missing-immediate")
@@ -578,20 +578,20 @@ def _addi_store_pair(a: Instruction, b: Instruction) -> None:
 @no_escape
 @a_chain_imm_ok
 @b_chain_mem(5)
-def _store_chain_alu_pair(a: Instruction, b: Instruction) -> Optional[str]:
+def _alu_store_chain(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
     return None
 
 
 # ---------------------------------------------------------------------------
-# load-sp-branch / load-base-branch
+# load-sp-branch-pair / load-base-branch-pair
 # ---------------------------------------------------------------------------
 # Load a value; branch on whether it is zero/nonzero; value kept alive.
 # The two variants differ in base register and offset range:
 #
-#   load-sp-branch:   A = any load with sp (x2) as base, 10-bit unsigned
+#   load-sp-branch-pair:   A = any load with sp (x2) as base, 10-bit unsigned
 #                     offset scaled by the access width.  Captures deep frames.
-#   load-base-branch: A = any load with any base register, 5-bit unsigned
+#   load-base-branch-pair: A = any load with any base register, 5-bit unsigned
 #                     offset scaled by the access width.  Shallow struct fields.
 #
 # Offsets are width-scaled (a multiple of the access size, encoded shifted),
@@ -615,8 +615,8 @@ def _load_branch_check(a: Instruction, b: Instruction,
 # Its own frame since the A9 split: sp implied, 10-bit offset, and the op set
 # mirrors RVC's c.lwsp/c.ldsp precedent (ld simply never matches on rv32).
 _SP_BRANCH_A_MN = frozenset({"lw", "ld", "lbu"})
-_SP_BRANCH_OFF_BITS = _w("load-sp-branch", "a", "lw")
-_BASE_BRANCH_OFF_BITS = _w("load-base-branch", "a", "lw")
+_SP_BRANCH_OFF_BITS = _w("load-sp-branch-pair", "a", "lw")
+_BASE_BRANCH_OFF_BITS = _w("load-base-branch-pair", "a", "lw")
 
 
 @a_base_not_from_auipc
@@ -637,7 +637,7 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# deref-chain-load-pair / base-chain-load-pair
+# deref-load-chain / base-load-chain
 # ---------------------------------------------------------------------------
 # Two load+load chains that pack into a single word as
 # {opcode-tuple, rtmp, rd, rb, imm10}, where imm10 is a 10-bit width-scaled
@@ -653,13 +653,13 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 # differ only in which load carries the imm10 offset.
 
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
-_DEREF_OFF_BITS = _w("deref-chain-load-pair", "a", "lw")   # split imma cells
+_DEREF_OFF_BITS = _w("deref-load-chain", "a", "lw")   # split imma cells
 
 
 @must_chain_base
 @no_escape
 @a_base_not_from_auipc
-def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
+def _deref_load_chain(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
     if a.rbase is None or a.rd is None:
         raise NotPair("A missing base/dest register")
@@ -676,7 +676,7 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
 @must_chain_base
 @no_escape
 @a_base_not_from_auipc
-def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
+def _base_load_chain(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
     if a.rbase is None or a.rd is None:
         raise NotPair("A missing base/dest register")
@@ -700,7 +700,7 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 #                 Two halves of ONE computation (mul lo/hi, div quotient/rem,
 #                 sum/difference, min/max), declared as a pair so hardware can
 #                 fuse them instead of issuing twice — see encoding.yaml's
-#                 dual-arith2-pair notes.  Kept despite a near-zero score.
+#                 macro-op-pair notes.  Kept despite a near-zero score.
 #   "indep_pair"  two independent small pseudo-ops (li / mv / addi4spn).
 #
 # Canonical order is (tuple[0], tuple[1]).  The reverse order is accepted only
@@ -738,13 +738,13 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 
 # No lb/lh/lwu: they accounted for 12 of 37816 scheduled slots.  arith-mem-pair
 # reuses this set for its B slot.
-_MEM_PAIR_MN = frozenset({"lbu", "lhu", "lw", "ld", "sb", "sh", "sw", "sd"})
-_MEM_PAIR_OFF_BITS = _w("mem-pair", "a", "lw")
-_MEM_PAIR_SP_OFF_BITS = _w("mem-pair-sp", "a", "lx")
+_MEM_BASE_MN = frozenset({"lbu", "lhu", "lw", "ld", "sb", "sh", "sw", "sd"})
+_MEM_BASE_OFF_BITS = _w("mem-base-pair", "a", "lw")
+_MEM_SP_OFF_BITS = _w("mem-sp-pair", "a", "lx")
 
 
 @exclusive_rd
-def _mem_pair(a: Instruction, b: Instruction) -> None:
+def _mem_base_pair(a: Instruction, b: Instruction) -> None:
     """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
     if a.mnemonic != b.mnemonic:
         raise NotPair("opcode-mismatch")
@@ -757,10 +757,10 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair(f"bad-delta")
     shift = a.access_shift or 0
     # Both rows draw imm[4:0] against `rbase`; the shared sixth bit is bought
-    # once per op on the opcode list (encoding.yaml mem-pair).  The wide sp
-    # form is its own frame (mem-pair-sp) -- an sp access too wide for this
+    # once per op on the opcode list (encoding.yaml mem-base-pair).  The wide sp
+    # form is its own frame (mem-sp-pair) -- an sp access too wide for this
     # field belongs to that frame or to neither.
-    imm_bits = _MEM_PAIR_OFF_BITS
+    imm_bits = _MEM_BASE_OFF_BITS
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
@@ -775,18 +775,18 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
 # No producer-consumer relationship required — they share no operands.
 # The dep graph prevents scheduling A before B when a true dependency exists.
 #
-# The union over both bases; `_mem_pair_sp` enforces which is the natural word
+# The union over both bases; `_mem_sp_pair` enforces which is the natural word
 # for the base actually being scheduled.  A set rather than None so the rule is
 # not eligible for -- and does not annotate -- unrelated instructions.
-_MEM_PAIR_SP_MN = frozenset({"lw", "sw", "ld", "sd"})
+_MEM_SP_MN = frozenset({"lw", "sw", "ld", "sd"})
 
 
 @exclusive_rd
-def _mem_pair_sp(a: Instruction, b: Instruction) -> None:
+def _mem_sp_pair(a: Instruction, b: Instruction) -> None:
     """Two adjacent sp-relative accesses of the NATURAL WORD, offsets one width
     apart.
 
-    encoding.yaml's mem-pair-sp: the base is implicit, so the freed column pays
+    encoding.yaml's mem-sp-pair: the base is implicit, so the freed column pays
     for a 10-bit shared offset -- which sp traffic needs (only 41% of it fits
     five bits on rv32) and base traffic does not (97% fits).  The op is `lx`/`sx`,
     one XLEN-switchable opcode meaning lw/sw on RV32 and ld/sd on RV64, which
@@ -804,7 +804,7 @@ def _mem_pair_sp(a: Instruction, b: Instruction) -> None:
         raise NotPair("bad-delta")
     shift = a.access_shift or 0
     for insn in (a, b):
-        if not insn.uimm_fits(_MEM_PAIR_SP_OFF_BITS, shift):
+        if not insn.uimm_fits(_MEM_SP_OFF_BITS, shift):
             raise NotPair("big-imm")
 
 
@@ -815,7 +815,7 @@ _DUAL_TUPLES: dict = {
     ("min", "max"):       "arith2",
     ("minu", "maxu"):     "arith2",
     # High half first, per the M extension's fusion sequence -- see the
-    # dual-arith2-pair notes in encoding.yaml.  The canonical direction is what
+    # macro-op-pair notes in encoding.yaml.  The canonical direction is what
     # the encoding blesses; rules.py still accepts either order.
     ("mulh", "mul"):      "arith2",
     ("mulhu", "mul"):     "arith2",
@@ -825,7 +825,7 @@ _DUAL_TUPLES: dict = {
     ("divw", "remw"):     "arith2",
     ("divuw", "remuw"):   "arith2",
     # (post-increment mem+addi / mem+shNadd tuples live in _POST_INC_TUPLES)
-    # (adjacent load/store pairs are handled by the dedicated mem-pair rule)
+    # (adjacent load/store pairs are handled by the dedicated mem-base-pair rule)
     # independent single-output pairs — no shared operands required
     # ("addi", "addi") is overloaded: it covers three pseudo-ops (li, mv,
     # addi4spn) giving 6 order-insensitive combinations: li+li, mv+mv,
@@ -866,8 +866,8 @@ def _b_slot_mnems(role: str) -> frozenset:
     return frozenset(k[1] for k in _role_tuples(role))
 
 
-_POST_INC_STRIDE_BITS = _w("post-inc-addi-pair", "b", "addi")
-_POST_INC_OFF_BITS = _w("post-inc-addi-pair", "a", "lw")
+_POST_INC_STRIDE_BITS = _w("post-inc-pair", "b", "addi")
+_POST_INC_OFF_BITS = _w("post-inc-pair", "a", "lw")
 
 
 def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
@@ -976,10 +976,10 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
         raise NotPair("B-addi-imm-mismatch")
 
 
-_DUAL_ADDI4SPN_BITS = _w("dual-indep-pair", "a", "addi4spn")
-_DUAL_LI_BITS = _w("dual-indep-pair", "a", "li")
+_DUAL_ADDI4SPN_BITS = _w("indep-pair", "a", "addi4spn")
+_DUAL_LI_BITS = _w("indep-pair", "a", "li")
 # The un-extended field width: mv declares nothing, so its width IS the field.
-_DUAL_FIELD_BITS = _w("dual-indep-pair", "a", "mv")
+_DUAL_FIELD_BITS = _w("indep-pair", "a", "mv")
 
 
 @dual_family("indep_pair")
@@ -1013,7 +1013,7 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# chain-li-branch
+# li-branch-chain
 # ---------------------------------------------------------------------------
 # A loads a small constant into a temporary; B is any conditional comparison
 # branch that uses that temporary as one of its two operands (either slot),
@@ -1028,7 +1028,7 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
 
 _LI_BRANCH_A_MN = frozenset({"addi"})
 _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
-_CHAIN_LI_BITS = _w("chain-li-branch", "a", "li")
+_CHAIN_LI_BITS = _w("li-branch-chain", "a", "li")
 
 
 @must_chain
@@ -1100,7 +1100,7 @@ def _inc_branch_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# chain-bit-test-branch
+# bit-test-branch-chain
 # ---------------------------------------------------------------------------
 # A isolates a single bit (mask or shift); B branches on whether it is zero.
 # A's result register is dead after B — it carries only the bit to the branch.
@@ -1114,7 +1114,7 @@ def _inc_branch_pair(a: Instruction, b: Instruction) -> None:
 
 _BIT_BRANCH_A_MN = frozenset({"andi", "slli", "srli"})
 _BIT_BRANCH_B_MN = frozenset({"beqz", "bnez", "beq", "bne"})
-_BIT_BRANCH_IMM_HI = (1 << _w("chain-bit-test-branch", "a", "andi")) - 1
+_BIT_BRANCH_IMM_HI = (1 << _w("bit-test-branch-chain", "a", "andi")) - 1
 
 
 def _is_pow2_imm(v) -> bool:
@@ -1171,14 +1171,14 @@ def _chain_bit_test_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# czero-select-pair
+# czero-or-chain
 # ---------------------------------------------------------------------------
 # The second half of a zicond select:
 #     czero.eqz t1, x, c
 #     czero.nez t2, y, c     <- A
 #     or        r,  t1, t2   <- B
 # A's result is the chain temporary, so only four registers are encoded and the
-# shape is exactly chain-alu-pair's row. czero is not in *chain_alu because
+# shape is exactly alu-alu-chain's row. czero is not in *alu_chain because
 # adding it there would take that 16x16 cross product to 18x18.
 #
 # 97-99% of czero's forward chains go to `or` on the four newer corpora.
@@ -1206,7 +1206,7 @@ def _czero_select_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# index-chain-mem-pair
+# index-mem-chain
 # ---------------------------------------------------------------------------
 # RISC-V has no register+register addressing, so `array[i]` costs two
 # instructions: scale the index onto the base, then access through the result.
@@ -1230,12 +1230,12 @@ _INDEX_MEM_TUPLES: frozenset = frozenset({
 })
 _INDEX_MEM_A_MN = frozenset(a for a, _ in _INDEX_MEM_TUPLES)
 _INDEX_MEM_B_MN = frozenset(b for _, b in _INDEX_MEM_TUPLES)
-_INDEX_MEM_OFF_BITS = _w("index-chain-mem-pair", "b", "lw")
+_INDEX_MEM_OFF_BITS = _w("index-mem-chain", "b", "lw")
 
 
 @must_chain_base
 @no_escape
-def _index_chain_mem_pair(a: Instruction, b: Instruction) -> None:
+def _index_mem_chain(a: Instruction, b: Instruction) -> None:
     """A forms a scaled-index address into a temporary; B accesses through it."""
     if (a.mnemonic, b.mnemonic) not in _INDEX_MEM_TUPLES:
         raise NotPair("bad-tuple")
@@ -1356,7 +1356,7 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# arith-jump-pair / mvload-jump-pair
+# arith-jump-pair / setup-jump-pair
 # ---------------------------------------------------------------------------
 # Pack a productive instruction into the same packet as a trailing unconditional
 # control transfer (the packet's B slot always executes last).  Ported from the
@@ -1364,7 +1364,7 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # advantage on real code, and offset-independent (unlike its memory rules).
 #
 #   arith-jump-pair:   A = RSD ALU op (or li), x0..x15, imm in range
-#   mvload-jump-pair:  A = mv, li (10-bit signed), or lbu/lw/ld with a
+#   setup-jump-pair:  A = mv, li (10-bit signed), or lbu/lw/ld with a
 #                          non-negative offset fitting a 5-bit scaled field
 #   B (both):          ret / jr / indirect jalr (imm 0) / direct j / jal x0
 #
@@ -1375,7 +1375,7 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 
 _SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
 _MVLOAD_JUMP_A_MN = frozenset({"addi", "lbu", "lw", "ld"})
-_MVLOAD_JUMP_LI_BITS = _w("mvload-jump-pair", "a", "li")
+_MVLOAD_JUMP_LI_BITS = _w("setup-jump-pair", "a", "li")
 _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
                                  # (a ONE-ROW narrowing — imm_contracts is
                                  # per-op and cannot express it)
@@ -1459,86 +1459,86 @@ RULES: list[PairingRule] = [
         check=_rsd_alu_pair,
     ),
     PairingRule(
-        name="chain-alu-pair",
-        a_mnemonic_set=_CHAIN_ALU_MN,
-        b_mnemonic_set=_CHAIN_ALU_MN,
-        check=_chain_alu_pair,
+        name="alu-alu-chain",
+        a_mnemonic_set=_ALU_ALU_CHAIN_MN,
+        b_mnemonic_set=_ALU_ALU_CHAIN_MN,
+        check=_alu_alu_chain,
     ),
     PairingRule(
-        name="load-chain-alu-pair",
+        name="load-alu-chain",
         a_mnemonic_set=_SP_LOAD_MN,
-        b_mnemonic_set=_CHAIN_ALU_MN,
-        check=_load_chain_alu_pair,
+        b_mnemonic_set=_ALU_ALU_CHAIN_MN,
+        check=_load_alu_chain,
     ),
     PairingRule(
-        name="addi-store-pair",
+        name="addi-store-chain",
         a_mnemonic_set=frozenset({"addi"}),
         b_mnemonic_set=_ADDI_STORE_MN,
-        check=_addi_store_pair,
+        check=_addi_store_chain,
     ),
     PairingRule(
-        name="store-chain-alu-pair",
-        a_mnemonic_set=_CHAIN_ALU_MN,
+        name="alu-store-chain",
+        a_mnemonic_set=_ALU_ALU_CHAIN_MN,
         b_mnemonic_set=_SP_STORE_MN,
-        check=_store_chain_alu_pair,
+        check=_alu_store_chain,
     ),
     PairingRule(
-        name="load-sp-branch",
+        name="load-sp-branch-pair",
         a_mnemonic_set=_SP_BRANCH_A_MN,
         b_mnemonic_set=_ZERO_BRANCH_MN,
         a_prerequisites=["reads_stack"],
         check=_load_sp_branch,
     ),
     PairingRule(
-        name="load-base-branch",
+        name="load-base-branch-pair",
         a_mnemonic_set=_ALL_LOAD_MN,
         b_mnemonic_set=_ZERO_BRANCH_MN,
         check=_load_base_branch,
     ),
     PairingRule(
-        name="deref-chain-load-pair",
+        name="deref-load-chain",
         a_mnemonic_set=_CHAIN_LOAD_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
-        check=_deref_chain_load_pair,
+        check=_deref_load_chain,
     ),
     PairingRule(
-        name="base-chain-load-pair",
+        name="base-load-chain",
         a_mnemonic_set=_CHAIN_LOAD_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
-        check=_base_chain_load_pair,
+        check=_base_load_chain,
     ),
     PairingRule(
-        name="mem-pair-sp",
-        a_mnemonic_set=_MEM_PAIR_SP_MN,
-        b_mnemonic_set=_MEM_PAIR_SP_MN,
-        check=_mem_pair_sp,
+        name="mem-sp-pair",
+        a_mnemonic_set=_MEM_SP_MN,
+        b_mnemonic_set=_MEM_SP_MN,
+        check=_mem_sp_pair,
     ),
     PairingRule(
-        name="mem-pair",
-        a_mnemonic_set=_MEM_PAIR_MN,
-        b_mnemonic_set=_MEM_PAIR_MN,
-        check=_mem_pair,
+        name="mem-base-pair",
+        a_mnemonic_set=_MEM_BASE_MN,
+        b_mnemonic_set=_MEM_BASE_MN,
+        check=_mem_base_pair,
     ),
     PairingRule(
-        name="dual-arith2-pair",
+        name="macro-op-pair",
         a_mnemonic_set=_role_mnems("arith2"),
         b_mnemonic_set=_role_mnems("arith2"),
         check=_dual_arith2,
     ),
     PairingRule(
-        name="post-inc-addi-pair",
+        name="post-inc-pair",
         a_mnemonic_set=_a_slot_mnems("mem_addi"),
         b_mnemonic_set=_b_slot_mnems("mem_addi"),
         check=_post_inc_addi,
     ),
     PairingRule(
-        name="dual-indep-pair",
+        name="indep-pair",
         a_mnemonic_set=_role_mnems("indep_pair"),
         b_mnemonic_set=_role_mnems("indep_pair"),
         check=_dual_indep,
     ),
     PairingRule(
-        name="chain-li-branch",
+        name="li-branch-chain",
         a_mnemonic_set=_LI_BRANCH_A_MN,
         b_mnemonic_set=_LI_BRANCH_B_MN,
         a_prerequisites=["is_li"],
@@ -1552,7 +1552,7 @@ RULES: list[PairingRule] = [
         check=_inc_branch_pair,
     ),
     PairingRule(
-        name="chain-bit-test-branch",
+        name="bit-test-branch-chain",
         a_mnemonic_set=_BIT_BRANCH_A_MN,
         b_mnemonic_set=_BIT_BRANCH_B_MN,
         check=_chain_bit_test_branch,
@@ -1570,23 +1570,23 @@ RULES: list[PairingRule] = [
         check=_epilogue_pair,
     ),
     PairingRule(
-        name="czero-select-pair",
+        name="czero-or-chain",
         a_mnemonic_set=_CZERO_MN,
         b_mnemonic_set=frozenset({"or"}),
         check=_czero_select_pair,
     ),
     PairingRule(
-        name="li-czero-pair",
+        name="li-czero-chain",
         a_mnemonic_set=frozenset({"addi"}),
         b_mnemonic_set=_CZERO_MN,
         a_prerequisites=["is_li"],
         check=_li_czero_pair,
     ),
     PairingRule(
-        name="index-chain-mem-pair",
+        name="index-mem-chain",
         a_mnemonic_set=_INDEX_MEM_A_MN,
         b_mnemonic_set=_INDEX_MEM_B_MN,
-        check=_index_chain_mem_pair,
+        check=_index_mem_chain,
     ),
     PairingRule(
         name="pre-inc-pair",
@@ -1602,7 +1602,7 @@ RULES: list[PairingRule] = [
         check=_arith_jump_pair,
     ),
     PairingRule(
-        name="mvload-jump-pair",
+        name="setup-jump-pair",
         a_mnemonic_set=_MVLOAD_JUMP_A_MN,
         b_mnemonic_set=_SMALL_JUMP_MN,
         check=_mvload_jump_pair,

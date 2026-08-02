@@ -39,7 +39,7 @@
 # powers of two, so a frame at 11 and a frame at 10 reserve the same 16 and the
 # waste costs nothing real. It only becomes a decision if the waste is what
 # pushes a count across a power-of-two boundary and doubles the reservation.
-# dual-indep-pair pays 1 codepoint of it today, at 11 of 16 — five to spare
+# indep-pair pays 1 codepoint of it today, at 11 of 16 — five to spare
 # before it would matter.
 #
 # Ordering the two immediates by VALUE (not just by range band) would be more
@@ -144,7 +144,7 @@ opsets:
   # its own codepoint. It is also the single most common op in either frame
   # (3316 of 5934 slot uses), which is why it earns the wide field.
   #
-  # Chosen by the same search used for chain_alu: the two rules widened to a
+  # Chosen by the same search used for alu_chain: the two rules widened to a
   # generous op set with unrestricted immediates, the REAL checks run over the
   # corpus, then a knapsack over the pairs that came back. Priced W^2 + 4W --
   # rsd-alu-pair is a full cross product (W x W = 256) and arith-jump-pair is
@@ -189,8 +189,8 @@ opsets:
     - {op: srli,  imm: {bits: 6, signed: false}}
     - xor
 
-  # The ALU set shared by the three CHAIN frames (chain-alu-pair,
-  # load-chain-alu-pair, store-chain-alu-pair). Deliberately NOT *rsd_alu:
+  # The ALU set shared by the three CHAIN frames (alu-alu-chain,
+  # load-alu-chain, alu-store-chain). Deliberately NOT *rsd_alu:
   # chain and rsd serve near-disjoint populations (ACCOUNTING.md §5), and a
   # chain slot is written `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1
   # as an ENCODED FIELD -- so li (rs1=x0), mv (imm=0) and addi4spn (rs1=sp) are
@@ -217,7 +217,7 @@ opsets:
   # `li tmp, K` + store cases from store-chain (869 -> 295 pairs), which were
   # what justified a 7-bit addi. 6 bits now suffice, freeing 2 slots for two
   # more opcodes. Capture over the three chain populations 578 -> 639.
-  chain_alu: &chain_alu
+  alu_chain: &alu_chain
     - {op: addi, imm: {bits: 6, signed: true}}     # 2 codepoints; carries li/mv
     - add
     - addw
@@ -422,13 +422,13 @@ doc:
          (eg., store, branch) meaning result comes from first, or there's no result at all.
 
   - frame:
-      name: chain-alu-pair
+      name: alu-alu-chain
       budget: 256
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
       ops:
-        - {a: *chain_alu, b: *chain_alu}
+        - {a: *alu_chain, b: *alu_chain}
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
@@ -436,7 +436,7 @@ doc:
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
 
   - frame:
-      name: load-chain-alu-pair
+      name: load-alu-chain
       # lwu dropped from the A slot: 2 loads x weight 2 x 16 = 64 codepoints,
       # down from 96, so the block halves 128 -> 64. That is what clears the
       # namespace over-reservation (1036 -> 972 of 1024) without touching the
@@ -460,33 +460,33 @@ doc:
         # sixth bit rides the opcode list rather than a g bit, hence bits: 6 on
         # a row that only draws imma[4:0].
         - {a: [{op: lw, imm: {bits: 6, signed: false, scale: 4}},
-               {op: ld, imm: {bits: 6, signed: false, scale: 8}}], b: *chain_alu}
+               {op: ld, imm: {bits: 6, signed: false, scale: 8}}], b: *alu_chain}
       rows:
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
 
   - frame:
-      name: store-chain-alu-pair
+      name: alu-store-chain
       budget: 32
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "store   tmp, k*immb(rs1b)"]
       ops:
-        - {a: *chain_alu, b: [sw, sd]}
+        - {a: *alu_chain, b: [sw, sd]}
       rows:
         - ["h", "rs1b",      "g", "rs2a",      "rs1a", "fn3", "immb[4:0]"]
         - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
 
   - frame:
-      name: czero-select-pair
+      name: czero-or-chain
       # The second half of a zicond select:
       #     czero.eqz t1, x, c
       #     czero.nez t2, y, c     <- A
       #     or        r,  t1, t2   <- B
       # A's result is the chain temporary, so only four registers are encoded:
       # rs1a (the value), rs2a (the condition), rs2b (the other arm) and rdb.
-      # That is exactly chain-alu-pair's row, which is why this needs no new
-      # layout -- only its own frame, since adding czero to *chain_alu would
+      # That is exactly alu-alu-chain's row, which is why this needs no new
+      # layout -- only its own frame, since adding czero to *alu_chain would
       # take that cross product from 16x16 to 18x18 and overflow its 256.
       #
       # The forward chain is overwhelmingly concentrated: of czero -> successor
@@ -511,15 +511,15 @@ doc:
         - ["h", "rs2b", "g", "rs2a", "rs1a", "fn3", "rdb"]
 
   - frame:
-      name: addi-store-pair
-      # Carved out of store-chain-alu-pair: compute an addi, then store it.
+      name: addi-store-chain
+      # Carved out of alu-store-chain: compute an addi, then store it.
       #
       #     A: addi tmp, rs1a, imma      B: store tmp, k*immb(sp)  or  0(rbase)
       #
       # tmp is dead at the store so it is never encoded, which frees the space
       # for a 10-bit immediate alongside a full 5-bit rs1a. That is the whole
-      # point of the carve-out: chain_alu cannot afford a wide immediate,
-      # because widening its addi costs chain-alu codepoints quadratically,
+      # point of the carve-out: alu_chain cannot afford a wide immediate,
+      # because widening its addi costs alu-alu-chain codepoints quadratically,
       # whereas here there is no second register field competing for room.
       #
       # Measured: an all-5-bit version of this frame is worth only +81 pairs,
@@ -551,7 +551,7 @@ doc:
            register/immediate choices, so they need no opcodes of their own.
 
   - frame:
-      name: "deref-chain-load-pair, base-chain-load-pair"
+      name: "deref-load-chain, base-load-chain"
       budget: 64
       level: 2
       templates:
@@ -565,7 +565,7 @@ doc:
          * TODO: decide how to balance imma and immb sizes.
 
   - frame:
-      name: chain-li-branch
+      name: li-branch-chain
       budget: 64
       level: 2
       templates:
@@ -581,7 +581,7 @@ doc:
          * TODO: could replace li with alu op and compare result with zero (mostly?).
 
   - frame:
-      name: chain-bit-test-branch
+      name: bit-test-branch-chain
       budget: 32
       level: 2
       templates:
@@ -596,7 +596,7 @@ doc:
       # Chain rules, but first op is result
 
   - frame:
-      name: load-base-branch
+      name: load-base-branch-pair
       budget: 16
       level: 2
       templates:
@@ -610,13 +610,13 @@ doc:
            are unresolved labels in the corpus, so their fit is unmeasured.
 
   - frame:
-      name: load-sp-branch
+      name: load-sp-branch-pair
       # The sp side of the old combined frame (the last undiscriminated
       # SP-relative row): with the base implicit, the freed rs1a
       # column pays for the 10-bit offset this traffic needs (5-bit fit is
       # only 66-69% on sp).  Ops mirror RVC's own split -- c.lwsp exists on
       # both widths, c.ldsp on rv64 only -- so plain lw/ld rather than the
-      # switchable lx: unlike mem-pair-sp's ~100% natural-word traffic, the
+      # switchable lx: unlike mem-sp-pair's ~100% natural-word traffic, the
       # scheduled mix here is genuinely mixed (rv64: ld 63%, lw 22%,
       # lbu 14%), and lbu's half of the block earns ~22 pairs/codepoint.
       budget: 8
@@ -628,7 +628,7 @@ doc:
       rows:
         - ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"]
       notes: |
-         * `immb` as in load-base-branch: unresolved, fit unmeasured.
+         * `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
 
   - frame:
       name: inc-branch-pair
@@ -674,7 +674,7 @@ doc:
       temporary — it exists only because the ISA has that hole.
 
   - frame:
-      name: li-czero-pair
+      name: li-czero-chain
       # The other half of a zicond select: materialise one arm's constant, then
       # conditionally zero it. `li` is the chain temporary, so only two
       # registers are encoded (the condition and the destination), which leaves
@@ -700,7 +700,7 @@ doc:
       # (An earlier note here claimed only 26% were dead. That tested
       # `rd in live_out`, which counts the register as live when the czero is
       # itself what redefines it -- the same a.rd != b.rd subtlety that halved
-      # index-chain-mem-pair. @no_escape gets it right, which is why this frame
+      # index-mem-chain. @no_escape gets it right, which is why this frame
       # scored 107/116/53 against a population estimated at 78/87/45.)
       #
       # Immediate width, over the frame's actual scheduled hits:
@@ -717,11 +717,11 @@ doc:
       # and ~15 at 7, of 155 on sqlite-rv64. Its addends are wide because they
       # are offsets into a running value, not constants. Not viable.
       #
-      # NOTE this frame and czero-select-pair overlap on any czero that has BOTH
+      # NOTE this frame and czero-or-chain overlap on any czero that has BOTH
       # a feeding li and a consuming or. Measured both RULES orders: the split
       # is identical either way (107 / 603 on sqlite-rv64), because the greedy
       # left-to-right pairer reaches the contested czero from the same side
-      # regardless of rule priority. czero-select-pair is ordered first anyway,
+      # regardless of rule priority. czero-or-chain is ordered first anyway,
       # so that if the population ever shifts the larger frame keeps the tie.
       #
       # THE THREE-WAY FUSION IS OUT OF SCOPE. A full select is
@@ -736,7 +736,7 @@ doc:
       # It is excluded solely by the pairwise contract -- a packet holds exactly
       # two instructions -- not by any field shortage. If that contract is ever
       # revisited this is the first candidate: it would take a 4-instruction
-      # select to ONE packet, where this frame and czero-select-pair together
+      # select to ONE packet, where this frame and czero-or-chain together
       # still need two.
       budget: 2
       level: 2
@@ -748,7 +748,7 @@ doc:
         - ["h", "rs2b", "g", "imma[4:0|9:5]*2", "fn3", "rdb"]
 
   - frame:
-      name: index-chain-mem-pair
+      name: index-mem-chain
       # A scales an index and adds it to a base; B accesses through the result,
       # which is then dead. The computed address is the CHAIN TEMPORARY and is
       # not encoded, which is what makes three register operands fit: rs1a (the
@@ -826,7 +826,7 @@ doc:
 
   - frame:
       name: post-inc-pair
-      rules_py_names: [post-inc-addi-pair]   # rule names in rules.py this frame covers
+      rules_py_names: [post-inc-pair]   # rule names in rules.py this frame covers
       budget: 4
       level: 2
       templates:
@@ -867,8 +867,8 @@ doc:
       # Other stuff
 
   - frame:
-      name: mem-pair-sp
-      # Separate from mem-pair because the layouts differ: with the base
+      name: mem-sp-pair
+      # Separate from mem-base-pair because the layouts differ: with the base
       # implicit, the freed `rbase` column pays for a 10-bit shared offset,
       # and nothing in a shared opcode could tell the two row families apart
       # -- a combined frame would owe a discriminator bit.
@@ -879,7 +879,7 @@ doc:
       # c.lwsp/c.ldsp do.  `lx`/`sx` are declared in opsets.xlen_switchable and
       # resolved against the base the scheduler detects from the input.
       #
-      # This is where mem-pair's traffic actually is: 85% of its pairs on
+      # This is where mem-base-pair's traffic actually is: 85% of its pairs on
       # rv32 and 81% on rv64.  It is also the half that NEEDS the width --
       # sp offsets fit five bits only 41% of the time on rv32 against 97% for
       # base-register offsets, which is why the two want different layouts.
@@ -905,10 +905,10 @@ doc:
         - ["h", "rs2b", "g", "rs2a", "imm[9:5]", "fn3", "imm[4:0]"]
       notes: |
          * both opcodes in a pair must be identical operations
-         * offsets differ by one data width, as in mem-pair
+         * offsets differ by one data width, as in mem-base-pair
 
   - frame:
-      name: mem-pair
+      name: mem-base-pair
       budget: 16
       level: 1
       templates:
@@ -957,7 +957,7 @@ doc:
            slots across musl-rv32 and sqlite-rv64.
 
   - frame:
-      name: dual-arith2-pair
+      name: macro-op-pair
       budget: 16
       level: 1
       templates:
@@ -1017,7 +1017,7 @@ doc:
            the low score as a measurement of clang and GCC, not of the frame.
 
   - frame:
-      name: dual-indep-pair
+      name: indep-pair
       # `li` is 6 bits: a 5-bit field plus one opcode repeat (the *li_6s
       # anchor), charged in both slots -- demand 11 -> 17, a 32-block, +169
       # pairs at ~10.6/codepoint.  Worth it only while the space is idle.
@@ -1131,7 +1131,7 @@ doc:
         - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 1 0"]
 
   - frame:
-      name: mvload-jump-pair
+      name: setup-jump-pair
       # Set up a value, then transfer control. The counterpart to
       # arith-jump-pair: that frame's A slot is RSD (rd == rs1), so its rd field
       # is free for the sentinel. Here A's destination and source are DISTINCT

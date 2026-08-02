@@ -93,7 +93,7 @@ one register field across the pair (A's result is B's input) and requires the
 intermediate value to be **dead** so no field need name it — a register-liveness
 condition that is a real pairing constraint.  Other frames constrain operand
 form similarly: a shared read-modify-write destination (`rsd`), dual-arith
-shared sources, or `mem-pair`'s same-base adjacent offsets.  These operand-form
+shared sources, or `mem-base-pair`'s same-base adjacent offsets.  These operand-form
 and liveness constraints are exactly what the yaml frames declare; the "never a
 constraint" statement above holds only for independent pairs.
 

@@ -50,11 +50,11 @@ compiler reads the YAML (and the templates) and emits the matcher.
    templates* as arithmetic on a shared immediate variable — the work is to
    parse/interpret them, not to invent syntax. `analysis/imm_relations.py` now
    parses the template expressions, derives each frame's relation, and checks it
-   against the corpus. Findings: **prologue 100%**, **mem-pair 100%** (once the
+   against the corpus. Findings: **prologue 100%**, **mem-base-pair 100%** (once the
    check is order-insensitive), **dual-mem 0%** — the contorted frame's offset-0
    forms don't fit the `b = -a` addi-template relation and need per-form
    handling (same special-case encoding_assign required).
-   - `mem-pair`: `k*imm(rbase)` and `k*imm+k(rbase)` → B offset = A offset + one
+   - `mem-base-pair`: `k*imm(rbase)` and `k*imm+k(rbase)` → B offset = A offset + one
      width. (`rules.py:570`, `abs(a.imm-b.imm)==width`)
    - `prologue`: `addi sp, -16*imm` and `store rs1b, 16*imm-k(sp)` → store offset
      ties to the frame adjustment. (`rules.py:936`, `b.imm+b.access_width+a.imm==0`)

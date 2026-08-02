@@ -107,6 +107,22 @@ def validate(spec):
         errs.append(f"grid: bits sum to {sum(bits)} + opcode5(5) + marker(2) "
                     f"= {sum(bits) + 7}, not 32")
 
+    # No frame name may CONTAIN another.  Frame names are the identity strings
+    # shared by the yaml, rules.py, the tests and every measurement record, so
+    # they get renamed and grepped in bulk; a name that is a substring of
+    # another turns any careless sweep into silent corruption.  Keeping the set
+    # containment-free means even a naive search cannot go wrong.
+    all_names = []
+    for node in spec.get("doc") or []:
+        frame = node.get("frame") if isinstance(node, dict) else None
+        if frame and frame.get("name"):
+            all_names += [x.strip() for x in str(frame["name"]).split(",")]
+    for a in all_names:
+        for b in all_names:
+            if a != b and a in b:
+                errs.append(f"frame name {a!r} is a substring of {b!r} — "
+                            f"rename one so bulk edits cannot corrupt them")
+
     seen = set()
     for node in spec.get("doc") or []:
         frame = node.get("frame") if isinstance(node, dict) else None

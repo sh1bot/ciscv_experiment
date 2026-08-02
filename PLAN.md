@@ -918,8 +918,8 @@ non-`None` string constitutes a rejection of that specific encoding.
 > scheduler-side semantics each rule enforces — deadness, chaining, operand
 > forms, order-sensitivity — are documented at each rule's definition in
 > `scheduler/rules.py`, which defines two dozen rules (`rsd-alu-pair`,
-> `chain-alu-pair`, the load/store-chain rules, the `*-branch` rules,
-> `mem-pair`, the `dual-*-pair` family, `pre-inc-pair`, `prologue-pair`,
+> `alu-alu-chain`, the load/store-chain rules, the `*-branch` rules,
+> `mem-base-pair`, the `dual-*-pair` family, `pre-inc-pair`, `prologue-pair`,
 > `epilogue-pair`, ...).  A rule's `check(a, b)` raises `NotPair(reason)` to
 > reject a candidate and returns `None` to accept.  This section keeps a single,
 > deliberately simplified example purely to illustrate the rule *mechanism*; do

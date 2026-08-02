@@ -3,7 +3,7 @@ scheduler/imm_contracts.py — immediate widths, derived from encoding.yaml.
 
 `rules.py` used to carry ten named width constants and four inline ranges, each
 a hand-copy of a fact the yaml already states. Four of them had drifted:
-`chain-li-branch` accepted 8 bits against a declared 6, `arith-mem-pair` 7
+`li-branch-chain` accepted 8 bits against a declared 6, `arith-mem-pair` 7
 against 5, its B offset had a field that did not exist, and `pre-inc-pair`
 checked no width at all. Every one was invisible until something else went
 looking.
@@ -15,7 +15,7 @@ stale between edit and regeneration, and staleness is the failure mode we are
 trying to remove.
 
     from scheduler.imm_contracts import width_of
-    bits = width_of("chain-li-branch", "a", "li")     # -> 6, or None
+    bits = width_of("li-branch-chain", "a", "li")     # -> 6, or None
 
 `width_of` returns the DECLARED op width, which is what an op may actually
 carry: the drawn field plus whatever opcode repetition the op's `imm: {bits}`

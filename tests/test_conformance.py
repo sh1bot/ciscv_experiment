@@ -53,9 +53,9 @@ def test_immediate_contracts_derive():
     missing = [r.name for r in RULES if r.name not in table]
     assert not missing, f"rules with no frame contract: {missing}"
     # Spot values this session got wrong in both directions at some point.
-    assert width_of("chain-li-branch", "a", "li") == 8
-    assert width_of("dual-indep-pair", "b", "li") == 6
-    assert width_of("mem-pair", "a", "lw") == 6
+    assert width_of("li-branch-chain", "a", "li") == 8
+    assert width_of("indep-pair", "b", "li") == 6
+    assert width_of("mem-base-pair", "a", "lw") == 6
 
 
 def test_yaml_schema_valid():

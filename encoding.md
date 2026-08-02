@@ -82,7 +82,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
  * Generally second operation produces result, but second op may have no output
    (eg., store, branch) meaning result comes from first, or there's no result at all.
 
-## chain-alu-pair
+## alu-alu-chain
 
     alu     tmp, rs1a, rs2a/imma
     alu     rdb, tmp, rs2b/immb
@@ -95,7 +95,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│immb[4:0]│g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
-## load-chain-alu-pair
+## load-alu-chain
 
     load    tmp, k*imma(rs1a)
     alu     rdb, tmp, rs2b/immb
@@ -106,7 +106,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│  rs2b   │g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
-## store-chain-alu-pair
+## alu-store-chain
 
     alu     tmp, rs1a, rs2a/imma
     store   tmp, k*immb(rs1b)
@@ -117,7 +117,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│  rs1b   │g│  rs2a   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│  rs1b   │g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
-## czero-select-pair
+## czero-or-chain
 
     czero.X tmp, rs1a, rs2a
     or      rdb, tmp, rs2b
@@ -127,7 +127,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs2b   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
-## addi-store-pair
+## addi-store-chain
 
     addi    tmp, rs1a, imma
     store   tmp, 0(rbase)
@@ -145,7 +145,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * A covers li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) as
   register/immediate choices, so they need no opcodes of their own.
 
-## deref-chain-load-pair, base-chain-load-pair
+## deref-load-chain, base-load-chain
 
     load    tmp, k*imma(rs1a)
     load    rdb, k*immb(tmp)
@@ -158,7 +158,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 * TODO: decide how to balance imma and immb sizes.
 
-## chain-li-branch
+## li-branch-chain
 
     li      tmp, imma
     bXX     rs1b, tmp, 4*immb
@@ -173,7 +173,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
   ~13 pairs/codepoint for the extra 32).
 * TODO: could replace li with alu op and compare result with zero (mostly?).
 
-## chain-bit-test-branch
+## bit-test-branch-chain
 
     andi    tmp, rs1a, imma
     beqz/bnez tmp, immb
@@ -188,7 +188,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 # Chain rules, but first op is result
 
-## load-base-branch
+## load-base-branch-pair
 
     load    rda, k*imma(rs1a)
     beqz/bnez rda, zero, 4*immb
@@ -201,7 +201,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * `immb` is the branch displacement, a 5-bit field.  Displacements
   are unresolved labels in the corpus, so their fit is unmeasured.
 
-## load-sp-branch
+## load-sp-branch-pair
 
     load    rda, k*imma(sp)
     beqz/bnez rda, zero, 4*immb
@@ -211,7 +211,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│   rda   │g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
-* `immb` as in load-base-branch: unresolved, fit unmeasured.
+* `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
 
 ## inc-branch-pair
 
@@ -250,7 +250,7 @@ RISC-V has no register+register addressing mode, so `array[i]` costs two
 instructions: form the address, then access it. The address is a pure
 temporary — it exists only because the ISA has that hole.
 
-## li-czero-pair
+## li-czero-chain
 
     li      tmp, imma
     czero.X rdb, tmp, rs2b
@@ -260,7 +260,7 @@ temporary — it exists only because the ISA has that hole.
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │   rdb   │ opcode5 │1 0│
 
-## index-chain-mem-pair
+## index-mem-chain
 
     shXadd  tmp, rs1a, rs2a
     load    rdb, k*immb(tmp)
@@ -337,7 +337,7 @@ Also chain rules with surviving first result, but also sometimes a second result
 
 # Other stuff
 
-# mem-pair-sp
+# mem-sp-pair
 
     load    rda, k*imm(sp)
     load    rdb, k*imm+k(sp)
@@ -352,9 +352,9 @@ Also chain rules with surviving first result, but also sometimes a second result
 │h│  rs2b   │g│  rs2a   │imm[9:5] │ fn3 │imm[4:0] │ opcode5 │1 0│
 
 * both opcodes in a pair must be identical operations
-* offsets differ by one data width, as in mem-pair
+* offsets differ by one data width, as in mem-base-pair
 
-# mem-pair
+# mem-base-pair
 
     load    rda, k*imm(rbase)
     load    rdb, k*imm+k(rbase)
@@ -372,7 +372,7 @@ Also chain rules with surviving first result, but also sometimes a second result
 * No `lb`, `lh` or `lwu`: they account for 12 of 37816 scheduled
   slots across musl-rv32 and sqlite-rv64.
 
-# dual-arith2-pair
+# macro-op-pair
 
     alu     rda, rs1a, rs2a
     alu     rdb, rs1a, rs2a
@@ -423,7 +423,7 @@ Also chain rules with surviving first result, but also sometimes a second result
   available would emit the two halves adjacently and in order. Treat
   the low score as a measurement of clang and GCC, not of the frame.
 
-# dual-indep-pair
+# indep-pair
 
     mv      rda, rs1a
     mv/li   rdb, rs2b/immb
@@ -501,7 +501,7 @@ patterns as possible to tamp down the cost.
 │h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 │h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
 
-## mvload-jump-pair
+## setup-jump-pair
 
     mv      rda, rs1a
     jr      rs1b

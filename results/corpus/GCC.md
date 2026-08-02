@@ -38,19 +38,19 @@ sqlite, GCC's actual hits against clang's scaled to the same instruction count
 ```
 rule                         clang  scaled     gcc   delta
 prologue-pair                  894     790      65    -725
-load-chain-alu-pair           2052    1812    1206    -606
-czero-select-pair              603     533       0    -533
-mvload-jump-pair              6623    5849    5363    -486
-addi-store-pair                797     704     225    -479
-chain-bit-test-branch          902     797     469    -328
+load-alu-chain           2052    1812    1206    -606
+czero-or-chain              603     533       0    -533
+setup-jump-pair              6623    5849    5363    -486
+addi-store-chain                797     704     225    -479
+bit-test-branch-chain          902     797     469    -328
 rsd-alu-pair                  3412    3013    2712    -301
-index-chain-mem-pair           436     385      88    -297
+index-mem-chain           436     385      88    -297
 ...
-load-sp-branch                 477     421     557    +136
-chain-alu-pair                1143    1009    1266    +257
-post-inc-addi-pair             693     612    1038    +426
+load-sp-branch-pair                 477     421     557    +136
+alu-alu-chain                1143    1009    1266    +257
+post-inc-pair             693     612    1038    +426
 pre-inc-pair                   565     499    1059    +560
-dual-indep-pair               5949    5254    5935    +681
+indep-pair               5949    5254    5935    +681
 TOTAL                        43115   38076   35156   -2920
 ```
 
@@ -77,7 +77,7 @@ codepoint budget.
 
 ### 2. GCC 13 never emits `czero` — −627
 
-`czero-select-pair` and `li-czero-pair` are 603 + 107 on clang sqlite and **0 +
+`czero-or-chain` and `li-czero-chain` are 603 + 107 on clang sqlite and **0 +
 0** on GCC, because GCC 13.3 emits no `czero.eqz`/`czero.nez` at all despite
 accepting `zicond` in `-march` (1530 czero instructions in the clang build, 0 in
 GCC's). Nothing is broken; the conditional-select work we did earlier this
@@ -86,8 +86,8 @@ which has better Zicond codegen.
 
 ### 3. GCC prefers the other half of several dual frames — +2060
 
-`pre-inc-pair` doubles (499 → 1059), `post-inc-addi-pair` +70%, `chain-alu-pair`
-+25%, `dual-indep-pair` +13%. These are the frames whose value we have
+`pre-inc-pair` doubles (499 → 1059), `post-inc-pair` +70%, `alu-alu-chain`
++25%, `indep-pair` +13%. These are the frames whose value we have
 repeatedly questioned on clang evidence alone — `pre-inc-pair` in particular was
 called "pretty useless" on clang numbers and is GCC's third-biggest earner among
 the chain frames. Its low clang score was a fact about clang.

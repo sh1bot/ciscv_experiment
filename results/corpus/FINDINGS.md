@@ -26,47 +26,47 @@ representative binary.
 | frame | budget | evidence |
 |---|---|---|
 | `post-inc-shadd-pair` | 4 of post-inc's 16 | **0 hits on all six corpora.** Not because Zba is missing — `sh2add`/`sh3add` occur up to 2687 times and `pre-inc-pair` does consume them. Compilers form the address *before* the access; a post-access shXadd base update is an idiom nothing emits. |
-| `dual-arith2-pair` | 11 used of 16 | Raw hits 1 / 13 / 30 / **0** / 89 / **0**. Only the `mul`/`mulh*` clusters ever fire; add/sub, addw/subw, min/max and every div/rem tuple are zero on all six. Keeping just `{mul}×{mulh,mulhu,mulhsu}` is 3 codepoints and frees the 16-block. |
-| chain-load A-slot | 49 → 14 | The A slot of `deref-chain` and `base-chain` is **100.0% lw/ld across all six**; lb/lbu/lh/lhu/lwu never appear. 7×7 → 2×7 drops the 64-block to 16. |
-| `store-chain-alu-pair` | 32 | ≤0.8 per 1000 everywhere, max 96 raw pairs. `addi-store-pair` drained it, and that is now confirmed out-of-sample. |
+| `macro-op-pair` | 11 used of 16 | Raw hits 1 / 13 / 30 / **0** / 89 / **0**. Only the `mul`/`mulh*` clusters ever fire; add/sub, addw/subw, min/max and every div/rem tuple are zero on all six. Keeping just `{mul}×{mulh,mulhu,mulhsu}` is 3 codepoints and frees the 16-block. |
+| chain-load A-slot | 49 → 14 | The A slot of `deref-load-chain` and `base-load-chain` is **100.0% lw/ld across all six**; lb/lbu/lh/lhu/lwu never appear. 7×7 → 2×7 drops the 64-block to 16. |
+| `alu-store-chain` | 32 | ≤0.8 per 1000 everywhere, max 96 raw pairs. `addi-store-chain` drained it, and that is now confirmed out-of-sample. |
 
 Together roughly **100 codepoints**, against 130 currently spare.
 
 ### Frames that are strong elsewhere but were sized for godot
 
-- **`mvload-jump-pair`** — 33.7–34.5 per 1000 on sqlite (its second-largest
+- **`setup-jump-pair`** — 33.7–34.5 per 1000 on sqlite (its second-largest
   frame there), against 7.5 on godot. Budget is 16, and the yaml note admits
   the load-offset field was sized on a single RV32 idiom: *"54 of 55 are the
   same frame-pointer spill."* sqlite now supplies mass evidence to re-derive
   `imma` honestly.
-- **`load-base-branch`** 18.2–18.5 per 1000 on sqlite vs 7.8 godot;
+- **`load-base-branch-pair`** 18.2–18.5 per 1000 on sqlite vs 7.8 godot;
   **`arith-mem-pair`** 5.0–8.7 vs 1.3. Both deserve a sizing pass. Note the
   offset-overflow distributions were NOT measured, so "widen the field" is a
   hypothesis, not a finding.
 
 ### Godot-flavoured — REFUTED, see §5
 
-`load-sp-branch` (11.0 per 1000 on godot vs 1.1–2.5) and
-`load-chain-alu-pair` (8.3 vs 1.7–2.0) were argued here to track C++
+`load-sp-branch-pair` (11.0 per 1000 on godot vs 1.1–2.5) and
+`load-alu-chain` (8.3 vs 1.7–2.0) were argued here to track C++
 register-pressure spill/reload — corpus *character* rather than a tuning
 accident, on the reasoning that any C++ workload would reproduce it.
 
 **A second C++ corpus refuted this.** cpp-rv64/cpp-rv32 use
-`load-chain-alu-pair` at 0.29/0.34 per 1000 — less than any other corpus in
-the set — and `load-sp-branch` at 1.54/1.70, squarely in the ordinary band.
+`load-alu-chain` at 0.29/0.34 per 1000 — less than any other corpus in
+the set — and `load-sp-branch-pair` at 1.54/1.70, squarely in the ordinary band.
 See §5. Both frames' budgets are reclaimable.
 
-`chain-bit-test-branch` is the mirror image: 24.5 per 1000 on **testcase0**
+`bit-test-branch-chain` is the mirror image: 24.5 per 1000 on **testcase0**
 vs 0.6 on godot, and two anonymous Rust functions own 30% of testcase0's
-hits. ACCOUNTING §6 applies. Same for `addi-store-pair` (14.9 vs 2.4–5.2).
+hits. ACCOUNTING §6 applies. Same for `addi-store-chain` (14.9 vs 2.4–5.2).
 
 ### One op-set eviction
 
-`maxu` in `chain_alu`: 86 occurrences in godot, 21–29 in each new corpus,
+`maxu` in `alu_chain`: 86 occurrences in godot, 21–29 in each new corpus,
 and inside accepted chain pairs 74 slot-uses on godot vs ≤9 anywhere else
 (zero on musl-rv32). It is a Zbb op godot's build happens to emit.
 
-Worth noting `chain-alu-pair`'s rate is *lowest* on godot (3.4 vs 6.3–17.8),
+Worth noting `alu-alu-chain`'s rate is *lowest* on godot (3.4 vs 6.3–17.8),
 so that frame is under-fitted to godot, not over-fitted — it was testcase0
 inflating the pooled rate.
 
@@ -92,7 +92,7 @@ inflating the pooled rate.
 So the headline "RV32 does better" is half a real result and half a weak
 denominator. The real one: the RV32 stream is intrinsically denser in the
 shapes the frames encode — register-pair spills produce adjacent lw/lw and
-sw/sw at consecutive offsets (mem-pair adjacency candidates 14347 vs 8714 on
+sw/sw at consecutive offsets (mem-base-pair adjacency candidates 14347 vs 8714 on
 musl), and carry chains produce dependent ALU pairs (`sltu` 594 vs 40 on
 sqlite).
 
@@ -155,7 +155,7 @@ re-check if a future corpus disagrees.
 `addi4spn` at 6 bits scale-4 does not survive the matched corpora:
 musl-rv32 has 4242 sites, 9.7% not 4-aligned, and u6x4 fits only **39.7%**
 (u7x4 55.1%, u8x4 70.4%). Widening to 7 bits costs ~16 codepoints and pushes
-`dual-indep-pair` from its 16-block to 32. Apply the §6 concentration check
+`indep-pair` from its 16-block to 32. Apply the §6 concentration check
 first — musl-rv32's big-frame functions may own that tail. Scale 8 is
 re-refuted for RV32 (u6x8 fits 43.9%).
 
@@ -166,7 +166,7 @@ re-refuted for RV32 (u6x8 fits 43.9%).
 - Per-frame attribution is first-accepting-rule, so RULES order shapes every
   absolute per-frame number. Cross-corpus ratios *within* one rule are fine.
 - Candidate acceptance ≠ packed pairs, and they diverge badly in one place:
-  on godot, `load-chain-alu-pair` has 44 adjacent candidates but 746 scheduled
+  on godot, `load-alu-chain` has 44 adjacent candidates but 746 scheduled
   pairs (17×), because the list scheduler drags sp-reloads next to consumers.
   This is a live warning for every candidate-based op-set search in
   `analysis/`.
@@ -204,7 +204,7 @@ corpora it cannot close the gap alone.
 
 `addi + jal(ra)` is the top leftover adjacency in all three corpora.
 `is_call` excludes jal-with-link from **every** jump B slot, so argument
-setup before a call — the exact shape `mvload-jump-pair` captures before a
+setup before a call — the exact shape `setup-jump-pair` captures before a
 *tail* call — is unreachable.
 
 Raw adjacency, independently verified: **3900 (musl-rv64) / 6043
@@ -222,22 +222,22 @@ not a hard constraint.
 
 | rule / limit | deficit | musl-rv64 | sqlite-rv64 | musl-rv32 |
 |---|---|---:|---:|---:|
-| mem-pair non-local offset (5u scaled) | +1 | 62 | 151 | **1394** |
-| load-base-branch offset (5u scaled) | +1–2 | 30 | **1034** | 41 |
+| mem-base-pair non-local offset (5u scaled) | +1 | 62 | 151 | **1394** |
+| load-base-branch-pair offset (5u scaled) | +1–2 | 30 | **1034** | 41 |
 | arith-mem-pair B offset (2-bit scaled) | +1–2 | 62 | **693** | 57 |
-| chain-alu addi (6s) | +1–2 | 222 | 163 | 83 |
-| mvload-jump load offset (5u) | +1–2 | 22 | **296** | 27 |
-| addi-store (10s / 5u-sp / base=0) | +1–2 | 98 | 182 | 233 |
+| alu-alu-chain addi (6s) | +1–2 | 222 | 163 | 83 |
+| setup-jump load offset (5u) | +1–2 | 22 | **296** | 27 |
+| addi-store-chain (10s / 5u-sp / base=0) | +1–2 | 98 | 182 | 233 |
 | rsd-alu addi (7s) | +1–2 | 133 | 95 | 94 |
-| dual-indep addi4spn | +1–4 | 111 | 48 | **841** |
+| indep addi4spn | +1–4 | 111 | 48 | **841** |
 | load/store-chain `base-not-sp` | needs base field | 234 | 530 | 313 |
-| chain-bit-test andi not mask-shaped | needs full andi imm | 27 | 271 | 27 |
+| bit-test-branch-chain andi not mask-shaped | needs full andi imm | 27 | 271 | 27 |
 
 Deficits are front-loaded at 1–2 bits everywhere except arith-jump and
 addi-branch, which have long tails to +6/+7. Unaligned/negative offsets
 ("inf") are only 83–143.
 
-Note `mem-pair` +1 bit is worth 1394 pairs on musl-rv32 but only 62–151 on
+Note `mem-base-pair` +1 bit is worth 1394 pairs on musl-rv32 but only 62–151 on
 RV64 — the RV32-specific case, since lw/sw scaling by 4 halves the byte reach.
 This is the same k-scaling asymmetry §2 identified.
 
@@ -245,8 +245,8 @@ This is the same k-scaling asymmetry §2 identified.
 
 **495 / 1174 / 622 pairs measured** as a movability-proven lower bound;
 ceiling ignoring movability is 1894 / 4146 / 2818. Costs no encoding space at
-all. The rules being missed are mvload-jump, load-base-branch, chain-alu and
-mem-pair — the scheduler is failing to bring jumps and branches together with
+all. The rules being missed are setup-jump, load-base-branch-pair, alu-alu-chain and
+mem-base-pair — the scheduler is failing to bring jumps and branches together with
 their partners.
 
 ### Ops in no frame at all
@@ -261,7 +261,7 @@ are independently measured but realizing all of them means widening many
 fields at once. 343/968/1117 of the ENC total are "no numeric deficit"
 near-misses (imm==0 exclusions, mask-shape failures) — patch-verified, medium
 confidence. Branch/jump displacement optimism applies to the call frame and
-to load-base-branch.
+to load-base-branch-pair.
 
 ---
 
@@ -285,7 +285,7 @@ if admissible, closes it outright.
 
 ### Candidate 2 is free money — VERIFIED
 
-The yaml template for `load-chain-alu-pair` is
+The yaml template for `load-alu-chain` is
 `load tmp, k*imma(rs1a)` with rows 1–2 drawing an explicit `rs1a` base field;
 rows 3–4 are the SP-relative variant with a 10-bit offset. **`rules.py`
 applies `@a_sp_mem` unconditionally**, refusing the any-base form the encoding
@@ -332,7 +332,7 @@ Otherwise strike it, and candidates 2–5 deliver about half the gap.
 - Independent same-op mem pairs with free offsets (`lw+lw` 10.6k, `sw+sw`
   5.7k) — two independent offsets need 3 regs + 2×5 bits = 25 bits. The
   encodable residue (~3.8k, same base, delta one width, offset just out of
-  range) is a mem-pair offset-width question, and there are no spare row bits.
+  range) is a mem-base-pair offset-width question, and there are no spare row bits.
 - `mv+mv`, `addi_rsd+sw`, `lw+beqz` residues — shapes existing frames already
   own, failing on ordering or escape. Tuning, not frame gaps.
 
@@ -343,7 +343,7 @@ Otherwise strike it, and candidates 2–5 deliver about half the gap.
 1. **Candidate 2** — delete one decorator, +1250 measured on two corpora, zero
    codepoints. (Then extend `rules_conform` to catch base-register
    disagreements, which is how this hid.)
-2. **Reclaim ~100 codepoints** from §1 (dual-mem-shadd 0/6, dual-arith2,
+2. **Reclaim ~100 codepoints** from §1 (dual-mem-shadd 0/6, macro-op,
    chain-load A-slot 7→2, store-chain).
 3. **Candidate 4** (zicond) at 2 codepoints for ~1.9k pairs — best ratio in
    the set.
@@ -370,16 +370,16 @@ Normalised hits per 1000 instructions:
 
 | frame | godot | cpp-rv64 | cpp-rv32 | musl-rv64 | sqlite-rv64 |
 |---|--:|--:|--:|--:|--:|
-| `load-chain-alu-pair` | **8.27** | **0.29** | **0.34** | 1.71 | 1.86 |
-| `load-sp-branch` | **11.01** | **1.54** | **1.70** | 1.30 | 2.53 |
+| `load-alu-chain` | **8.27** | **0.29** | **0.34** | 1.71 | 1.86 |
+| `load-sp-branch-pair` | **11.01** | **1.54** | **1.70** | 1.30 | 2.53 |
 
 §1 argued these two track C++ register-pressure spill/reload and that "any
 C++ workload would reproduce it". It does not. The C++ corpora use
-`load-chain-alu-pair` **less than any other corpus in the set** — 0.29 against
-musl's 1.71 — and `load-sp-branch` sits in the ordinary 1.3–2.5 band.
+`load-alu-chain` **less than any other corpus in the set** — 0.29 against
+musl's 1.71 — and `load-sp-branch-pair` sits in the ordinary 1.3–2.5 band.
 
-godot's rates are a property of that one binary. `load-chain-alu-pair`'s
-64-codepoint block and `load-sp-branch`'s dedicated 10-bit sp row are
+godot's rates are a property of that one binary. `load-alu-chain`'s
+64-codepoint block and `load-sp-branch-pair`'s dedicated 10-bit sp row are
 justified by nothing but godot, which adds to the ~100 codepoints §1 already
 identified.
 
@@ -387,8 +387,8 @@ identified.
 
 | frame | godot | cpp-rv64 | cpp-rv32 | sqlite-rv64 |
 |---|--:|--:|--:|--:|
-| `load-base-branch` | 7.76 | 11.22 | 11.66 | 18.47 |
-| `mvload-jump-pair` | 7.52 | 14.87 | 14.28 | 34.53 |
+| `load-base-branch-pair` | 7.76 | 11.22 | 11.66 | 18.47 |
+| `setup-jump-pair` | 7.52 | 14.87 | 14.28 | 34.53 |
 
 Both are strong everywhere and weakest on godot — §1's "sized for godot,
 strong elsewhere" reading is confirmed, now on five corpora.
@@ -467,7 +467,7 @@ new optimism, and unlike the existing jump frames it would be *honest* —
 the displacement checked rather than assumed.
 
 Worth noting the same measurement indicts the current frames mildly:
-`arith-jump-pair` and `mvload-jump-pair` accept `j` with no range check at
+`arith-jump-pair` and `setup-jump-pair` accept `j` with no range check at
 all, and 17–26% of `j` targets exceed 8 bits. Those frames have no spare bits
 in their `jr` rows, so making them honest means either a direct-jump-only row
 or accepting the existing fiction.
