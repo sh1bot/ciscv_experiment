@@ -70,6 +70,12 @@ def main():
             continue
         N, packets, pairs = s
         n_dis, comp = r
+        if comp == 0:
+            # A no-C build has no real RVC to score against; those corpora
+            # exist for the cross-build parity table (util/cross_parity.py).
+            print(f"{name:16} (no compressed instructions — skipped; "
+                  f"see cross_parity)")
+            continue
         if n_dis != N:
             print(f"{name:16} ! -noalias has {n_dis} instructions, "
                   f"scheduled file has {N} — not the same build")
