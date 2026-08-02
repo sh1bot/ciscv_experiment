@@ -62,6 +62,81 @@ grid:
 
 # Named opcode sets, referenced from frame `ops` via YAML aliases (*name).
 # Kept here so the large recurring lists are written once.
+# Pseudo-ops: what an op NAME in a frame's `ops` list actually means.
+#
+# A yaml op name like `li` is not an opcode -- it is a register/immediate
+# pattern on a real one, and every consumer needs the same translation
+# (rules.py's mnemonic sets, imm_contracts, rules_conform's probes,
+# encoding_budget's subform, isa/instruction.py's predicates).  Stated once
+# here (A1.9); consumers read it rather than each carrying a copy.
+#
+# ENCODE and MATCH are deliberately different, because they answer
+# different questions:
+#
+#   `encode` is the canonical form a packet EMITS.  This encoding has no
+#   immediate-zero codepoint -- a zero immediate would be indistinguishable
+#   from the register form -- so `mv` emits as `add rd, x0, rs`, NOT as
+#   `addi rd, rs, 0`.  There is exactly one encode form per pseudo-op.
+#
+#   `match` is what the SCHEDULER accepts on input.  Corpus assembly has
+#   been through an assembler and any number of rewrites, so the same
+#   intent arrives spelled several ways; every spelling must be recognised
+#   or the pair is silently lost.  Be liberal here and strict in `encode`.
+#
+# Guards that are NOT expressible as operand patterns stay in the code and
+# are named here so the reason is not lost: `li`/`mv` require a RESOLVED
+# immediate (an unresolved relocation such as `addi rd, x0, %lo(sym)` must
+# never be treated as a load-immediate or a move -- dropping the relocation
+# mis-encodes it), and `addi_rsd` must be tested before `addi4spn` (an
+# `addi sp, sp, -32` frame adjust is a read-modify-write of sp belonging to
+# prologue/epilogue, not an sp-relative address).
+pseudo_ops:
+  li:
+    base: addi
+    encode: {rs1: x0}                    # addi rd, x0, imm
+    match:  [{op: addi, rs1: x0}]
+    requires: resolved-immediate
+  mv:
+    base: addi
+    encode: {op: add, rs2: x0}           # add rd, x0, rs -- NOT addi rd,rs,0
+    match:  [{op: addi, imm: 0},         # the assembler's spelling
+             {op: add,  rs2: x0},        # the canonical form, either operand
+             {op: add,  rs1: x0}]
+    requires: resolved-immediate
+  addi4spn:
+    base: addi
+    encode: {rs1: x2}                    # addi rd, sp, imm (scaled x4)
+    match:  [{op: addi, rs1: x2, imm: nonzero}]
+    after: addi_rsd                      # frame adjusts are not addi4spn
+  addi_rsd:
+    base: addi
+    encode: {rd: rs1}                    # addi rd, rd, imm
+    match:  [{op: addi, rd: rs1}]
+  inc:
+    base: addi
+    encode: {rd: rs1, imm: 1}
+    match:  [{op: addi, rd: rs1, imm: 1}, {op: addiw, rd: rs1, imm: 1}]
+  dec:
+    base: addi
+    encode: {rd: rs1, imm: -1}
+    match:  [{op: addi, rd: rs1, imm: -1}, {op: addiw, rd: rs1, imm: -1}]
+  j:
+    base: jal
+    encode: {rd: x0}
+    match:  [{op: jal, rd: x0}, {op: j}]
+  ret:
+    base: jalr
+    encode: {rd: x0, rs1: x1, imm: 0}
+    match:  [{op: jalr, rd: x0, rs1: x1, imm: 0}, {op: ret}]
+  beqz:
+    base: beq
+    encode: {rs2: x0}
+    match:  [{op: beq, rs2: x0}, {op: beqz}]
+  bnez:
+    base: bne
+    encode: {rs2: x0}
+    match:  [{op: bne, rs2: x0}, {op: bnez}]
+
 opsets:
   # The RSD set, shared by rsd-alu-pair and arith-jump-pair. Both slots write
   # `alu rsd, rsd, ...` -- rd and rs1 are the SAME field -- so li (rs1=x0) is
@@ -176,6 +251,7 @@ opsets:
   loads:    &loads    [lb, lbu, lh, lhu, lw, lwu, ld]
   branches: &branches [beq, bne, blt, bge, bltu, bgeu]
   mem:      &mem      [lbu, lhu, lw, ld, sb, sh, sw, sd]
+
 
   # Width-annotated ops: a bare mnemonic takes the frame's base immediate range;
   # these request an explicit wider range, and each bit of range above the base

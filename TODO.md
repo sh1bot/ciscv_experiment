@@ -22,11 +22,14 @@ The planning documents name `encoding.yaml` as the source of truth (see
    default, but RVE (16 registers) has no x31 and needs another — x7 is the
    candidate.  Settle before any ABI claim; `yaml_migration.md`'s
    "compiler's own register, required dead" wording is now superseded.
-5. **Wide `li`.**  Over 61033 `li` in five corpora: 68.8% fit 5 bits, 74.1%
-   fit 6, 90.1% fit 8, 97.4% fit 10.  Current widths: 6 bits in
-   `dual-indep-pair`, 8 in `chain-li-branch`, 10 in `li-czero-pair` and
-   `mvload-jump-pair`.  The remaining question is whether the 8-10-bit tail
-   deserves a dedicated frame or a lui-split, or is an accepted loss.
+5. **Wide `li`** — CLOSED: an ACCEPTED LOSS.  Over 61033 `li` in five
+   corpora: 68.8% fit 5 bits, 74.1% fit 6, 90.1% fit 8, 97.4% fit 10, against
+   widths of 6 (`dual-indep`), 8 (`chain-li-branch`), 10 (`li-czero`,
+   `mvload-jump`).  A `lui`+`addi` pair frame is endorsed by four independent
+   sources (FRAMES.md §3) but cannot work here: 32 bits of constant against a
+   20-bit operand budget.  Base RISC-V's own split of wide constants was made
+   on sound grounds — if a 15-bit form were worth having, it would already
+   exist — so the tail stays solo and is not second-guessed.
 8. **Frame priority.**  DECIDED: default to YAML ORDER, but make it
    experimentally flexible — the scheduler should let a rule be promoted or
    demoted so the effect on attribution and totals can be observed.  Today
@@ -36,10 +39,14 @@ The planning documents name `encoding.yaml` as the source of truth (see
    attribution snapshot).  To build: derive rule order from the yaml, and add
    a priority override (CLI and/or API) that reorders without editing either
    source.
-9. **Pseudo-op canonicalization placement** (`li`/`mv`/`addi4spn`, P1–P5 in
-   `yaml_migration.md`, explicitly TBD).  Defined today in three places:
-   predicates in `isa/instruction.py`, `encoding_budget.subform()`, and the
-   yaml's op vocabulary.  The yaml's op names are meaningless without them.
+9. **Pseudo-op canonicalization** — DECIDED: the yaml owns it.  A top-level
+   `pseudo_ops:` section states each name's base opcode, its single canonical
+   `encode` form, and the list of `match` spellings the scheduler accepts on
+   input (liberal in, strict out — and note `mv` ENCODES as `add rd, x0, rs`,
+   never `addi rd, rs, 0`, because this encoding has no immediate-zero
+   codepoint).  `rules_conform` now reads it instead of keeping a private
+   table.  Remaining: have `isa/instruction.py`'s predicates and
+   `encoding_budget.subform()` read it too, so the last two copies go.
 10. **Hardware-decoder opcode alignment** — DECIDED: an OBJECTIVE, held
     until it cannot be achieved, at which point it degrades to a nicety for
     the frame that broke it — and that concession is stated explicitly at the

@@ -61,13 +61,26 @@ from util.encoding_render import op_name, op_contracts
 
 # Pseudo-op names the yaml may use that are register-operand choices on a real
 # mnemonic rather than opcodes of their own.
-PSEUDO_BASE = {"li": "addi", "mv": "addi", "addi4spn": "addi",
-               "addi_rsd": "addi", "addi_other": "addi",
-               "inc": "addi", "dec": "addi",
-               "j": "jal", "j_near": "jal", "ret": "jalr",
-               "beqz": "beq", "bnez": "bne", "bltz": "blt", "bgez": "bge",
-               "blez": "bge", "bgtz": "blt",
-               "bltu_r": "bltu", "bge_r": "bge", "bgeu_r": "bgeu"}
+def _yaml_pseudo_bases():
+    """{pseudo_op: real_mnemonic} from encoding.yaml's `pseudo_ops` (A1.9).
+    The yaml states the translation once; this reads it rather than keeping a
+    fourth copy."""
+    import yaml as _yaml
+    with open(os.path.join(ROOT, "encoding.yaml")) as fh:
+        spec = _yaml.safe_load(fh)
+    return {name: d["base"]
+            for name, d in (spec.get("pseudo_ops") or {}).items()}
+
+
+PSEUDO_BASE = dict(_yaml_pseudo_bases())
+# Names that exist only as conform's own probe/row spellings, not as ops the
+# yaml declares: `_r` marks an operand-reversed branch (same opcode, the
+# counter in rs2), `j_near`/`addi_other` are analysis subforms, and the
+# remaining zero-compare aliases appear in rules.py's B sets.
+PSEUDO_BASE.update({"addi_other": "addi", "j_near": "jal",
+                    "bltz": "blt", "bgez": "bge", "blez": "bge",
+                    "bgtz": "blt",
+                    "bltu_r": "bltu", "bge_r": "bge", "bgeu_r": "bgeu"})
 
 # Register numbers the probes use. Nothing here may be x0 (rules read x0 as a
 # sentinel) or x2 (sp, which is what the base-class probe is trying to vary).
