@@ -129,6 +129,13 @@ def validate(spec):
                                 or not all(isinstance(x, str) for x in rpn)):
             errs.append(f"{name}: rules_py_names must be a list of strings")
 
+        for h in frame.get("probe") or []:
+            if not isinstance(h, dict) or not all(
+                    isinstance(h.get(s), dict) and "op" in h[s]
+                    for s in ("a", "b")):
+                errs.append(f"{name}: probe hint must give a and b op dicts "
+                            f"(got {h!r})")
+
         ma = frame.get("measures_also")
         if ma is not None:
             if not isinstance(ma, dict) or set(ma) - {"a", "b"} or not all(

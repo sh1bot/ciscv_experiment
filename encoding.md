@@ -142,8 +142,6 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│immb[9:5]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
 * TODO: decide how to balance imma and immb sizes.
-* TODO: maybe use g and h for the other immediate?  Or switch them between +2 bits on a or b
-  immediate?
 
 ## chain-li-branch
 

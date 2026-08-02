@@ -465,8 +465,6 @@ doc:
         - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
       notes: |
          * TODO: decide how to balance imma and immb sizes.
-         * TODO: maybe use g and h for the other immediate?  Or switch them between +2 bits on a or b
-           immediate?
 
   - frame:
       name: chain-li-branch
@@ -728,6 +726,11 @@ doc:
       ops:
         - {a: [ld, sd], b: [{op: addi, imm: {bits: 5, signed: false, scale: 8}}]}
         - {a: [lw, sw], b: [{op: addi, imm: {bits: 5, signed: false, scale: 4}}]}
+      # A8.2 probe hint: a zero stride is meaningless (remapped to 32), so the
+      # zero-immediate standard probes never reach this rule.
+      probe:
+        - {a: {op: ld, rd: 10, rs1: 12, imm: 0},
+           b: {op: addi, rd: 12, rs1: 12, imm: 8}}
       rows:
         - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
         - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rda"]
@@ -771,6 +774,15 @@ doc:
       ops:
         - {a: [{op: lx, imm: {bits: 10, signed: false}}], b: [{op: lx, imm: {bits: 10, signed: false}}]}
         - {a: [{op: sx, imm: {bits: 10, signed: false}}], b: [{op: sx, imm: {bits: 10, signed: false}}]}
+      # A8.2 probe hints: twin sp-based accesses one natural word apart.
+      # Deltas are the rv32 word — the default base the conformance run uses
+      # before any input settles XLEN; under an rv64-set run these hints
+      # fail to match and the contracts report unverified rather than wrong.
+      probe:
+        - {a: {op: lx, rd: 10, rs1: 2, imm: 0},
+           b: {op: lx, rd: 11, rs1: 2, imm: 4}, lockstep: true}
+        - {a: {op: sx, rs1: 2, rs2: 10, imm: 0},
+           b: {op: sx, rs1: 2, rs2: 11, imm: 4}, lockstep: true}
       rows:
         - ["h", "rda",  "g", "imm[4:0|9:5]*2", "fn3", "rdb"]
         - ["h", "rs2b", "g", "rs2a", "imm[9:5]", "fn3", "imm[4:0]"]
@@ -798,6 +810,27 @@ doc:
         - {a: [{op: sh, imm: *mp6}], b: [{op: sh, imm: *mp6}]}
         - {a: [{op: sw, imm: *mp6}], b: [{op: sw, imm: *mp6}]}
         - {a: [{op: sd, imm: *mp6}], b: [{op: sd, imm: *mp6}]}
+      # Conformance probe hints (A8.2): the standard probe shapes cannot
+      # construct twin same-base accesses one width apart, so the widths
+      # above were unverifiable without these.  lockstep: scanning one offset
+      # moves the other with it, preserving the delta.
+      probe:
+        - {a: {op: lbu, rd: 10, rs1: 12, imm: 0},
+           b: {op: lbu, rd: 11, rs1: 12, imm: 1}, lockstep: true}
+        - {a: {op: lhu, rd: 10, rs1: 12, imm: 0},
+           b: {op: lhu, rd: 11, rs1: 12, imm: 2}, lockstep: true}
+        - {a: {op: lw, rd: 10, rs1: 12, imm: 0},
+           b: {op: lw, rd: 11, rs1: 12, imm: 4}, lockstep: true}
+        - {a: {op: ld, rd: 10, rs1: 12, imm: 0},
+           b: {op: ld, rd: 11, rs1: 12, imm: 8}, lockstep: true}
+        - {a: {op: sb, rs1: 12, rs2: 10, imm: 0},
+           b: {op: sb, rs1: 12, rs2: 11, imm: 1}, lockstep: true}
+        - {a: {op: sh, rs1: 12, rs2: 10, imm: 0},
+           b: {op: sh, rs1: 12, rs2: 11, imm: 2}, lockstep: true}
+        - {a: {op: sw, rs1: 12, rs2: 10, imm: 0},
+           b: {op: sw, rs1: 12, rs2: 11, imm: 4}, lockstep: true}
+        - {a: {op: sd, rs1: 12, rs2: 10, imm: 0},
+           b: {op: sd, rs1: 12, rs2: 11, imm: 8}, lockstep: true}
       rows:
         - ["h", "rda",  "g", "imm[4:0]",   "rbase", "fn3", "rdb"]
         - ["h", "rs2b", "g", "rs2a",        "rbase", "fn3", "imm[4:0]"]

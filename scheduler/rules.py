@@ -13,6 +13,18 @@ from functools import wraps
 
 from isa.instruction import Instruction
 from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
+from scheduler.imm_contracts import width_of as _yaml_width
+
+
+def _w(rule: str, slot: str, op: str) -> int:
+    """A declared immediate width from encoding.yaml, required to exist.
+    Every numeric width below derives through here at import (TODO A8.1), so
+    the number in the rule and the number in the frame are the same number."""
+    v = _yaml_width(rule, slot, op)
+    if v is None:
+        raise RuntimeError(
+            f"encoding.yaml declares no immediate width for {rule}/{slot}/{op}")
+    return v
 
 # Which base this run is scheduling for.  Set once per input by __main__ from
 # the corpus's own ELF-class header (see isa/xlen.detect_xlen); frames that
@@ -86,16 +98,15 @@ _RSD_ALU_MN = frozenset({
     })
 _RSD_ALU_REGS = frozenset(range(32))         # x0..x31 — a FULL 5-bit field
 
-# Signed immediate widths, per the yaml op contracts. rsd-alu-pair's rows put
-# four register operands in the four 5-bit columns and can spare 7 bits for
-# addi/li; arith-jump-pair spends its rd column on a sentinel and draws only
-# imma[4:0], so it caps the same ops at 5.
-_RSD_IMM_BITS   = {"addi": 7, "addiw": 5, "andi": 5}
-_RSD_JUMP_BITS  = {"addi": 6, "addiw": 6, "andi": 6}
+# Signed immediate widths, derived from the yaml op contracts at import.
+_RSD_IMM_BITS   = {mn: _w("rsd-alu-pair", "a", mn)
+                   for mn in ("addi", "addiw", "andi")}
+_RSD_JUMP_BITS  = {mn: _w("arith-jump-pair", "a", mn)
+                   for mn in ("addi", "addiw", "andi")}
 _RSD_SHIFT_MN = frozenset({"slli", "srli"})
-# Shift-amount width is per-frame like the signed widths: rsd-alu-pair keeps
-# the 5-bit field, arith-jump-pair's ops all carry a sixth bit (rv64 shamts).
-_RSD_SHIFT_BITS, _RSD_JUMP_SHIFT_BITS = 5, 6
+# Shift-amount width is per-frame like the signed widths.
+_RSD_SHIFT_BITS = _w("rsd-alu-pair", "a", "slli")
+_RSD_JUMP_SHIFT_BITS = _w("arith-jump-pair", "a", "slli")
 
 # The ALU set shared by the three CHAIN frames — encoding.yaml `chain_alu`.
 # Chain slots write `alu tmp, rs1a, ...` / `alu rdb, tmp, ...` with rs1 an
@@ -105,9 +116,10 @@ _RSD_SHIFT_BITS, _RSD_JUMP_SHIFT_BITS = 5, 6
 _CHAIN_ALU_MN = frozenset({"addi", "andi", "add", "addw", "and", "or", "sub",
                            "xor", "xori", "maxu", "sltu", "sltiu",
                            "slli", "srli", "srliw"})
-_CHAIN_IMM_BITS = {"addi": 6, "andi": 5, "xori": 5, "sltiu": 5}   # signed
+_CHAIN_IMM_BITS = {mn: _w("chain-alu-pair", "b", mn)          # signed
+                   for mn in ("addi", "andi", "xori", "sltiu")}
 _CHAIN_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
-_CHAIN_SHIFT_HI = 31                          # 5-bit unsigned shift amount
+_CHAIN_SHIFT_HI = (1 << _w("chain-alu-pair", "b", "slli")) - 1
 
 
 def _chain_imm_in_range(insn: Instruction) -> None:
@@ -654,6 +666,7 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 # differ only in which load carries the imm10 offset.
 
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
+_DEREF_OFF_BITS = _w("deref-chain-load-pair", "a", "lw")   # split imma cells
 
 
 @must_chain_base
@@ -664,9 +677,10 @@ def _deref_chain_load_pair(a: Instruction, b: Instruction) -> None:
     if a.rbase is None or a.rd is None:
         raise NotPair("A missing base/dest register")
     shift = a.access_shift or 0
-    if not a.uimm_fits(10, shift):
-        max_off = ((1 << 10) - 1) << shift
-        raise NotPair(f"A offset exceeds 10-bit scaled range (max {max_off})")
+    bits = _DEREF_OFF_BITS
+    if not a.uimm_fits(bits, shift):
+        max_off = ((1 << bits) - 1) << shift
+        raise NotPair(f"A offset exceeds {bits}-bit scaled range (max {max_off})")
     if b.imm != 0:
         raise NotPair("B offset must be zero")
     return None
@@ -682,7 +696,7 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
     if a.imm != 0:
         raise NotPair("A offset must be zero")
     shift = b.access_shift or 0
-    if not b.uimm_fits(10, shift):
+    if not b.uimm_fits(_DEREF_OFF_BITS, shift):
         raise NotPair("big-imm")
     return None
 
@@ -738,6 +752,8 @@ def _base_chain_load_pair(a: Instruction, b: Instruction) -> None:
 # No lb/lh/lwu: they accounted for 12 of 37816 scheduled slots.  arith-mem-pair
 # reuses this set for its B slot.
 _MEM_PAIR_MN = frozenset({"lbu", "lhu", "lw", "ld", "sb", "sh", "sw", "sd"})
+_MEM_PAIR_OFF_BITS = _w("mem-pair", "a", "lw")
+_MEM_PAIR_SP_OFF_BITS = _w("mem-pair-sp", "a", "lx")
 
 
 @exclusive_rd
@@ -757,7 +773,7 @@ def _mem_pair(a: Instruction, b: Instruction) -> None:
     # once per op on the opcode list (encoding.yaml mem-pair).  The wide sp
     # form is its own frame (mem-pair-sp) -- an sp access too wide for this
     # field belongs to that frame or to neither.
-    imm_bits = 6
+    imm_bits = _MEM_PAIR_OFF_BITS
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
@@ -801,7 +817,7 @@ def _mem_pair_sp(a: Instruction, b: Instruction) -> None:
         raise NotPair("bad-delta")
     shift = a.access_shift or 0
     for insn in (a, b):
-        if not insn.uimm_fits(10, shift):
+        if not insn.uimm_fits(_MEM_PAIR_SP_OFF_BITS, shift):
             raise NotPair("big-imm")
 
 
@@ -863,10 +879,14 @@ def _b_slot_mnems(role: str) -> frozenset:
     return frozenset(k[1] for k in _role_tuples(role))
 
 
+_POST_INC_STRIDE_BITS = _w("post-inc-addi-pair", "b", "addi")
+_POST_INC_OFF_BITS = _w("post-inc-addi-pair", "a", "lw")
+
+
 def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
-    """stride_insn.imm is a nonzero uimm5-with-remap scaled by mem's data width."""
+    """stride_insn.imm is a nonzero width-scaled unsigned-with-remap stride."""
     shift = mem.access_shift if mem.access_shift is not None else 0
-    return stride_insn.uimm_fits(5, shift, nonzero='remap')
+    return stride_insn.uimm_fits(_POST_INC_STRIDE_BITS, shift, nonzero='remap')
 
 
 def _is_li_mv_addi4spn(insn: Instruction) -> bool:
@@ -955,7 +975,7 @@ def post_inc_family(role: str):
                 raise NotPair("load-clobbers-base")
             # A's offset rides the width-scaled imma[4:0] field.
             shift = a.access_shift if a.access_shift is not None else 0
-            if not a.uimm_fits(5, shift):
+            if not a.uimm_fits(_POST_INC_OFF_BITS, shift):
                 raise NotPair("A-big-imm")
             update_ok(a, b)
         return check
@@ -969,23 +989,33 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
         raise NotPair("B-addi-imm-mismatch")
 
 
+_DUAL_ADDI4SPN_BITS = _w("dual-indep-pair", "a", "addi4spn")
+_DUAL_LI_BITS = _w("dual-indep-pair", "a", "li")
+# The un-extended field width: mv declares nothing, so its width IS the field.
+_DUAL_FIELD_BITS = _w("dual-indep-pair", "a", "mv")
+
+
 @dual_family("indep_pair")
 def _dual_indep(a: Instruction, b: Instruction) -> None:
     """Two fully independent small pseudo-ops (li / mv / addi4spn)."""
+    li_lim = 1 << (_DUAL_LI_BITS - 1)
     for insn in (a, b):
         if not _is_li_mv_addi4spn(insn):
             raise NotPair("is-not-li_mv_addi4spn")
-        if insn.is_addi4spn and not insn.uimm_fits(6, 2, nonzero='remap'):
+        if insn.is_addi4spn and not insn.uimm_fits(
+                _DUAL_ADDI4SPN_BITS, 2, nonzero='remap'):
             raise NotPair(f"addi4spn immediate {insn.imm} out of range")
-        # immb is a 5-bit field plus one opcode repeat = 6 bits; imma is 5.
-        if insn.is_li and (insn.imm is None or not (-32 <= insn.imm <= 31)):
+        # li's extra bit above the drawn field rides one opcode repeat.
+        if insn.is_li and (insn.imm is None
+                           or not (-li_lim <= insn.imm < li_lim)):
             raise NotPair("li-big-imm")
     # Only immb carries the extra bit, so at most one of the two may exceed the
     # narrow field.  Which SLOT it lands in does not matter: this frame requires
     # mutual independence, so the encoder may swap the pair to put the wide
     # operand in immb.
+    nlim = 1 << (_DUAL_FIELD_BITS - 1)
     wide = sum(1 for i in (a, b)
-               if i.is_li and i.imm is not None and not (-16 <= i.imm <= 15))
+               if i.is_li and i.imm is not None and not (-nlim <= i.imm < nlim))
     if wide > 1:
         raise NotPair("li-both-wide")
     # A→B independence is enforced by _reject_dependence; also require B↛A
@@ -1011,6 +1041,7 @@ def _dual_indep(a: Instruction, b: Instruction) -> None:
 
 _LI_BRANCH_A_MN = frozenset({"addi"})
 _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
+_CHAIN_LI_BITS = _w("chain-li-branch", "a", "li")
 
 
 @must_chain
@@ -1019,10 +1050,9 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     """A loads an 8-bit constant; B compares it against a register and branches."""
     if not a.is_li:
         raise NotPair("A not li form (must be addi rd, x0, imm)")
-    # encoding.yaml declares li at 8 bits: a 5-bit imma column plus three
-    # doublings on the opcode list.
-    if not a.imm_fits(8):
-        raise NotPair("immediate out of 8-bit signed range [-128..127]")
+    # The 5-bit imma column plus the doublings the yaml's li op buys.
+    if not a.imm_fits(_CHAIN_LI_BITS):
+        raise NotPair(f"immediate out of {_CHAIN_LI_BITS}-bit signed range")
     return None
 
 
@@ -1097,7 +1127,7 @@ def _inc_branch_pair(a: Instruction, b: Instruction) -> None:
 
 _BIT_BRANCH_A_MN = frozenset({"andi", "slli", "srli"})
 _BIT_BRANCH_B_MN = frozenset({"beqz", "bnez", "beq", "bne"})
-_BIT_BRANCH_IMM_HI = 63          # imma[5:0], unsigned — encoding.yaml slli_6u
+_BIT_BRANCH_IMM_HI = (1 << _w("chain-bit-test-branch", "a", "andi")) - 1
 
 
 def _is_pow2_imm(v) -> bool:
@@ -1213,7 +1243,7 @@ _INDEX_MEM_TUPLES: frozenset = frozenset({
 })
 _INDEX_MEM_A_MN = frozenset(a for a, _ in _INDEX_MEM_TUPLES)
 _INDEX_MEM_B_MN = frozenset(b for _, b in _INDEX_MEM_TUPLES)
-_INDEX_MEM_OFF_BITS = 5
+_INDEX_MEM_OFF_BITS = _w("index-chain-mem-pair", "b", "lw")
 
 
 @must_chain_base
@@ -1260,6 +1290,8 @@ _PRE_INC_TUPLES: frozenset = frozenset({
 
 _PRE_INC_A_MN = frozenset(a for a, _ in _PRE_INC_TUPLES)
 _PRE_INC_B_MN = frozenset(b for _, b in _PRE_INC_TUPLES)
+_PRE_INC_BUMP_BITS = _w("pre-inc-pair", "a", "addi")
+_PRE_INC_OFF_BITS = _w("pre-inc-pair", "b", "lw")
 
 
 @a_is_rsd
@@ -1279,28 +1311,32 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
         if a.imm is None or not a.imm_multiple(shift):
             raise NotPair("A-stride-not-width-multiple")
         v = a.imm >> shift if a.imm >= 0 else -((-a.imm) >> shift)
-        if not (-512 <= v <= 511):
+        lim = 1 << (_PRE_INC_BUMP_BITS - 1)
+        if not (-lim <= v < lim):
             raise NotPair("A-big-imm")
     else:
         # shXadd rows: the stride is the register, so B keeps the width-scaled
-        # immb[4:0] offset field.
-        if b.has_mem_operand and not b.uimm_fits(5, b.access_shift or 0):
+        # immb offset field.
+        if b.has_mem_operand and not b.uimm_fits(
+                _PRE_INC_OFF_BITS, b.access_shift or 0):
             raise NotPair("B-big-imm")
     return None
 
 
 _EPILOGUE_A_MN = frozenset({"addi"})
+_PROLOGUE_IMM_BITS = _w("prologue-pair", "a", "addi")
+_EPILOGUE_IMM_BITS = _w("epilogue-pair", "a", "addi")
 _EPILOGUE_B_MN = frozenset({"jalr", "ret"})
 
 
 def _prologue_pair(a: Instruction, b: Instruction) -> None:
     """A reserves stack frame, B stores return address at top of frame
-    A: addi sp, sp, -N  - 7-bit uimm*16, nonzero
+    A: addi sp, sp, -N  - width-scaled negative uimm x16, nonzero
     B: sw ra, N-4(sp)  - store return address
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
-    if not a.nimm_fits(7, 4, nonzero=True):
+    if not a.nimm_fits(_PROLOGUE_IMM_BITS, 4, nonzero=True):
         raise NotPair("A-big-imm")
     if b.rs1 != 2:
         raise NotPair("B-not-SP-base")
@@ -1318,12 +1354,13 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
     last).  The reverse would run the transfer first and skip the addi, so it is
     not a valid packet -- is_control_transfer also keeps ret/jalr out of A.
 
-    A: addi sp, sp, +N  — 7-bit uimm×16, nonzero (max 2032)
-    B: ret or jalr rd∈{0,1} with 12-bit signed offset
+    A: addi sp, sp, +N  — width-scaled uimm×16, nonzero
+    B: ret or jalr rd∈{0,1} with 12-bit signed offset (architectural, not a
+       yaml field — the jump target register is what the row encodes)
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
-    if not a.uimm_fits(7, 4, nonzero=True):
+    if not a.uimm_fits(_EPILOGUE_IMM_BITS, 4, nonzero=True):
         raise NotPair("A-big-imm")
     if b.rd not in (0, 1):
         raise NotPair("B rd must be x0 or x1")
@@ -1351,8 +1388,10 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 
 _SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
 _MVLOAD_JUMP_A_MN = frozenset({"addi", "lbu", "lw", "ld"})
-_MVLOAD_JUMP_LI_BITS = 10        # imma[4:0|9:5] spans rs2+rs1 on the li row
+_MVLOAD_JUMP_LI_BITS = _w("mvload-jump-pair", "a", "li")
 _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
+                                 # (a ONE-ROW narrowing — imm_contracts is
+                                 # per-op and cannot express it)
 # A DIRECT jump needs a displacement, and encoding.yaml pays for it out of the
 # A slot: rows 3-4 give immb the rs2+rs1 span, leaving A only the funct5 column.
 # So li narrows to 5 bits and a load has no offset field left at all.  (The

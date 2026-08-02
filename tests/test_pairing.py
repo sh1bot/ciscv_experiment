@@ -575,8 +575,10 @@ class TestIndepPair:
             epi.check(a, b)
 
     def test_epilogue_sp_adjust_out_of_range_no_pair(self):
-        """sp adjustment beyond 7-bit uimm×16 (>2032) doesn't pair."""
-        a = make_insn("addi", rd=2, rs1=2, imm=2048)  # 128×16, needs 8 bits
+        """sp adjustment beyond the yaml's 10-bit uimm×16 field (>16368)
+        doesn't pair.  (The rule used to hand-narrow this to 7 bits; deriving
+        from the yaml lifted it — A8.1.)"""
+        a = make_insn("addi", rd=2, rs1=2, imm=16384)  # 1024×16, needs 11 bits
         b = make_insn("ret",  rd=0, rs1=1, imm=0)
         assert can_pair(a, b) is not None
 

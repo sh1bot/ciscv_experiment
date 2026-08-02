@@ -84,23 +84,23 @@ Recorded here so they are not lost; each needs a home in the design documents.
   iteration.
 - RVC-eligibility tests measure the comparison baseline, not the new encoding.
 
-## A8 — making the yaml actually singular
+## A8 — making the yaml actually singular (largely done; residue below)
 
-Every fact stated in the yaml and re-stated elsewhere is a drift waiting to
-happen; `tests/test_conformance.py` gates what can be compared mechanically.
-Remaining steps, in leverage order:
+Every numeric width in `rules.py` now derives from the yaml at import
+(`_w(rule, slot, op)` over `scheduler/imm_contracts.py`), and per-frame
+`probe:` hints let `rules_conform` verify 55 of 56 declared contracts (98%),
+including the scaled and coupled-immediate shapes it could never reach.
+What remains, deliberately:
 
-1. **Consume `scheduler/imm_contracts.py` in `rules.py`.**  Ten named width
-   constants plus four inline ranges are hand-copies of yaml facts over 32
-   call sites.  Replacing them with `width_of(rule, slot, mnemonic)` leaves one
-   number instead of two.  Blocker: a rule's check does not know its own name;
-   give `PairingRule` a back-reference and it falls out.
-2. **Extend `rules_conform`'s probe reach.**  The unverified immediate
-   contracts are frames whose pair shape the probe cannot construct (e.g.
-   `mem-pair`'s two same-mnemonic accesses one width apart).  Per-frame probe
-   hints in the yaml would close it.  The unverified list grew to 21 when
-   mem-pair, pre-inc and post-inc gained declared contracts, so this is now
-   the largest gap between "conform passed" and "verified".
+- **Row-level narrowings are not per-op facts**: mvload-jump's direct-j row
+  narrows li to 5 bits and drops the load offset; load/store-chain's
+  SP-relative rows carry the 10-bit sp field (A9 will restructure those).
+  These stay as documented literals until contracts can attach to rows.
+- **`chain-bit-test-branch a:andi` is unverifiable by interval compare**:
+  its accepted set is powers of two and masks, not a range.  Covered by
+  `tests/test_pairing.py` boundary tests instead.
+- Mnemonic SETS and mode tables (`_INC_MODES`/`_DEC_MODES` restate
+  inc-branch-pair's joint clusters) could derive the same way widths now do.
 
 ## A11 — the corpus is shaped by its compiler's cost model (third instance)
 

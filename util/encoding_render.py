@@ -380,7 +380,8 @@ def imm_field_bits(frame, grid, slot):
             continue
         cells = row["c"] if isinstance(row, dict) else row
         pos = 0
-        for cell in cells:
+        row_width = 0     # a field may be SPLIT across cells (imma[9:5] in one
+        for cell in cells:  # column, imma[4:0] in another) — sum within a row
             body, span = _cell(cell)
             stem = body.split("[")[0]
             if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
@@ -397,8 +398,9 @@ def imm_field_bits(frame, grid, slot):
                         f"Immediate fields are register columns only; extra "
                         f"range is bought by opcode duplication "
                         f"(imm: {{bits}}), never by widening the row.")
-                width = max(width, sum(bits[c] for c in cspan))
+                row_width += sum(bits[c] for c in cspan)
             pos += span
+        width = max(width, row_width)
     return width
 
 

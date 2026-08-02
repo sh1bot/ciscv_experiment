@@ -274,22 +274,90 @@ def reachable_configs(rule, frame, slot, pin=None):
     return out
 
 
+def hint_builders(frame, slot, mnemonic):
+    """Probe builders from the frame's `probe:` hints (encoding.yaml, A8.2).
+
+    The standard SHAPES place every register differently, so a pair shape they
+    cannot construct — twin accesses off the SAME base, an immediate coupled
+    to its partner's (mem-pair's one-width delta), a meaningless zero seed
+    (post-inc's nonzero stride) — leaves its rule unreachable and its widths
+    unverified.  A hint spells out one valid pair explicitly: full operand
+    tuples per slot, seed immediates, and `lockstep: true` when the partner
+    immediate must move with the scanned one.  Returns [build(v) -> (a, b)]
+    for scanning `slot`'s immediate."""
+    out = []
+    for h in frame.get("probe") or []:
+        spec = h.get(slot) or {}
+        if _real_mnemonic(spec.get("op", "")) != _real_mnemonic(mnemonic):
+            continue
+        other = h.get("b" if slot == "a" else "a") or {}
+        lock = bool(h.get("lockstep"))
+        seed, oseed = spec.get("imm", 0), other.get("imm", 0)
+
+        def build(v, delta, spec=spec, other=other, lock=lock, slot=slot):
+            ov = v + delta if lock else oseed
+            aspec, ai = (spec, v) if slot == "a" else (other, ov)
+            bspec, bi = (other, ov) if slot == "a" else (spec, v)
+            a = _mk(aspec["op"], aspec.get("rd"), aspec.get("rs1"),
+                    aspec.get("rs2"), ai)
+            b = _mk(bspec["op"], bspec.get("rd"), bspec.get("rs1"),
+                    bspec.get("rs2"), bi)
+            return a, b
+
+        from functools import partial
+        out.append(partial(build, delta=oseed - seed))
+        if lock:
+            # The mirrored coupling: a symmetric rule (mem-pair accepts the
+            # pair in either offset order) reaches its top value only with
+            # the partner BELOW the scanned slot.
+            out.append(partial(build, delta=seed - oseed))
+    return out
+
+
 def accepted_range(rule, frame, mnemonic, slot, lo=-4096, hi=4096):
     """The union of immediate values `rule` accepts for `mnemonic` in `slot`,
-    over every configuration that reaches the rule at all. None if no
-    configuration does — a probe result, not a proof."""
+    over every configuration that reaches the rule at all — the standard
+    shape probes plus any `probe:` hints the frame declares. None if nothing
+    reaches it — a probe result, not a proof."""
     configs = reachable_configs(rule, frame, slot, pin=(slot, mnemonic))
-    if not configs:
+    hints = hint_builders(frame, slot, mnemonic)
+    if not configs and not hints:
         return None
+    # A pseudo-op is an operand form, and the form can CHANGE under the scan:
+    # addi4spn at imm 0 is mv.  Count a value only while the instruction still
+    # is the op whose contract is being verified.
+    form = {"li": "is_li", "mv": "is_mv", "addi4spn": "is_addi4spn"}.get(mnemonic)
     seen = set()
+
+    def try_pair(v, a, b):
+        if form and not getattr(a if slot == "a" else b, form, False):
+            return
+        try:
+            rule.check(a, b)
+            seen.add(v)
+        except NotPair:
+            pass
+        except Exception:
+            pass
+
     for a_mn, b_mn, shape, kw in configs[:CONFIG_CAP]:
         for v in range(lo, hi + 1):
-            if v in seen:
-                continue
-            imms = (v, 0) if slot == "a" else (0, v)
-            if accepts(rule, a_mn, b_mn, shape, *imms, **kw):
-                seen.add(v)
+            if v not in seen:
+                imms = (v, 0) if slot == "a" else (0, v)
+                try_pair(v, *_pair(a_mn, b_mn, shape, *imms, **kw))
+    for build in hints:
+        for v in range(lo, hi + 1):
+            if v not in seen:
+                try_pair(v, *build(v))
     return (min(seen), max(seen)) if seen else None
+
+
+def _mem_scale(op):
+    """The access width a memory op's scaled offset field divides by, or None
+    for a non-memory op."""
+    i = _mk(op, RD_A, RS_1, RS_2, 0)
+    shift = getattr(i, "access_shift", None)
+    return (1 << shift) if shift is not None else None
 
 
 def base_class_note(siblings, frame, slot):
@@ -399,13 +467,18 @@ def main():
         contracts = op_contracts(frame)
         for mn, c in contracts.items():
             bits = c.get("bits")
-            if not bits or c.get("scale"):     # scaled fields need the width; skip
+            if not bits:
                 continue
             base = _real_mnemonic(mn)
+            if base in ("jal", "beq", "bne", "blt", "bge", "bltu", "bgeu"):
+                # A branch/jump DISPLACEMENT field: deliberately not range-
+                # checked by rules.py (corpus targets are unresolved labels —
+                # the optimism policy, see CLAUDE.md), so there is nothing to
+                # verify the declaration against.
+                continue
             for slot in ("a", "b"):
                 if base not in frame_slot_ops(frame, slot):
                     continue
-                want = bits_to_range(bits, c.get("signed", True))
                 got = accepted_range(rule, frame, mn, slot)
                 if got is None:
                     unreachable += 1
@@ -415,9 +488,19 @@ def main():
                                      f"(other constraints may gate it)")
                     continue
                 reached += 1
-                if got != want:
-                    notes.append(f"{slot}: {mn} yaml {bits}b = {want}, "
-                                 f"rules.py accepts {got}")
+                # A scaled field holds VALUE = k * field: the declared scale
+                # for a non-memory op, the access width for a memory one.
+                k = c.get("scale") or _mem_scale(mn) or 1
+                signed = c.get("signed", True)
+                lo, hi = bits_to_range(bits, signed)
+                want = (lo * k, hi * k)
+                # An unsigned no-zero field remaps 0 to 2^bits (a zero stride
+                # or offset is meaningless there) — also an exact match.
+                remap = (k, (1 << bits) * k) if not signed else None
+                if got != want and got != remap:
+                    notes.append(f"{slot}: {mn} yaml {bits}b x{k} = {want}"
+                                 + (f" (or remapped {remap})" if remap else "")
+                                 + f", rules.py accepts {got}")
         if multi and verbose:
             print(f"· {rn}: frame '{frame['name']}' covers "
                   f"{frame['rules_py_names']}; op sets not compared per-rule")
