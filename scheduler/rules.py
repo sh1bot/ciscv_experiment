@@ -1672,8 +1672,18 @@ def _arg_call_pair(a: Instruction, b: Instruction) -> None:
     """Argument setup followed by a call through a hard-coded base register."""
     if not _is_hardcoded_call(b):
         raise NotPair("B-not-hardcoded-call")
+    # The displacement is measured in PACKETS, and every packet is four bytes,
+    # so a target is 4-aligned by construction in this ISA. The corpus is not:
+    # it was linked with RVC, so half its function entries land on a 2-byte
+    # boundary and the byte displacement is odd*2. That is an artifact of the
+    # build we are reading, not of the scheme being measured, so only the RANGE
+    # is checked here -- the low two bits would be zero if our own linker had
+    # placed the target. Without this, cpp-rv32's 2463 far calls all failed on
+    # alignment alone and the frame measured zero on the corpus it was built
+    # for, while godot's happened to be even and measured 1721.
     off = b.imm if b.imm is not None else 0
-    if off % 4 or not _fits_s(off // 4, _ARG_CALL_OFF_BITS):
+    reach = 1 << (_ARG_CALL_OFF_BITS - 1)          # packets each way
+    if not -4 * reach <= off <= 4 * (reach - 1):
         raise NotPair("B-displacement-out-of-range")
     if not _arg_call_a_ok(a):
         raise NotPair("A-not-encodable-here")
