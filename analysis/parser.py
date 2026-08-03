@@ -471,15 +471,33 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
 # Line tokenization
 # ---------------------------------------------------------------------------
 
+def _strip_annotations(line: str) -> str:
+    """Remove a `# comment` and objdump's glued `<target>` annotation.
+
+    objdump writes the resolved target of a computed branch onto the end of the
+    operand list, with no separator a splitter would notice:
+
+        jalr  -0x722(ra) <write+0x24a680>
+
+    Left in place it makes `_parse_mem_operand` fail, so the instruction
+    decodes with no base register and a zero offset -- which is how every far
+    call in cpp-rv32 and cpp-rv64 read as a plain `jalr x0` with nothing
+    attached. The godot dump spells the same annotation `# sym`, which the
+    comment strip already removed, and that is the only reason far calls
+    appeared to exist in one corpus and not the others.
+    """
+    line = re.sub(r'#.*$', '', line)
+    line = re.sub(r'//.*$', '', line)
+    return re.sub(r'\s*<[^<>]*>\s*$', '', line).strip()
+
+
 def _tokenize_line(line: str) -> tuple[Optional[str], Optional[str], list[str], str]:
     """Parse an assembly source line.
 
     Returns: (label, mnemonic, operand_tokens, raw_line)
     """
     raw = line
-    # Strip comments
-    line = re.sub(r'#.*$', '', line).strip()
-    line = re.sub(r'//.*$', '', line).strip()
+    line = _strip_annotations(line)
 
     if not line:
         return None, None, [], raw
@@ -528,7 +546,7 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
     type_function: set = set()  # labels declared .type @function
 
     for line in lines:
-        stripped = re.sub(r'#.*$', '', line).strip()
+        stripped = _strip_annotations(line)
         if not stripped:
             continue
 
@@ -626,7 +644,7 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
 
     for line in lines:
         raw = line
-        stripped = re.sub(r'#.*$', '', line).strip()
+        stripped = _strip_annotations(line)
 
         def _buf(line):
             """Buffer a passthrough line to block header or instruction prefix."""

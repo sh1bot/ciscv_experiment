@@ -208,7 +208,7 @@ def test_jalr_with_a_displacement_is_a_call_not_a_jump():
     """
     from analysis.parser import parse_file
     blocks, _fns = parse_file(
-        "f:\n\tauipc\tra,0x11b\n\tjalr\t-0x722(ra)\n"
+        "f:\n\tauipc\tra,0x11b\n\tjalr\t-0x722(ra) <write+0x24a680>\n"
         "g:\n\tauipc\tra,0x11b\n\tjalr\tra,-0x722(ra)\n"
         "h:\n\tauipc\tt1,0x11a\n\tjr\t0x4b6(t1)\n")
     jalrs = [i for b in blocks for i in b.instructions if i.mnemonic == "jalr"]
