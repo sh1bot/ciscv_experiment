@@ -1272,3 +1272,43 @@ two instructions (`auipc;jalr`: 2463 on cpp-rv32, 2147 on cpp-rv64, zero on
 musl and sqlite) — there the jalr half is pairable for free and needs only one
 partner. But a 20-bit `jal` reaches 100% of these corpora, so in the packet
 ISA that case may not exist at all.
+
+### Correction: the split call does not need two partners — it needs no lump
+
+The framing above (that the split needs TWO movable candidates) described a
+variant where both halves pair. With a 20-bit `adduipc` that is not the design:
+a 20-bit immediate IS the whole operand space, so `adduipc` can only ever be a
+solo. The right reading is the simple one:
+
+* `jalr ra, imm10(ra)` with an implicit base and implicit link is a 10-bit B
+  slot — **the same shape as `cm.jalt`**. It therefore has exactly the same
+  pairing opportunity: the same A candidates, the same 66.9 / 56.0 / 60.3%.
+* The difference is one standing 32-bit word beside it.
+
+Per call site, in words:
+
+| | today | index | split |
+|---|---|---|---|
+| call | 1 (solo `jal`) | 0 | 1 (solo `adduipc`) |
+| partner | 1 (solo) | 0 | 0 |
+| packet | — | 1 `[A \| cm.jalt]` | 1 `[A \| jalr]` |
+| **total** | **2** | **1** | **2** |
+
+The lump eats the entire gain. The split is never worse than today and never
+better: it converts a pairing opportunity into nothing.
+
+The only thing that could rescue it is amortising one base over several calls,
+which requires a base register that survives a call — so not `ra`, which every
+`jalr` overwrites with the link, but a callee-saved register held across the
+group. Even granting that for free, and grouping greedily per function:
+
+| base reloads needed | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|---------------------|----------|---------------|-------------|
+| ±512 packets (10-bit) | 14901 48.7% | 3210 62.1% | 5032 71.8% |
+| ±2048 packets (12-bit)| 8703 28.4% | 2848 55.1% | 4735 67.6% |
+| calls per base (10-bit) | 2.05 | 1.61 | 1.39 |
+
+Net saving is (paired calls − reloads): +5583 on cpp, **−312 on musl, −808 on
+sqlite**. Positive only on C++, only at a quarter of the index's value, and
+only if a callee-saved register is free — which it is not. With `ra` as the
+base, sharing is impossible and the net is exactly zero everywhere.
