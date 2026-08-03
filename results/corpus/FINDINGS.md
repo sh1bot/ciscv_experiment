@@ -615,6 +615,20 @@ exact squares (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256), so the axes hold 8,
 | **11** | **128** | **4500 (88%)** | **35.2** |
 | 16 | 256 | 5090 (100%) | 19.9 |
 
+MEASURED, all three corpora scheduled end to end (total pairs, and the
+frame's own hits):
+
+| config | block | musl-rv32 | sqlite-rv64 | cpp-rv64 | total vs 16x16 | frame hits |
+|---|--:|--:|--:|--:|--:|--:|
+| 16/axis | 256 | 27506 | 41498 | 84439 | — | 5090 |
+| **11/axis, 3-corpus fit** | **128** | 27385 | 41389 | 84196 | **-473** | 4655 |
+| 11/axis, 2-corpus fit | 128 | — | — | 83595 | (cpp -844) | — |
+| 8/axis, 2-corpus fit | 64 | 27282 | 41261 | 83432 | (-1468) | — |
+
+The shipped configuration keeps **91% of the frame's hits for 50% of its
+codepoints**, and the 128 codepoints given up were earning 3.7 pairs each —
+under the floor near 6, so the cut is correct.
+
 As the marginal cost of KEEPING space: 64 -> 128 buys 745 census pairs
 (11.6/cp), 128 -> 256 buys 590 (4.6/cp).  Deflated by the ~0.7
 census-to-measured factor seen throughout this project those are roughly 8
