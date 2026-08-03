@@ -1553,6 +1553,36 @@ def _load_call_chain(a: Instruction, b: Instruction) -> None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# addi-store-off-chain
+# ---------------------------------------------------------------------------
+# addi-store-chain's offset-bearing sibling: A computes a value from one base,
+# B stores it at an offset from ANOTHER base, and the value dies there.  The
+# zero-offset frame spends its whole row on a 10-bit addi immediate, so an
+# offset can only be had by giving that width back.
+
+_ASO_A_MN = frozenset({"addi"})
+_ASO_B_MN = frozenset({"sb", "sh", "sw", "sd"})
+_ASO_A_BITS = _w("addi-store-off-chain", "a", "addi")
+_ASO_B_BITS = _w("addi-store-off-chain", "b", "sw")
+
+
+@must_chain_stored
+@no_escape
+@a_base_not_from_auipc
+def _addi_store_off_chain(a: Instruction, b: Instruction) -> None:
+    """Compute a value, store it at an offset from another base."""
+    if a.rd is None or a.rs1 is None or b.rbase is None:
+        raise NotPair("MALFORMED: missing register")
+    if a.rs1 == 0:
+        raise NotPair("A-is-li")            # li belongs to the frames that draw it
+    if a.imm is None or not a.imm_fits(_ASO_A_BITS):
+        raise NotPair("A-big-imm")
+    if not b.uimm_fits(_ASO_B_BITS, b.access_shift or 0):
+        raise NotPair("B-big-imm")
+    return None
+
+
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
@@ -1626,6 +1656,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_LOAD_STORE_A_MN,
         b_mnemonic_set=_LOAD_STORE_B_MN,
         check=_load_store_chain,
+    ),
+    PairingRule(
+        name="addi-store-off-chain",
+        a_mnemonic_set=_ASO_A_MN,
+        b_mnemonic_set=_ASO_B_MN,
+        check=_addi_store_off_chain,
     ),
     PairingRule(
         name="load-call-chain",

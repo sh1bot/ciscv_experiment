@@ -421,6 +421,21 @@ Also chain rules with surviving first result, but also sometimes a second result
 * Both offsets are width-scaled and unsigned; the loaded value is the
   chain temporary and is not encoded.
 
+## addi-store-off-chain
+
+*Compute a value from one base and store it at an offset from another.*
+
+    addi    tmp, rs1a, imma
+    store   tmp, k*immb(rbase)
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│  rs1a   │g│immb[4:0]│  rbase  │ fn3 │imma[4:0]│ opcode5 │1 0│
+
+* `immb` is width-scaled and unsigned; `imma` is signed.  The stored
+  value is the chain temporary and is not encoded.
+
 ## load-call-chain
 
 *Load a function pointer and call through it (virtual dispatch).*
