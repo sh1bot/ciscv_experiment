@@ -111,10 +111,18 @@ Every numeric width in `rules.py` now derives from the yaml at import
 including the scaled and coupled-immediate shapes it could never reach.
 What remains, deliberately:
 
-- **Row-level narrowings are not per-op facts**: setup-jump's direct-j row
-  narrows li to 5 bits and drops the load offset.  (The other instance, the
-  SP-relative chain rows, dissolved with the A9 split.)  Stays a documented
-  literal until contracts can attach to rows.
+- **Row-level narrowings are not per-op facts**, and this is a live HAZARD,
+  not merely a documented literal.  `imm_field_bits` takes the WIDEST row, so
+  a frame whose rows differ in shape is priced against its most generous one.
+  Concretely: `setup-jump-pair` draws `imma[4:0|9:5]` on its `li` row, so
+  pricing reports a 6-bit LOAD offset as free — while its load row also fields
+  `rda`, `rs1a` and `rs1b` and is full at 20 bits, where six offset bits would
+  need 21.  Nothing declares that today, but nothing prevents it either, and
+  the accounting would authorise an unencodable widening exactly as the g/h
+  machinery once did.  (Its direct-j row separately narrows `li` to 5 bits and
+  drops the load offset; the SP-relative chain rows dissolved with A9.)
+  Fix: attach contracts to ROWS, or have `lint_frame` reject an op whose
+  declared width exceeds the narrowest row able to hold that op's operands.
 - **`bit-test-branch-chain a:andi` is unverifiable by interval compare**:
   its accepted set is powers of two and masks, not a range.  Covered by
   `tests/test_pairing.py` boundary tests instead.
