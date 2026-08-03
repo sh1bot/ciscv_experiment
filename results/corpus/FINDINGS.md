@@ -1312,3 +1312,59 @@ Net saving is (paired calls − reloads): +5583 on cpp, **−312 on musl, −808
 sqlite**. Positive only on C++, only at a quarter of the index's value, and
 only if a callee-saved register is free — which it is not. With `ra` as the
 base, sharing is impossible and the net is exactly zero everywhere.
+
+### Correction: the split saves one word of three, not zero of two
+
+The word count above took a bare `jal` as the baseline. If the baseline call
+is itself the two-instruction form — and it is, wherever the ISA has no solo
+20-bit `jal` to fall back on — then the A slot has to be counted as the solo
+it would otherwise be, and the tally is 3 / 1 / 2:
+
+| words                | today | index | split |
+|----------------------|-------|-------|-------|
+| A (argument setup)   | 1 solo | 0 (in the packet) | 0 (in the packet) |
+| high half            | 1 `adduipc` | 0 | 1 `adduipc` |
+| transfer             | 1 `jalr` | 1 `[A \| cm.jalt]` | 1 `[A \| jalr]` |
+| **total**            | **3** | **1** | **2** |
+
+So the split captures HALF the index's saving, not none of it, and both are
+gated by the same number: each needs exactly ONE A candidate, and `jalr` with
+an implicit base is the same 10-bit B slot as `cm.jalt`. At the eight-op set
+that is 66.9 / 57.1 / 60.9%:
+
+| bytes saved  | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|--------------|----------|---------------|-------------|
+| paired calls | 20485    | 2953          | 4266        |
+| index (2 words) | 164 KiB | 23.6 KiB    | 34.1 KiB    |
+| split (1 word)  | 82 KiB  | 11.8 KiB    | 17.1 KiB    |
+
+Which baseline applies is the whole question. A 20-bit packet displacement
+covers 100% of all three corpora, so IF the packet ISA keeps a solo `jal` with
+a 20-bit field, the baseline is two words and the split is neutral. If it does
+not — or for a text segment past that reach — the baseline is three and the
+split is worth half the table, for no table, no `jvt` and no Zcmt.
+
+## `util/anchor_scan.py`: stop answering these questions by hand (2026-08)
+
+Four candidate-frame questions in a row were answered with throwaway scripts,
+and three of them were wrong in the same way: they counted the instruction
+that happened to be adjacent. `analysis/anchors.py` + `util/anchor_scan.py`
+make the correct analysis the cheap one.
+
+It caches the annotated stream the scheduler already produces — parse,
+liveness, schedule, pair, reduced to plain tuples — keyed by the content of
+the parser, scheduler, pairer, rules and yaml, so it invalidates itself when
+any of them changes. First run per corpus ~30 s on musl and minutes on cpp;
+every run after that is 0.3 s. A hundredfold, which is the difference between
+"measure it" and "guess".
+
+What it corrects, in one pass:
+
+* anchors another frame already paired are reported and excluded;
+* candidates another frame already took are excluded;
+* every candidate in the block that could be REORDERED to the anchor is
+  considered, not just the neighbour;
+* operand SHAPES are scored, not mnemonics, since the frame picks its op set.
+
+It reports the candidate-count distribution, the marginal reach of every
+shape, the greedy op-set order, and the cumulative coverage of a fixed set.

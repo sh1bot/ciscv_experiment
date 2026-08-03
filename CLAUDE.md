@@ -29,6 +29,25 @@ derive (TODO A8).
 - `[C]`/`[?]` markers are emitted on SOLO instructions only (by design) — a
   "missed something compressible" signal; paired instructions never show them.
 
+## Answering "what could pair with X?"
+
+Use `util/anchor_scan.py` (built on `analysis/anchors.py`). **Never answer a
+candidate-frame question from adjacency** — the instruction next to an anchor
+is not the instruction that could be there. The tool corrects for all three
+biases at once: it scores against the real scheduled and paired stream, skips
+candidates another frame has already taken, and lets the scheduler reorder a
+candidate down to the anchor. It scores operand SHAPES rather than mnemonics,
+because a frame chooses its op set and the question is what is encodable.
+
+    python3 util/anchor_scan.py cpp-rv32 --anchor call --budget 10
+    python3 util/anchor_scan.py cpp-rv32 --fixed 'mv rd5,rs5' 'li rd3,imm7'
+
+The first run per corpus pays for the schedule (~30 s on musl, minutes on
+cpp); it caches the annotated stream under `results/cache/` and every run
+after that is ~0.3 s. The cache key is the content of the parser, scheduler,
+pairer, rules and yaml, so it invalidates itself when any of them changes —
+never hand-clear it, and never trust a hand-rolled adjacency script instead.
+
 ## Conventions
 
 - Develop on the designated feature branch; keep `main` synced when asked.
