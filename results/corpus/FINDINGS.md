@@ -1442,3 +1442,49 @@ back is an index-width question (worth 1.3 KiB), not a codepoint question.
 musl is the corpus where tail calls matter most (669, 11% of its transfers) —
 the wrapper-heavy libc idiom — and it is also the corpus with no far calls at
 all, so `cm.jt` is the whole of its wart story.
+
+### State of the work, and what the frame moves
+
+Full rescore, 2026-08 (`util/corpus_scores.py`). "to parity" is in PAIRS: how
+many more this corpus needs before packets beat the RVC the binary shipped.
+
+| corpus | insns | pairs | vs RVC | to parity | frame | remaining |
+|--------|-------|-------|--------|-----------|-------|-----------|
+| cpp-rv32       | 420866 | 89499 | 110.7% | +31954 | 21797 | +10157 |
+| cpp-rv64       | 411687 | 84188 | 111.5% | +33750 | 20333 | +13417 |
+| sqlite-rv32    | 192768 | 44585 | 106.6% |  +9185 |  3631 |  +5554 |
+| sqlite-rv64    | 189677 | 41589 | 108.3% | +11366 |  2753 |  +8613 |
+| musl-gcc-rv32  | 119956 | 25801 | 109.1% |  +7875 |  2410 |  +5465 |
+| musl-gcc-rv64  | 103442 | 20401 | 110.1% |  +7589 |   936 |  +6653 |
+| musl-rv32      | 119026 | 27433 | 102.7% |  +2438 |  1838 |   +600 |
+| musl-os-rv32   | 109880 | 25424 | 102.9% |  +2382 |  1769 |   +613 |
+| musl-rv64      | 102040 | 21838 | 108.1% |  +5978 |    —  |     —  |
+| musl-os-rv64   |  93289 | 19921 | 108.5% |  +5745 |    —  |     —  |
+| sqlite-gcc-rv64| 167510 | 33124 | 112.7% | +15124 |    —  |     —  |
+| sqlitem-rv64   | 201905 | 43998 | 108.9% | +12944 |    —  |     —  |
+| godot          |  90172 | 13183 | 111.9% |  +8185 |  2192 |  +5993 |
+| testcase0      |  21876 |  4099 |  99.5% |    −81 |    —  |     —  |
+| **TOTAL**      |        |       |        | **+111593** | | |
+
+The frame closes 68% of cpp-rv32's gap, 60% of cpp-rv64's, and takes
+musl-rv32 and musl-os-rv32 to within ~600 pairs of beating real RVC. Across
+the nine corpora measured it is worth 57659 pairs against a gap of 101749 —
+**a bit over half of everything still owed.** No other single frame in the
+encoding is within an order of magnitude of that.
+
+Two corpora say why it works for different reasons:
+
+* **godot** is 1693 near calls and 6694 FAR ones — a PLT-heavy shared-library
+  build. Its pairing win is only 1372 words but the wart removal is 1844, so
+  most of its 8.6 KiB comes from Zcmt eliminating `auipc` rather than from
+  pairing at all. That is the case where the architectural feature earns its
+  keep on its own.
+* **musl-rv32** (clang) has no far calls and a weak 44.2% A-partner rate, yet
+  the frame still closes three quarters of its remaining gap — because its gap
+  was already small.
+
+The rate to watch is the A-partner rate, which varies more than anything else
+in the table: 67.1% on cpp-rv64 down to 44.2% on musl-rv32. It is the ceiling
+on the pairing half of the win, and it is set by how much spare independent
+work sits beside a call — dense C++ argument marshalling has plenty, a thin
+libc wrapper has almost none.
