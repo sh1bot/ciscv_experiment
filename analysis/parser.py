@@ -843,17 +843,24 @@ def annotate_branch_distances(blocks) -> None:
     label_at: dict = {}
     for bb in blocks:
         # Labels are carried by the BLOCK, not the instruction; a block's label
-        # names the position of its first instruction.
+        # names the position of its first instruction.  Compiler-local labels
+        # are NOT unique across a file -- cpp-rv32 defines `.Lpcrel_hi1` 101
+        # times and has 48938 definitions for 21869 distinct names -- so every
+        # definition is kept and the NEAREST is used below.  Taking the first
+        # match instead measured the distance to some other function's copy
+        # and reported half of cpp-rv32's conditional branches as out of range
+        # when a B-type branch cannot physically exceed +/-4 KiB.
         if getattr(bb, "label", None):
-            label_at.setdefault(bb.label, len(seq))
+            label_at.setdefault(bb.label, []).append(len(seq))
         seq.extend(bb.instructions)
     for i, insn in enumerate(seq):
         tgt = insn.branch_target
         if tgt is None:
             continue
-        j = label_at.get(tgt)
-        if j is None:
+        where = label_at.get(tgt)
+        if not where:
             continue                       # external symbol, PLT, or register
+        j = min(where, key=lambda p: abs(p - i))
         insn.est_packet_distance = (j - i) * PACKETS_PER_INSN
 
 

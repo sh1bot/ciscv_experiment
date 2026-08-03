@@ -880,3 +880,45 @@ another.  (Not confusing `li` with `addi`, incidentally: zero `addi` in
 cpp-rv32 are spelled `addi rd, x0, imm` — the disassembler always writes
 `li`.)
 
+## Branch displacements estimated: the 5-bit frames are overclaiming (2026-08)
+
+Displacements were the last standing optimism -- rules never range-checked
+them, because the true distance needs a packet layout that does not exist
+until scheduling has run.  `parse_file` now annotates every branch and jump
+whose target label is defined in the file with `est_packet_distance`: the
+instruction count to that label times 0.8 packets per instruction.  Rough on
+purpose, and usable only to REJECT, never to claim encodability.
+
+One trap on the way: compiler-local labels are NOT unique across a file.
+cpp-rv32 defines 48938 labels with only 21869 distinct names (`.Lpcrel_hi1`
+appears 101 times), so a first-match lookup measured the distance to another
+function's copy and reported half its conditional branches as beyond 12 bits
+-- impossible, since a B-type branch cannot exceed +/-4 KiB.  Resolving to the
+NEAREST definition fixes it; musl was unaffected because its labels are
+address-derived and unique.
+
+| corpus | kind | 5b | 6b | 8b | 10b | 12b |
+|---|---|--:|--:|--:|--:|--:|
+| musl-rv32 | cond-branch | 33.5% | 49.3% | 76.3% | 94.6% | 100% |
+| cpp-rv32 | cond-branch | 61.7% | 76.3% | 93.3% | 98.7% | 100% |
+| musl-rv32 | call | 0.8% | 1.7% | 5.5% | 12.1% | 21.6% |
+| cpp-rv32 | call | 0.4% | 0.5% | 0.9% | 1.7% | 3.0% |
+
+**The 10-bit frames are vindicated** -- `li-branch-chain`,
+`bit-test-branch-chain`, `inc-branch-pair` and `setup-jump-pair` all draw ten
+and sit at 94.6-98.7%.  The optimism was, for them, roughly right.
+
+**The 5-bit frames are not.**  `load-base-branch-pair` and
+`load-sp-branch-pair` draw five, where only 33.5% (musl) / 61.7% (cpp) of
+conditional branches reach.  `load-base-branch-pair` alone scored 3730 pairs
+on cpp-rv32 and 737 on musl-rv32, so on the order of 1400-1900 of its claimed
+pairs cannot encode their displacement.  That is the largest known
+overstatement left in the headline numbers, and it is now measurable rather
+than merely suspected.
+
+Next: wire the estimate into those rules as a rejection, remeasure, and
+restate the corpus scores.  Expect the totals to FALL.  (Better source
+available first: musl's labels encode their target address --
+`.Lbranch_0004757e` is 0x4757e -- so the distance can be read exactly instead
+of counted, wherever the corpus uses that form.)
+
