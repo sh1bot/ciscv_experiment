@@ -712,3 +712,57 @@ only insofar as its instructions end up solo once the frame is gone) returns
 73% of attributed pairs.  The recoverable mass is spread proportionally
 across the op mix rather than concentrated in particular ops, so the choice
 is not an artifact of counting attributed hits.
+
+## setup-call-pair is REFUTED, not parked (2026-08)
+
+FINDINGS §4 listed `mv/li/addi4spn` + `call` as the largest idiom in the
+corpus (~19663 adjacencies, ~14k estimated pairs, 4 codepoints) and parked it
+on a policy question: whether the jump-displacement optimism extended to
+calls.  It does not, and the question is now closed by measurement rather
+than by policy.
+
+Call targets in `cpp-rv32` were resolved against symbols defined in the same
+file (30603 calls, none unresolved) and the displacement expressed in PACKET
+units:
+
+| field | 5b | 8b | 10b | 12b | 14b | 16b | 18b |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| calls reachable | 0.4% | 1.0% | 1.7% | 3.0% | 5.9% | 12.7% | 45.4% |
+
+A packet holds 20 operand bits.  `mv rda, rs1a` spends 10, leaving 10 for the
+target — **1.7% of calls**.  Even a bare call with no argument setup, spending
+all 20 bits on the displacement, would not reach the 18-bit column's 45%.
+The ~14k estimate counted adjacencies without ever resolving a displacement,
+the same error that inflated the inverted-condition far-jump candidate.
+
+`auipc`-fed pairs need no measurement to reject.  `auipc rd, %pcrel_hi(sym)`
+followed by `addi rd, rd, %pcrel_lo(sym)` (7856 in cpp-rv32) or a load (6301)
+carries **32 bits** of PC-relative immediate; the pair exists precisely
+BECAUSE the constant does not fit one instruction.  Folding it into a 32-bit
+packet would mean fitting 32 bits of address plus two register fields into
+20.  The relocation policy (TODO A5) is shorthand for that arithmetic, not an
+independent choice.
+
+**The lesson generalises**: an adjacency census is meaningless for any idiom
+whose operand is a displacement or a relocated address until the operand is
+resolved.  Three candidates have now died this way (far-jump diamond,
+setup-call, auipc); the exclusion policies encode the capacity reality and
+should not be re-litigated on adjacency counts alone.
+
+### Where cpp-rv32's mass actually is
+
+Of its 366243 adjacencies, the two largest same-op runs are already inside
+the encoding, not outside it:
+
+| adjacency | count | already satisfies mem-base-pair |
+|---|--:|--:|
+| `lw`->`lw` | 31411 | 21776 (69.3%) |
+| `sw`->`sw` | 26424 | 22932 (86.8%) |
+
+Same base, offsets exactly one data width apart, both within the 6-bit scaled
+field.  The residue is mostly a different base register (25.2% of `lw` pairs,
+5.0% of `sw`), not a width or range failure.  So this mass is limited by
+SCHEDULING and run structure rather than by encoding: a run of N consecutive
+same-base accesses offers N-1 adjacencies but only floor(N/2) pairs, and the
+sp-based majority is already taken by `mem-sp-pair`.
+
