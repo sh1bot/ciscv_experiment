@@ -922,3 +922,33 @@ available first: musl's labels encode their target address --
 `.Lbranch_0004757e` is 0x4757e -- so the distance can be read exactly instead
 of counted, wherever the corpus uses that form.)
 
+### Fixing load-base-branch-pair / load-sp-branch-pair
+
+Both rows are FULL at 20 bits -- `rda + imma + rs1a + immb[4:0]` for the base
+form, `rda + imma[9:0] + immb[4:0]` for the sp one -- so displacement bits
+must come from `imma` or from opcode duplication.  Joint fit of (load offset,
+estimated packet displacement), musl-rv32:
+
+| split | load-base (138 sites) | load-sp (37 sites) |
+|---|--:|--:|
+| imma 5b + immb 5b (today) | 38.4% | 18.9% |
+| imma 4b + immb 6b | 50.7% | 27.0% |
+| imma 3b + immb 7b | 63.0% | 24.3% |
+| imma 5b + immb 7b (dup x4) | 69.6% | 59.5% |
+| imma 10b + immb 7b | 76.8% | 78.4% |
+
+Rebalancing alone is worth 12-25 points and costs nothing; buying two
+displacement bits by opcode duplication (x4 codepoints) reaches ~70-78%.
+Neither gets near the 10-bit frames' 94-99%, because the row simply cannot
+hold ten displacement bits alongside a load.
+
+**But the distribution may not be intrinsic.**  This population is dominated
+by NULL CHECKS -- `lw rd, off(base) ; beqz rd, handler` -- whose branch is
+long only because block placement put the handler far away.  A compiler with
+any reason to prefer short forward branches could lay the small block next
+and branch over it, which would move most of this mass inside five bits.
+That makes it the FOURTH member of the "corpus is shaped by its compiler's
+cost model" family (A11), alongside the RVC register-clustering tax, the
+clang/GCC gap, and LSR's pointer-bump strength reduction -- and it argues for
+measuring a placement-tuned build before spending codepoints on width.
+
