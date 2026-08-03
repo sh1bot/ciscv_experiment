@@ -815,7 +815,46 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
             bb.successors   = [s for s in bb.successors   if id(s) in fn_block_set]
             bb.predecessors = [p for p in bb.predecessors if id(p) in fn_block_set]
 
+    annotate_branch_distances(blocks)
+
     return blocks, functions
+
+
+# Measured packets per instruction across the corpus (README: ~0.79 on the
+# scored builds).  Used only to turn an instruction count into a rough packet
+# distance -- see Instruction.est_packet_distance.
+PACKETS_PER_INSN = 0.8
+
+
+def annotate_branch_distances(blocks) -> None:
+    """Estimate, for every branch/jump with a resolvable label, how far its
+    target is in PACKETS.
+
+    Displacements are the project's largest standing optimism: a pairwise rule
+    cannot see them, because the real distance needs a packet layout that does
+    not exist until scheduling has run.  But a rule does not need the real
+    figure to reject the hopeless cases -- counting instructions to the label
+    and scaling by PACKETS_PER_INSN separates "plausibly in range" from "off
+    by orders of magnitude", which is all a range check has to do.
+
+    Deliberately approximate, and deliberately NOT used to accept: a frame may
+    reject on this estimate, never claim encodability because of it."""
+    seq = []
+    label_at: dict = {}
+    for bb in blocks:
+        # Labels are carried by the BLOCK, not the instruction; a block's label
+        # names the position of its first instruction.
+        if getattr(bb, "label", None):
+            label_at.setdefault(bb.label, len(seq))
+        seq.extend(bb.instructions)
+    for i, insn in enumerate(seq):
+        tgt = insn.branch_target
+        if tgt is None:
+            continue
+        j = label_at.get(tgt)
+        if j is None:
+            continue                       # external symbol, PLT, or register
+        insn.est_packet_distance = (j - i) * PACKETS_PER_INSN
 
 
 def identify_functions(blocks: list) -> list:

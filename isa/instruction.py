@@ -34,6 +34,13 @@ class Instruction:
     # an unresolved immediate as never-fitting, never zero — see imm_unresolved.
     imm_expr: Optional[str] = None
     branch_target: Optional[str] = None
+    # Estimated distance to `branch_target`, in PACKETS, signed (negative =
+    # backward).  Instruction count to the label times the measured
+    # packets-per-instruction ratio -- deliberately a guess, since the real
+    # figure needs a packet layout that does not exist until after scheduling.
+    # None when the target is unresolved (external symbol, PLT, register).
+    # Its only job is to separate "plausibly in range" from "hopeless".
+    est_packet_distance: Optional[float] = None
     is_unknown:    bool = False
     _has_mem_operand: bool = False  # set by parser for unknown insns with (base-reg) operand
 
