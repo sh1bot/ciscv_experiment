@@ -952,3 +952,128 @@ cost model" family (A11), alongside the RVC register-clustering tax, the
 clang/GCC gap, and LSR's pointer-bump strength reduction -- and it argues for
 measuring a placement-tuned build before spending codepoints on width.
 
+
+## The indexed-call frame: A-slot census (2026-08)
+
+Sketch under test — B is a table jump (`cm.jalt`/`cm.jt`-style, 10-bit index),
+A is the argument-setup instruction that precedes the call:
+
+    [ h | idx[9:5] | g | idx[4:0] | rs1a | fn3 |    rda    ]   mv    rda, rs1a
+    [ h | idx[9:5] | g | idx[4:0] |  imma[6:0]  +  rda[2:0] ]   li/addi/load
+    [ h | idx[9:5] | g | idx[4:0] | rs2a | fn3 | imma[4:0] ]   store
+
+The index takes ten bits (two columns), leaving ten for A. `mv` needs only
+eight of them (rd + rs), which is the two-spare-bit question.
+
+Predecessor of every DIRECT call, by the A form needed to encode it. Counts
+are of call sites; percentages are of all direct calls in the corpus.
+
+| A form                       | bits | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|------------------------------|------|----------|---------------|-------------|
+| direct calls                 |      | 30603    | 5172          | 7008        |
+| `mv rda, rs1a`, rda ∈ a0–a7  | 3+5  | 12842 42.0% | 1495 28.9% | 3956 56.4% |
+| `mv rda, rs1a`, rda any      | 5+5  | 13604 44.5% | 1685 32.6% | 4203 60.0% |
+| `addi rda, sp, imm` @7, rd3  | 3+7  | **7268 23.7%** | 51 1.0% | 148 2.1% |
+| `addi rda, sp, imm` @5, rd3  | 3+5  | 6126 20.0% | 32 0.6%   | 72 1.0%    |
+| `li rda, imm` @7, rd3        | 3+7  | 1566 5.1% | 315 6.1%   | **1566 22.3%** |
+| `li rda, imm` @5, rd3        | 3+5  | 925 3.0%  | 270 5.2%   | 1492 21.3% |
+| `li rda, imm` @9, rd3        | 3+9  | 1975 6.5% | 332 6.4%   | 1572 22.4% |
+| `load rda, imm(sp)` @7, rd3  | 3+7  | 1626 5.3% | 46 0.9%    | 234 3.3%   |
+| `store rs2a, imm(sp)` @5,rs5 | 5+5  | 69 0.2%   | **536 10.8%** | 21 0.3%  |
+| `store rs2a, imm(sp)` @7,rs3 | 3+7  | —         | 399 7.7%   | —          |
+| `addi rda, rs1a, imm` (3-reg)| 5+5+ | 8163 26.7% | 128 2.5%  | 207 3.0%   |
+| `sh[123]add` (any form)      |      | 4 0.0%   | 15 0.3%    | 1 0.0%     |
+| no predecessor in block      |      | 1402 4.6% | 386 7.5%   | 252 3.6%   |
+
+Reading it:
+
+* **`addi rda, sp, imm` is the second-biggest A form and is C++-specific**
+  (23.7% of cpp's direct calls, 1–2% elsewhere): the address of a stack
+  temporary passed by reference. cpp-rv32 is the corpus furthest from parity,
+  so this one row is the single largest thing in the census.
+* **`store rs, imm(sp)` is the mirror image** — 10.8% on musl/GCC, nil on the
+  other two: GCC spilling an argument before the call.  Its best split is the
+  ordinary 5+5 (536 hits), not 3+7 (399): the stored register is often a
+  saved register, and musl's sp offsets are small.  On musl/clang the row is
+  much weaker (140 at 5+5 of 938 sp-relative stores) — offsets there are large.
+* **3 bits of rd costs almost nothing** where the immediate wants the room:
+  `li` at rd3+imm5 catches 925 of the 933 that any-rd+imm5 catches (99.1%).
+  These are argument setups by construction, so rd ∈ a0–a7 nearly always.
+  Hence 3+7 beats 5+5 on the li/addi/load rows: +68% on cpp `li`, +18% on
+  cpp `addi sp`.
+* **`addi rda, rs1a, imm` (three registers) does not fit and never will** —
+  8163 hits on cpp, and 5+5+imm has no room beside a 10-bit index.
+* **`sh[123]add` is dead in this position**: 20 hits across the three corpora,
+  despite Zba being enabled (3025/779/3326 shadds in the corpora overall).
+  Address scaling happens well before the call, not immediately before it.
+
+Cumulative, taking mv(5+5), addi-sp(3+7), li(3+7), load-sp(3+7), store(5+5):
+
+| A set                        | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|------------------------------|----------|---------------|-------------|
+| mv + li only                 | 49.6%    | 38.7%         | 82.3%       |
+| + addi-sp, load-sp, store-sp | **78.9%** | **51.4%**    | **88.1%**   |
+
+The three extra rows are worth +8963 pairs on cpp, +658 on musl/GCC, +403 on
+sqlite, for six more codepoints.  Every one of them is a pair that no other
+frame can make: a direct call's displacement is unencodable, so without the
+index these are all solos.
+
+### The two spare bits go to `rd` on the `mv` row
+
+Candidates measured, all on the mv row's eight-of-ten:
+
+| use of the 2 bits         | gain                              |
+|---------------------------|-----------------------------------|
+| widen rda 3→5 bits        | +762 cpp, +190 musl, +247 sqlite  |
+| `sh[123]add` shift amount | +4 cpp, +15 musl, +1 sqlite       |
+| `slli` shift amount       | +214 cpp, +29 musl, +6 sqlite     |
+| widen idx 10→12 on this row only | +2 KiB cpp; needs a 4096-entry table and a per-row index width |
+| leave reserved            | 0                                 |
+
+Widening rd wins, and it is not only the +1199 pairs: a full five-bit rd
+column is what makes the frame HOSTABLE.  `mv x0, rs` is a nop and `mv sp, rs`
+before a call is not an idiom, so both sentinel values stand empty and the
+mv rows can lend x0 and x2 to guests.  A 3-bit rda has two idle bits that are
+not the sentinel pattern and can lend nothing.
+
+### Index width: 10 bits, and the A bits are worth a third of it
+
+Frequency-weighted coverage of the top-N call targets:
+
+| table size | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|------------|----------|---------------|-------------|
+| 256  (8b, = ratified `cm.jt`) | 82.3% | 83.9% | 84.3% |
+| 512  (9b)  | 87.9% | 95.6% | 94.5% |
+| 1024 (10b) | 93.4% | 100%  | 100%  |
+| 2048 (11b) | 98.2% | 100%  | 100%  |
+
+Distinct targets: 2587 / 742 / 800.  Going 8→10 bits is +3400 cpp, +833 musl,
++1100 sqlite call sites.  Spending those same two bits on A instead (rd3+imm9
+rather than rd3+imm7) is worth roughly +400 on cpp `li` and a similar order on
+`addi sp` — about a third as much.  **The index gets the bits.**
+
+The 1024-entry table costs 4 KiB of .rodata on cpp against ~90 KiB of packets
+saved, so the overhead is ~4%.  Note this is wider than architectural Zcmt
+(256 entries, indices 0–31 `cm.jt` / 32–255 `cm.jalt`); ours is one shared
+1024-entry table addressed by both B opcodes.
+
+### Cost and optionality
+
+Two B ops × seven A ops (mv, li, addi, lw, ld, sw, sd) = 14 codepoints,
+rounded to a 16 budget.  Every row is exactly ten bits over two columns, so
+no immediate buys extra opcode entries — the 3+7 splits are free.
+
+The frame needs a table base register and a table, which is architecture we
+do not otherwise require.  That is the same shape of bet as `czero` and the
+other level-gated features already in the encoding: an implementation that
+has committed to Zcmt has already paid for the base register and the table
+walk, and this frame asks it to widen the index and let the table jump ride
+in a packet.  Implementations that do not want it lose one 16-codepoint
+block; nothing else in the encoding depends on it.
+
+Caveat: this is an adjacency census, not a scheduler measurement — it counts
+opportunities, not yield.  The scheduler may already be pairing some of these
+predecessors with something else, and it may be able to hoist a non-fitting
+predecessor out of the way to expose a fitting one.  Both effects are
+unmeasured.
