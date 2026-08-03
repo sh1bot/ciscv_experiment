@@ -124,10 +124,19 @@ _CHAIN_ALU_IMM_BITS = {mn: _w("load-alu-chain", "b", mn)          # signed
 # a value, B consumes it.  Fitted on THREE corpora -- a set tuned without a
 # C++ corpus drops srliw, which RV32 cannot even spell.  See encoding.yaml.  The three chain frames still SHARE
 # _CHAIN_ALU_MN above; only this frame is cut.
-_ALU_ALU_A_MN = frozenset({"add", "addi", "andi", "or", "slli", "sltiu", "sltu",
-                           "srli", "srliw", "sub"})
-_ALU_ALU_B_MN = frozenset({"add", "addi", "and", "andi", "or", "slli", "sltiu",
-                           "srli", "sub", "xor"})
+# Two 8x8 blocks, each an (A-set, B-set) pair; a candidate must sit inside ONE
+# of them, not in the cross product of the unions.  The population splits into
+# two vocabularies that barely interact -- arithmetic/shift and
+# logical/compare -- and one square would pay for every cross term between
+# them (encoding.yaml carries the measurements).
+_ALU_ALU_BLOCKS = (
+    (frozenset({"add", "addi", "andi", "slli", "sltu", "srliw", "sub"}),
+     frozenset({"add", "addi", "and", "or", "slli", "srli", "sub"})),
+    (frozenset({"addi", "and", "or", "sltiu", "srli", "xor", "xori"}),
+     frozenset({"add", "addi", "andi", "or", "slli", "sltiu", "xor"})),
+)
+_ALU_ALU_A_MN = frozenset().union(*(a for a, _ in _ALU_ALU_BLOCKS))
+_ALU_ALU_B_MN = frozenset().union(*(b for _, b in _ALU_ALU_BLOCKS))
 
 _CHAIN_ALU_SHIFT_MN = frozenset({"slli", "srli", "srliw"})
 _CHAIN_ALU_SHIFT_HI = (1 << _w("load-alu-chain", "b", "slli")) - 1
@@ -477,6 +486,9 @@ def _alu_alu_chain(a: Instruction, b: Instruction) -> None:
     @chain_uses_low_regs (which skips a.rd and B's consuming source), matching
     load-chain / store-chain.
     """
+    if not any(a.mnemonic in A and b.mnemonic in B
+               for A, B in _ALU_ALU_BLOCKS):
+        raise NotPair("op-pair-outside-both-blocks")
     pass
 
 

@@ -615,13 +615,49 @@ exact squares (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256), so the axes hold 8,
 | **11** | **128** | **4500 (88%)** | **35.2** |
 | 16 | 256 | 5090 (100%) | 19.9 |
 
+**Two 8x8 blocks beat one 11x11 at the same cost**, because the population
+splits into two vocabularies that barely interact and a single square pays
+for every cross term between them — the same argument as decoupling A from B,
+one level up.  Census over three corpora: 94% against 88%.  Rectangle-cover
+alternatives at 128 codepoints, measured by census:
+
+| plan | cp | covers | pairs/cp |
+|---|--:|--:|--:|
+| one 11x11 | 121 | 4500 (88%) | 37.2 |
+| **two 8x8** | **128** | **4775 (94%)** | **37.3** |
+| 8x8 + 8x4 + 4x8 | 128 | 4815 (95%) | 37.6 |
+| 8x8 + 4x4 x4 | 128 | 4866 (96%) | 38.0 |
+| 16x4 + 4x16 | 128 | 4182 (82%) | 32.7 |
+| 31 x 2x2 (unconstrained greedy) | 128 | 5014 (99%) | 39.2 |
+
+The unconstrained greedy reaches 99% only by splintering into 31 tiny
+rectangles pinned to individual hot idioms — the shape most likely to fail on
+a fourth corpus, and 31 decode groups against the decoder-alignment objective
+(A1.10).  Extreme aspect ratios (16x4) are actively bad: they spend width on
+ops with few partners.  Two squares is the knee.
+
+The blocks have distinct identities:
+
+* **Block 1, arithmetic/shift** (3755 pairs, 59/cp): A `add addi andi slli
+  sltu srliw sub` -> B `add addi and or slli srli sub`.  Address and index
+  work: `slli->add` 476, `srliw->addi` 453, `addi->srli` 288.
+* **Block 2, logical/compare** (1020 pairs, 16/cp): A `addi and or sltiu srli
+  xor xori` -> B `add addi andi or slli sltiu xor`.  Predicate and bitfield
+  work: `or->or` 124, `xori->add` 124, `sltiu->or` 72.
+
+Only `addi`, `or` and `srli` appear in both A sets, and the two top-pair
+lists share no entry.  6% of the population (315 pairs) falls outside both;
+`addw` and `maxu` become unreachable in either slot, and `sltu`/`srliw`/`xori`
+are producer-only.
+
 MEASURED, all three corpora scheduled end to end (total pairs, and the
 frame's own hits):
 
 | config | block | musl-rv32 | sqlite-rv64 | cpp-rv64 | total vs 16x16 | frame hits |
 |---|--:|--:|--:|--:|--:|--:|
 | 16/axis | 256 | 27506 | 41498 | 84439 | — | 5090 |
-| **11/axis, 3-corpus fit** | **128** | 27385 | 41389 | 84196 | **-473** | 4655 |
+| **two 8x8, 3-corpus fit (SHIPPED)** | **128** | 27436 | 41434 | pending | **-134 so far** | 2453* |
+| 11/axis, 3-corpus fit | 128 | 27385 | 41389 | 84196 | -473 | 4655 |
 | 11/axis, 2-corpus fit | 128 | — | — | 83595 | (cpp -844) | — |
 | 8/axis, 2-corpus fit | 64 | 27282 | 41261 | 83432 | (-1468) | — |
 

@@ -455,11 +455,22 @@ doc:
       level: 2
       templates:
         - ["alu     tmp, rs1a, rs2a/imma", "alu     rdb, tmp, rs2b/immb"]
+      # TWO 8x8 blocks rather than one 11x11, because the population splits
+      # into two vocabularies that barely interact and a single square pays
+      # for every cross term between them.  Same argument as decoupling A from
+      # B, one level up.  Measured over three corpora: 94% coverage against
+      # 88% for 11x11, at 128 codepoints either way.
       ops:
-        - a: [{op: addi, imm: {bits: 6, signed: true}},   # 2 codepoints
-              add, andi, or, slli, sltiu, sltu, srli, srliw, sub]
-          b: [{op: addi, imm: {bits: 6, signed: true}},   # 2 codepoints
-              add, and, andi, or, slli, sltiu, srli, sub, xor]
+        # Block 1 -- arithmetic and shift: address and index work.  3755 pairs
+        # (74%), 59 per codepoint.  slli->add, srliw->addi, addi->srli.
+        - a: [{op: addi, imm: &ac6 {bits: 6, signed: true}},   # 2 codepoints
+              add, andi, slli, sltu, srliw, sub]
+          b: [{op: addi, imm: *ac6},                           # 2 codepoints
+              add, and, or, slli, srli, sub]
+        # Block 2 -- logical and compare: predicate and bitfield work.  1020
+        # pairs (20%), 16 per codepoint.  or->or, xori->add, sltiu->or.
+        - a: [{op: addi, imm: *ac6}, and, or, sltiu, srli, xor, xori]
+          b: [{op: addi, imm: *ac6}, add, andi, or, slli, sltiu, xor]
       rows:
         - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
         - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
