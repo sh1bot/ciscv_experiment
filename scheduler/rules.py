@@ -1583,6 +1583,102 @@ def _addi_store_off_chain(a: Instruction, b: Instruction) -> None:
     return None
 
 
+
+# ---------------------------------------------------------------------------
+# arg-call-pair
+# ---------------------------------------------------------------------------
+# Argument setup packed with a call made through a HARD-CODED base register.
+#
+# A direct call's displacement has nowhere to live in a packet (only 1.7% of
+# cpp-rv32's calls fit ten bits, FINDINGS.md), so every call in the corpus is
+# a solo today and so is the instruction beside it.  This frame makes the
+# transfer ten bits by naming neither register:
+#
+#   jalr ra, 4*imm(ra)   a far CALL      -- link and base are both ra
+#   jr       4*imm(t1)   a far TAIL call -- base is t1, link is x0
+#
+# Those are the two spellings the linker already emits when it cannot relax a
+# call, so the rule matches code that exists rather than code we wish existed.
+# The register choice is forced, not chosen: a call may clobber ra because the
+# jalr overwrites it with the link anyway, and a TAIL call may not, because the
+# auipc would destroy the return address the callee still needs.
+#
+# The displacement is in PACKETS.  Targets are packet-aligned in this ISA, so
+# the low two bits are dead and ten bits reaches +-2 KiB -- which is what the
+# high half leaves unresolved.  Corpus offsets are byte displacements against
+# an auipc-computed base, so the check is `fits ten bits after scaling`.
+#
+# What this leaves behind: the high half is a 20-bit instruction that can never
+# pair, and it stands as a solo word beside every packet this rule makes.  A
+# table jump (Zcmt `cm.jalt`/`cm.jt`) deletes it -- the index IS the target --
+# for one more word per call, with no pairing needed.  Converting this rule is
+# a change of B mnemonic and nothing else: a 10-bit index and a 10-bit scaled
+# displacement are the same field.
+
+_ARG_CALL_A_MN = frozenset({"addi", "addiw", "mv", "li", "lw", "ld", "sw", "sd"})
+_ARG_CALL_OFF_BITS = _w("arg-call-pair", "b", "jalr_ra")     # 10, scaled by 4
+_ARG_CALL_LI_BITS = _w("arg-call-pair", "a", "li")           # 7, rd3 row
+_ARG_CALL_SPN_BITS = _w("arg-call-pair", "a", "addi4spn")    # 7, rd3 row
+_ARG_CALL_LOAD_BITS = _w("arg-call-pair", "a", "lw")         # 7, scaled, rd3
+_ARG_CALL_STORE_BITS = _w("arg-call-pair", "a", "sw")        # 5, scaled, rs5
+_ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # 5
+_ARG_REGS = frozenset(range(10, 18))          # a0-a7: the 3-bit rd column
+
+
+def _fits_u(v, bits, scale=1):
+    return v is not None and v >= 0 and v % scale == 0 and v // scale < (1 << bits)
+
+
+def _fits_s(v, bits):
+    return v is not None and -(1 << (bits - 1)) <= v < (1 << (bits - 1))
+
+
+def _is_hardcoded_call(insn: Instruction) -> bool:
+    """`jalr ra, imm(ra)` or `jr imm(t1)` -- the two forms whose registers this
+    frame hard-codes, so the whole word is left for the displacement."""
+    if insn.mnemonic != "jalr":
+        return False
+    if insn.rd == 1 and insn.rs1 == 1:
+        return True
+    return insn.rd == 0 and insn.rs1 == 6
+
+
+def _arg_call_a_ok(a: Instruction) -> bool:
+    """Whichever of the frame's A rows can hold `a`, if any."""
+    m, rd, rs1, imm = a.mnemonic, a.rd, a.rs1, a.imm
+    i = imm if imm is not None else 0
+    if m in ("mv",) or (m in ("addi", "addiw") and i == 0 and rs1 not in (0, None)):
+        return rd not in (0, None)                       # row 1: rda, rs1a
+    if m == "li" or (m in ("addi", "addiw") and rs1 in (0, None)):
+        return rd in _ARG_REGS and _fits_s(i, _ARG_CALL_LI_BITS)
+    if m in ("addi", "addiw") and rs1 == 2 and rd not in (0, 2, None):
+        # addi4spn: scaled by four AND biased by one, as c.addi4spn is
+        # -- a zero offset is `mv rda, sp`, which row 1 already holds,
+        # so the codepoint is spent on 512 instead of wasting it on 0
+        return rd in _ARG_REGS and _fits_u(i - 4, _ARG_CALL_SPN_BITS, 4)
+    if m in ("addi", "addiw") and rd == rs1 and rd not in (0, None):
+        return _fits_s(i, _ARG_CALL_RSD_BITS)
+    if m in ("lw", "ld") and rs1 == 2:
+        return rd in _ARG_REGS and _fits_u(i, _ARG_CALL_LOAD_BITS, MEM_SCALE[m])
+    if m in ("sw", "sd") and rs1 == 2:
+        return _fits_u(i, _ARG_CALL_STORE_BITS, MEM_SCALE[m])
+    return False
+
+
+MEM_SCALE = {"lw": 4, "sw": 4, "ld": 8, "sd": 8}
+
+
+def _arg_call_pair(a: Instruction, b: Instruction) -> None:
+    """Argument setup followed by a call through a hard-coded base register."""
+    if not _is_hardcoded_call(b):
+        raise NotPair("B-not-hardcoded-call")
+    off = b.imm if b.imm is not None else 0
+    if off % 4 or not _fits_s(off // 4, _ARG_CALL_OFF_BITS):
+        raise NotPair("B-displacement-out-of-range")
+    if not _arg_call_a_ok(a):
+        raise NotPair("A-not-encodable-here")
+
+
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
@@ -1756,6 +1852,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_MVLOAD_JUMP_A_MN,
         b_mnemonic_set=_SMALL_JUMP_MN,
         check=_mvload_jump_pair,
+    ),
+    PairingRule(
+        name="arg-call-pair",
+        a_mnemonic_set=_ARG_CALL_A_MN,
+        b_mnemonic_set=frozenset({"jalr"}),
+        check=_arg_call_pair,
     ),
 ]
 

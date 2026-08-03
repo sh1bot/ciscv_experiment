@@ -124,6 +124,14 @@ pseudo_ops:
     base: jal
     encode: {rd: x0}
     match:  [{op: jal, rd: x0}, {op: j}]
+  jalr_ra:
+    base: jalr
+    encode: {rd: x1, rs1: x1}            # jalr ra, imm(ra) -- a far CALL
+    match:  [{op: jalr, rd: x1, rs1: x1}]
+  jr_t1:
+    base: jalr
+    encode: {rd: x0, rs1: x6}            # jr imm(t1) -- a far TAIL call
+    match:  [{op: jalr, rd: x0, rs1: x6}]
   ret:
     base: jalr
     encode: {rd: x0, rs1: x1, imm: 0}
@@ -1151,6 +1159,109 @@ doc:
          * The `rd` column carries the x0 sentinel, not the x2 one every other
            hosted frame uses.  Both are reserved, so x0 was standing empty --
            this frame rides there and competes with nothing.
+
+  - frame:
+      name: arg-call-pair
+      does: "Set up an argument, then call through a hard-coded base register."
+      # The call frame, written so it can be MEASURED on code that exists.
+      #
+      # A direct call's displacement does not fit a packet, so today every call
+      # in the corpus is a solo and the instruction beside it is a second solo.
+      # This frame makes the transfer ten bits by hard-coding both registers:
+      # `jalr ra, 4*immb(ra)` names neither its base nor its link, and
+      # `jr 4*immb(t1)` names neither its base nor x0.  Targets are packet
+      # aligned in this ISA, so the displacement is scaled by four and the low
+      # two bits are dead -- 10 bits reaches +-2 KiB, which is what the high
+      # half (`auipc`/`adduipc`) leaves unresolved.
+      #
+      # The register choice is not free.  A far CALL may use ra as its address
+      # temporary because the jalr overwrites it with the link anyway, and the
+      # corpus already does: 2462 of 2463 on cpp-rv32.  A far TAIL call may
+      # NOT -- the auipc would destroy the return address the callee still
+      # needs -- so it uses t1, and the corpus already does that too (101 on
+      # cpp-rv32, 125 on godot).  Both spellings are hard-coded here rather
+      # than fielded, which is where the ten bits come from.
+      #
+      # WHAT THIS FRAME LEAVES ON THE TABLE.  The high half is a 20-bit
+      # instruction that can never pair -- it fills the operand space by
+      # itself, so it stands as a solo word beside every packet this frame
+      # makes.  A table jump (`cm.jalt`/`cm.jt`, Zcmt) removes it outright: the
+      # index IS the target, so there is no high half to set up.  That is worth
+      # one more word per call, on top of the word this frame saves, and it
+      # needs no pairing opportunity at all -- an unpaired table jump still
+      # fits a packet beside a derived nop.  Converting this frame is a
+      # one-line change to its B ops; the A rows, the ten-bit field and the
+      # budget are all unchanged, because a 10-bit index and a 10-bit scaled
+      # displacement are the same shape.  See results/corpus/FINDINGS.md,
+      # "The indexed-call frame, priced end to end".
+      #
+      # A ops are fitted in FINDINGS, "The indexed-call A slot, chosen from
+      # what is REACHABLE": eight shapes reaching 66.9 / 57.1 / 60.9% of calls
+      # on cpp / musl-gcc / sqlite rv32, against a hard ceiling of ~68 / 58 /
+      # 62% (the share of calls with ANY movable candidate beside them).
+      budget: 16
+      level: 2
+      templates:
+        - ["mv      rda, rs1a",         "jalr_ra 4*immb"]
+        - ["li      rda, imma",         "jalr_ra 4*immb"]
+        - ["addi4spn rda, 4*imma",      "jalr_ra 4*immb"]
+        - ["load    rda, k*imma(x2)",   "jalr_ra 4*immb"]
+        - ["store   rs2a, k*imma(x2)",  "jalr_ra 4*immb"]
+        - ["addi_rsd rda, imma",        "jr_t1   4*immb"]
+      ops:
+        - a: [mv, {op: li, imm: {bits: 7}}, {op: addi4spn, imm: {bits: 7, scale: 4, signed: false}},
+              {op: lw, imm: {bits: 7, signed: false}},
+              {op: ld, imm: {bits: 7, signed: false}},
+              {op: sw, imm: {bits: 5, signed: false}},
+              {op: sd, imm: {bits: 5, signed: false}},
+              addi_rsd]
+          b: [{op: jalr_ra, imm: {bits: 10, scale: 4}},
+              {op: jr_t1,   imm: {bits: 10, scale: 4}}]
+      measures_also: {a: [addiw]}
+      probe:
+        - {a: {op: addi, rd: 10, rs1: 8, imm: 0},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: addi, rd: 10, rs1: 0, imm: 0},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: addi, rd: 10, rs1: 2, imm: 8},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: addi, rd: 10, rs1: 10, imm: 4},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: lw, rd: 10, rs1: 2, imm: 4},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: ld, rd: 10, rs1: 2, imm: 8},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: sw, rs2: 10, rs1: 2, imm: 4},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: sd, rs2: 10, rs1: 2, imm: 8},
+           b: {op: jalr, rd: 1, rs1: 1, imm: 16}}
+        - {a: {op: addi, rd: 10, rs1: 8, imm: 0},
+           b: {op: jalr, rd: 0, rs1: 6, imm: 16}}
+      rows:
+        - ["h", "rs1a",      "g", "immb[4:0|9:5]*2", "fn3", "rda"]
+        - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "imma[6:5]+rda[2:0]"]
+        - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "rs2a"]
+      notes: |
+         * Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the
+           three ops that want a wide immediate and an ARGUMENT destination,
+           splitting the rd column three-two so `imma` reaches seven bits;
+           row 3 holds the stores, whose source register needs all five bits
+           and whose stack offsets are small.
+         * rd 3 bits costs almost nothing here and buys two: `li` at rd3+imm5
+           catches 925 of the 933 that an unrestricted rd catches on cpp-rv32,
+           because these are argument setups by construction.  3+7 beats 5+5 by
+           68% on cpp `li` and 18% on cpp `addi4spn`.
+         * Load and store offsets scale by the ACCESS width, as `c.lwsp` and
+           `c.sdsp` do: spill slots are aligned to the access, so `k*imm` costs
+           nothing and reaches four or eight times further.
+         * `addi4spn` scales by four, which is a real trade rather than a free
+           one: 10.7% of cpp's `addi rd,sp` are NOT 4-aligned, because C++ takes
+           the address of byte- and short-sized stack temporaries, so scaling
+           costs 13% of the cpp hits (6473 against 7456 for a raw 7-bit field)
+           and buys 0..508 instead of 0..127.  On rv64 the scaled form is the
+           one the fit prefers outright.
+         * The rd column is a register in row 1 only, so this frame neither
+           hosts nor is hosted.
 
   - frame:
       name: macro-op-pair

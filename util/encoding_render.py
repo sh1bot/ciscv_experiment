@@ -49,6 +49,36 @@ def _cell(text):
     return text, 1
 
 
+def _packed(body):
+    """Sub-fields of a cell that SHARES one column between two fields.
+
+    'imma[6:5]+rda[2:0]' -> ['imma[6:5]', 'rda[2:0]'].  A plain cell returns a
+    single-element list, so callers can treat every cell the same way.
+
+    Sharing is how a row draws a 3-bit register beside a 7-bit immediate: the
+    column rule (five bits per register column) prices whole columns, but a
+    row is free to divide one between two fields as long as the total still
+    fits.  A packed field is charged the bits its range actually names, not
+    the whole column -- otherwise a shared column would be billed twice.
+    """
+    return body.split("+") if "+" in body else [body]
+
+
+def _range_bits(body):
+    """Bits a field's explicit range names: 'imma[6:5]' -> 2, 'x[4:0|9:5]' -> 10."""
+    m = re.search(r"\[([^\]]*)\]", body)
+    if not m:
+        return None
+    total = 0
+    for part in m.group(1).split("|"):
+        if ":" in part:
+            hi, lo = (int(x) for x in part.split(":"))
+            total += abs(hi - lo) + 1
+        elif part.strip().isdigit():
+            total += 1
+    return total or None
+
+
 def _spanned(widths, pos, span):
     """Display width of a cell spanning `span` columns from `pos`
     (sum of the column widths plus the internal separators they absorb)."""
@@ -161,12 +191,13 @@ def asm_operands(pair):
 def row_operands(cells):
     ops = set()
     for cell in cells:
-        name = cell.split("*")[0].split("[")[0]
-        if name in _NON_OPERAND_CELLS:
-            continue
         if re.fullmatch(r"[01 ]+", cell):       # fixed bit pattern e.g. "0 0 0 0 1"
             continue
-        ops.add(name)
+        body, _span = _cell(cell)
+        for part in _packed(body):              # a shared column names two
+            name = part.split("[")[0].strip()
+            if name and name not in _NON_OPERAND_CELLS:
+                ops.add(name)
     return ops
 
 
@@ -458,22 +489,35 @@ def imm_field_bits(frame, grid, slot):
         row_width = 0     # a field may be SPLIT across cells (imma[9:5] in one
         for cell in cells:  # column, imma[4:0] in another) — sum within a row
             body, span = _cell(cell)
-            stem = body.split("[")[0]
-            if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
-                raise ValueError(
-                    f"{frame.get('name')}: row names immediate field '{stem}', "
-                    f"which the pricing model does not recognise (expected one "
-                    f"of {sorted(ALL_IMM_NAMES)}). An unrecognised name is never "
-                    f"charged for its width.")
-            if stem in names:
+            parts = _packed(body)
+            for part in parts:
+                stem = part.split("[")[0]
+                if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
+                    raise ValueError(
+                        f"{frame.get('name')}: row names immediate field "
+                        f"'{stem}', which the pricing model does not recognise "
+                        f"(expected one of {sorted(ALL_IMM_NAMES)}). An "
+                        f"unrecognised name is never charged for its width.")
+                if stem not in names:
+                    continue
                 cspan = range(pos, pos + span)
                 if any(c in (gi, hi) for c in cspan):
                     raise ValueError(
-                        f"{frame.get('name')}: row parks '{body}' in g/h. "
+                        f"{frame.get('name')}: row parks '{part}' in g/h. "
                         f"Immediate fields are register columns only; extra "
                         f"range is bought by opcode duplication "
                         f"(imm: {{bits}}), never by widening the row.")
-                row_width += sum(bits[c] for c in cspan)
+                if len(parts) > 1:
+                    # a shared column: charge only the bits this field names,
+                    # so the register beside it is not billed to the immediate
+                    named = _range_bits(part)
+                    if named is None:
+                        raise ValueError(
+                            f"{frame.get('name')}: packed cell '{body}' must "
+                            f"give every field an explicit bit range.")
+                    row_width += named
+                else:
+                    row_width += sum(bits[c] for c in cspan)
             pos += span
         width = max(width, row_width)
     return width

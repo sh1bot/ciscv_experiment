@@ -452,6 +452,56 @@ Also chain rules with surviving first result, but also sometimes a second result
   hosted frame uses.  Both are reserved, so x0 was standing empty --
   this frame rides there and competes with nothing.
 
+## arg-call-pair
+
+*Set up an argument, then call through a hard-coded base register.*
+
+    mv      rda, rs1a
+    jalr_ra 4*immb
+
+    li      rda, imma
+    jalr_ra 4*immb
+
+    addi4spn rda, 4*imma
+    jalr_ra 4*immb
+
+    load    rda, k*imma(x2)
+    jalr_ra 4*immb
+
+    store   rs2a, k*imma(x2)
+    jalr_ra 4*immb
+
+    addi_rsd rda, imma
+    jr_t1   4*immb
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│  rs1a   │g│   immb[4:0|9:5]   │ fn3 │   rda   │ opcode5 │1 0│
+│h│imma[4:0]│g│   immb[4:0|9:5]   │ fn3 │imma[6:5]+rda[2:0]│ opcode5 │1 0│
+│h│imma[4:0]│g│   immb[4:0|9:5]   │ fn3 │  rs2a   │ opcode5 │1 0│
+
+* Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the
+  three ops that want a wide immediate and an ARGUMENT destination,
+  splitting the rd column three-two so `imma` reaches seven bits;
+  row 3 holds the stores, whose source register needs all five bits
+  and whose stack offsets are small.
+* rd 3 bits costs almost nothing here and buys two: `li` at rd3+imm5
+  catches 925 of the 933 that an unrestricted rd catches on cpp-rv32,
+  because these are argument setups by construction.  3+7 beats 5+5 by
+  68% on cpp `li` and 18% on cpp `addi4spn`.
+* Load and store offsets scale by the ACCESS width, as `c.lwsp` and
+  `c.sdsp` do: spill slots are aligned to the access, so `k*imm` costs
+  nothing and reaches four or eight times further.
+* `addi4spn` scales by four, which is a real trade rather than a free
+  one: 10.7% of cpp's `addi rd,sp` are NOT 4-aligned, because C++ takes
+  the address of byte- and short-sized stack temporaries, so scaling
+  costs 13% of the cpp hits (6473 against 7456 for a raw 7-bit field)
+  and buys 0..508 instead of 0..127.  On rv64 the scaled form is the
+  one the fit prefers outright.
+* The rd column is a register in row 1 only, so this frame neither
+  hosts nor is hosted.
+
 # macro-op-pair
 
 *Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them.*

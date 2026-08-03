@@ -32,7 +32,7 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from encoding_render import (ALL_IMM_NAMES, _cell, asm_operands, asm_pairs,
+from encoding_render import (ALL_IMM_NAMES, _cell, _packed, asm_operands, asm_pairs,
                              op_imm, op_name)
 
 _LITERAL = re.compile(r"^[01o.](?: [01o.])*$")
@@ -53,18 +53,33 @@ def _check_row(frame, cells, ncols, ops_in_templates, errs):
         errs.append(f"{name}: row {cells} spans {span} columns, grid has {ncols}")
     for cell in cells:
         body, _ = _cell(cell)
+        # a cell may SHARE its column between two fields ("imma[6:5]+rda[2:0]");
+        # each half is checked on its own, and each must name its bits, since a
+        # shared column is priced by the range rather than by the column
+        for part in _packed(body):
+            _check_cell(frame, cell, part, ops_in_templates, errs,
+                        shared=len(_packed(body)) > 1)
+
+
+def _check_cell(frame, cell, body, ops_in_templates, errs, shared=False):
+    name = frame.get("name")
+    if True:
         stem, _, spec = body.partition("[")
         if stem in _FIXED_CELLS or _LITERAL.match(body):
-            continue
+            return
+        if shared and not spec:
+            errs.append(f"{name}: shared cell '{cell}' must give '{stem}' an "
+                        f"explicit bit range")
+            return
         if stem in ALL_IMM_NAMES:
             if spec and not _BRACKET.match("[" + spec):
                 errs.append(f"{name}: malformed immediate spec '{cell}'")
-            continue
+            return
         if stem.startswith("imm"):
             # imm_field_bits also hard-errors on this; repeated here so the
             # schema gate reports every problem in one pass.
             errs.append(f"{name}: unknown immediate field '{stem}'")
-            continue
+            return
         if stem not in ops_in_templates:
             errs.append(f"{name}: row cell '{cell}' names no template operand "
                         f"(templates use {sorted(ops_in_templates)})")
