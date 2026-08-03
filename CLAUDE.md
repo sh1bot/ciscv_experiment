@@ -16,6 +16,12 @@ documented at its definition there; numeric limits are yaml-owned, and
 `rules.py` still hand-copies widths that `scheduler/imm_contracts.py` can
 derive (TODO A8).
 
+`python3 util/encoding_assign.py` assigns the opcode bit-patterns and emits the
+published `ciscv-proto.yml` data file: per frame, the ASCII-art layout with the
+identifier filled in, the opcode tables, and the bit-level meaning of every
+op-select (`o`) bit. `--text` gives the human report instead, `--decode WORD`
+resolves a single selector word.
+
 ## Measurement caveats — remind the user about these when relevant
 
 - **RVC-eligibility (`[C]` / `rvc_eligible`) is an OPTIMISTIC ceiling, not actual

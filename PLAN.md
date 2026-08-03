@@ -44,7 +44,8 @@ rv_scheduler/
 ├── __main__.py
 ├── util/
 │   ├── encoding_render.py    # yaml -> encoding.md; --lint, --opcodes, --equiv, --check
-│   ├── encoding_assign.py    # budget-driven prefix-code block allocation
+│   ├── encoding_assign.py    # prefix-code block allocation + op tables;
+│   │                         #   emits ciscv-proto.yml (--text for the report)
 │   └── biclique_tiling.py    # op-set rectangle selection from co-occurrence tables
 ├── isa/
 │   ├── registers.py          # register indices, ABI names, calling-convention sets

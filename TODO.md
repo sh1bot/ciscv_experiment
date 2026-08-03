@@ -58,7 +58,12 @@ The planning documents name `encoding.yaml` as the source of truth (see
     musl-rv32 27191 -> 27192, sqlite-rv64 40850 -> 40851, both attribution
     reshuffles.  `encoding_assign.py` then hosts the three sentinel frames
     inside `alu-alu-chain`'s block, two guest identities per lent codepoint:
-    **986 -> 918 reserved, spare 38 -> 106**.
+    **986 -> 918 reserved, spare 38 -> 106**.  (Superseded twice since: a
+    guest names ONE pattern, so it pays a codepoint per op rather than half
+    of one, and a fourth guest has joined — see the tool's own report for the
+    current reservation.)  Each guest's op tables now fit its codepoints with
+    rd held at the pattern its rows draw, which is what
+    `encoding_assign.py --check-tables` gates.
 
 ## A5 — design constraints that live only in tooling or scheduler code
 

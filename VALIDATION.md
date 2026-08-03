@@ -177,7 +177,12 @@ the yaml changes, without a model in the loop.
   namespace, and every frame must land inside its declared `budget`.
 - `python3 util/encoding_assign.py` must exit 0 — a non-zero exit means the
   planned budgets do not fit as prefix-code blocks even if the raw codepoint
-  total does.
+  total does.  It emits the `ciscv-proto.yml` data file (frames, layouts and
+  op tables); `--text` gives the human-readable report instead.
+- `python3 util/encoding_assign.py --check-tables` must exit 0 — every frame's
+  op tables, rounded up to power-of-two index fields, fit the block its budget
+  reserves, and every assigned codepoint decodes back to one frame and one op
+  pair.  This is what makes every op-select bit in a layout resolvable.
 - `python3 -m analysis.encoding_verify tests/godot.s tests/testcase0.s` — watch
   the pack rate for regressions and the "rules with NO frame" list for gaps.
 

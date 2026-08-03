@@ -2,9 +2,9 @@
 """
 util/encoding_assign.py — assign concrete opcode bit-patterns to every frame in
 encoding.yaml as a VARIABLE-LENGTH PREFIX CODE (canonical Huffman, à la
-zlib/DEFLATE) and print the layouts with the frame IDENTIFIER bits filled in as
-constants (0/1), leaving only the op-SELECT bits ('o') that choose the specific
-opcode from that frame's list.
+zlib/DEFLATE), resolve every op-select bit against the frame's opcode tables,
+and emit the result as the `ciscv-proto.yml` data file (default) or as a
+human-readable report (--text).
 
 The opcode selector is the 10-bit word  opcode5(5) : funct3(3) : g(1) : h(1),
 read MSB->LSB (opcode5[4] first, h last). Each frame spends
@@ -35,13 +35,31 @@ Two "nice-to-have" biases are applied when they don't cost feasibility:
     ordering, rounding — are intent only, documented in encoding.yaml's
     "Enumeration policy" note.  Nothing here reads them as capacity.
 
+INSIDE a frame's block the same buddy discipline resolves the op-select bits
+themselves: each `ops` cluster takes an aligned sub-block, and inside it the
+index splits into a fixed A-index field, a B-index field and (for a frame whose
+rows draw ONE shared immediate) the immediate's extension bits. A cluster that
+states a diagonal (`same_op`/`same_width`) is indexed by the PAIR instead, so
+the combinations it forbids have no encoding at all. Every table is rounded up
+to a power of two, so every 'o' in a layout is a plain bit-field bit — no divide
+anywhere in the decode path — and the rounding holes are the frame's room to
+grow. `--check-tables` asserts the padded tables still fit each block, that the
+enumeration costs exactly what the pricing model charges, and that every
+codepoint decodes back to one frame and one op pair.
+
 For each frame the tool prints its bare form, then walks the frame's asm
 templates and, for each, reprints the matching encoding row TWICE — once for the
 A instruction and once for the B instruction — blanking the fields that slot
 does not use, so it is visible which fields each slot owns and which they share.
 
-Usage:  python3 util/encoding_assign.py
+Usage:
+    python3 util/encoding_assign.py                 # the ciscv-proto.yml data file
+    python3 util/encoding_assign.py -o FILE         # ... written to FILE
+    python3 util/encoding_assign.py --text          # the human-readable report
+    python3 util/encoding_assign.py --decode 0x2a1 [--rd x2]     # resolve one word
 """
+import argparse
+import json
 import math
 import os
 import re
@@ -54,7 +72,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from encoding_render import (_center, _cell, _spanned, header_lines,
                              opcode_demand, opcode_codepoints, op_name,
-                             row_operands, lint_frame, rd_column_role,
+                             op_bits, op_imm, _ext, imm_field_bits, shared_imm,
+                             cluster_pairs, row_operands, lint_frame,
+                             rd_column_cells, rd_column_role,
                              _OPERAND, _IMPLICIT)
 
 # Sentinel bit patterns reserved in the rd column (encoding.yaml `reserved`):
@@ -64,11 +84,11 @@ from encoding_render import (_center, _cell, _spanned, header_lines,
 # every frame drew x2 and left x0 empty, so each lent codepoint really held
 # one identity and the arithmetic was optimistic by 2x.
 SENTINEL_PATTERNS = {"0 0 0 0 0": "x0", "0 0 0 1 0": "x2"}
+SENTINEL_REGS = {0: "x0", 2: "x2"}      # rd's value -> the pattern it names
 
 
 def guest_sentinel(frame, grid):
     """Which reserved pattern a guest frame's rows put in the rd column."""
-    from encoding_render import rd_column_cells
     for s in rd_column_cells(frame, grid):
         if s in SENTINEL_PATTERNS:
             return SENTINEL_PATTERNS[s]
@@ -150,6 +170,16 @@ def opsel_bits(demand):
     return max(0, math.ceil(math.log2(demand))) if demand and demand > 1 else 0
 
 
+def _p2(n):
+    """The power of two at or above n (0 and 1 -> 1)."""
+    return 1 << max(0, (n - 1).bit_length())
+
+
+def _log2(n):
+    """log2 of an exact power of two."""
+    return max(0, (n - 1).bit_length())
+
+
 # --- budget-driven fixed-block allocation ----------------------------------
 def allocate_blocks(frames):
     """Reserve each frame a FIXED block of 2^opsel codepoints, where opsel comes
@@ -173,6 +203,227 @@ def allocate_blocks(frames):
         cursor = base + blk
     order.sort(key=lambda f: f["base_cp"])
     return order, total, W
+
+
+# --- op tables: what the op-select bits actually select ---------------------
+# A frame's op-select index is a bit-field, laid out the same way the frames
+# themselves are laid out in the namespace: aligned power-of-two blocks,
+# largest first.  Top bits pick the `ops` cluster; inside a cluster the index
+# splits into an A-table index, a B-table index and — only where the frame's
+# rows draw ONE shared immediate — the extension bits of that immediate.
+#
+# A cluster that states a DIAGONAL (`same_op` / `same_width`) is indexed by the
+# PAIR instead: its allowed combinations are a list, not a product, and giving
+# each slot its own field would encode combinations the frame forbids.
+#
+# Inside a slot's table the entries are ordered WIDEST FIRST, because an op
+# that declares more immediate range than its frame's field draws occupies
+# 2^ext consecutive entries (encoding.yaml's one widening mechanism).  Sorting
+# by descending span keeps every op's run aligned to its own size, so the low
+# ext bits of its index ARE the high bits of its immediate, with no adder in
+# the decode path.
+def slot_entries(op_list, field_bits):
+    """(entries, span) for one slot of one cluster. `field_bits` is the
+    immediate width the frame's rows draw for this slot, or None when the
+    frame's immediate is shared and its extension is bought once per cluster
+    rather than per op."""
+    ents = []
+    for e in op_list:
+        n = 1 if field_bits is None else 1 << _ext(e, field_bits)
+        ents.append({"op": op_name(e), "n": n, "imm": op_imm(e),
+                     "field": field_bits})
+    ents.sort(key=lambda e: -e["n"])          # stable: yaml order within a width
+    at = 0
+    for e in ents:
+        e["at"] = at
+        at += e["n"]
+    return ents, _p2(at)
+
+
+def _slot_entry(entry, field_bits, n):
+    return {"op": op_name(entry), "n": n, "imm": op_imm(entry),
+            "field": field_bits}
+
+
+def pair_entries(cluster, ba, bb, shared):
+    """(entries, span) for a DIAGONAL cluster, one entry per allowed (A, B)
+    combination.  An entry spans 2^ext indices exactly as a slot entry does —
+    the extensions of the two immediates, or, where one opcode serves both
+    slots (`same_op`), the single extension it pays for."""
+    ents = []
+    for x, y in cluster_pairs(cluster):
+        ea, eb = _ext(x, ba), _ext(y, bb)
+        if shared:                      # bought once, at the cluster level
+            ea = eb = 0
+        elif cluster.get("same_op"):    # one opcode, so one extension
+            ea, eb = max(ea, eb), 0
+        ents.append({"a": _slot_entry(x, None if shared else ba, 1 << ea),
+                     "b": _slot_entry(y, None if shared else bb, 1 << eb),
+                     "ext_a": ea, "ext_b": eb, "n": 1 << (ea + eb)})
+    ents.sort(key=lambda e: -e["n"])          # stable: yaml order within a width
+    at = 0
+    for e in ents:
+        e["at"] = at
+        at += e["n"]
+    return ents, _p2(at)
+
+
+def frame_tables(frame, grid):
+    """(clusters, used) — the frame's op-select space.
+
+    Each cluster gets an aligned sub-block of `size` indices; `used` is the
+    high-water mark, which must fit the frame's block. Emitted in yaml order,
+    allocated largest-first."""
+    ba = imm_field_bits(frame, grid, "a")
+    bb = imm_field_bits(frame, grid, "b")
+    shared = shared_imm(frame)
+    out = []
+    for c in frame.get("ops") or []:
+        a, b = list(c.get("a", [])), list(c.get("b", []))
+        ext, imm = 0, {}
+        if shared:
+            # One field serving both slots: its extension is bought once for
+            # the cluster, not once per slot (see opcode_codepoints).
+            base = max(ba, bb)
+            widest = max(a + b, key=lambda e: op_bits(e) or 0, default=None)
+            ext = _ext(widest, base) if widest is not None else 0
+            if ext:
+                imm = dict(op_imm(widest), field=base)
+        diagonal = next((k for k in ("same_op", "same_width") if c.get(k)), None)
+        cl = {"ext": ext, "imm": imm, "diagonal": diagonal}
+        if diagonal:
+            pairs, span = pair_entries(c, ba, bb, shared)
+            cl.update(pairs=pairs, span_p=span, size=span * (1 << ext))
+        else:
+            ea, sa = slot_entries(a, None if shared else ba)
+            eb, sb = slot_entries(b, None if shared else bb)
+            cl.update(a=ea, b=eb, span_a=sa, span_b=sb,
+                      size=sa * sb * (1 << ext))
+        out.append(cl)
+    cursor = 0
+    for c in sorted(out, key=lambda c: -c["size"]):
+        c["at"] = ((cursor + c["size"] - 1) // c["size"]) * c["size"]
+        cursor = c["at"] + c["size"]
+    return out, cursor
+
+
+def pair_fields(cluster):
+    """(pair-index bits, A-extension bits, B-extension bits) for a diagonal
+    cluster whose entries all span the same shape — the case where the index
+    still divides into named fields. (0, 0, 0) when they do not, and the entry
+    table's own `at`/`n` are the only way to read it."""
+    pairs = cluster["pairs"]
+    exts = {(e["ext_a"], e["ext_b"]) for e in pairs}
+    if len(exts) != 1:
+        return 0, 0, 0
+    ea, eb = exts.pop()
+    return _log2(cluster["span_p"]) - ea - eb, ea, eb
+
+
+def sel_bits(frame):
+    """Width of the frame's op-select index — the opcode bits its block spans.
+    A hosted frame's rd sentinel is not one of them: its rows NAME a single
+    reserved pattern, so it selects the frame and then holds still."""
+    return frame["opsel"]
+
+
+def cluster_word(frame, cluster):
+    """The cluster's op-select index spelled bit by bit, MSB first: constant
+    bits select the cluster, then 'a'/'b' index the two op tables (or 'p' the
+    pair table of a diagonal cluster, followed by the 'a'/'b' bits of the two
+    immediates it extends), and 'i' carries a shared immediate's high bits."""
+    span = _log2(cluster["size"])
+    pre = sel_bits(frame) - span
+    bits = "".join(str((cluster["at"] >> (span + pre - 1 - i)) & 1)
+                   for i in range(pre))
+    if cluster["diagonal"]:
+        p, ea, eb = pair_fields(cluster)
+        body = "p" * (p or _log2(cluster["span_p"])) + "a" * ea + "b" * eb
+    else:
+        body = "a" * _log2(cluster["span_a"]) + "b" * _log2(cluster["span_b"])
+    return bits + body + "i" * cluster["ext"]
+
+
+def _entry_at(entries, i):
+    """(entry, offset) for table index i, or (None, 0) if i lands in the
+    padding above the last entry."""
+    for e in entries:
+        if e["at"] <= i < e["at"] + e["n"]:
+            return e, i - e["at"]
+    return None, 0
+
+
+def _resolved(entry, offset):
+    out = {"op": entry["op"]}
+    if entry["imm"]:
+        out["imm"] = dict(entry["imm"])
+        if entry["field"] is not None:
+            out["imm"]["field"] = entry["field"]
+    if entry["n"] > 1:
+        out["imm_high"] = offset            # the immediate's bits above the field
+    return out
+
+
+def resolve_index(frame, index):
+    """THE op-select function: turn a frame's op-select index into the pair of
+    opcodes it names, or None where the index falls in a rounding hole (free
+    space the frame may grow into).
+
+    Returns {cluster, a: {op, imm, imm_high}, b: {...}, imm_high} — `imm_high`
+    on a slot is that op's immediate bits above the field its row draws; the
+    frame-level one is the same for a shared immediate."""
+    for n, c in enumerate(frame["tables"]):
+        if not (c["at"] <= index < c["at"] + c["size"]):
+            continue
+        rel = index - c["at"]
+        high = rel & ((1 << c["ext"]) - 1)
+        j = rel >> c["ext"]
+        if c["diagonal"]:
+            p, off = _entry_at(c["pairs"], j)
+            if p is None:
+                return None                  # padding inside the cluster
+            ea, eb = p["a"], p["b"]
+            oa, ob = off >> p["ext_b"], off & ((1 << p["ext_b"]) - 1)
+        else:
+            ea, oa = _entry_at(c["a"], j // c["span_b"])
+            eb, ob = _entry_at(c["b"], j % c["span_b"])
+        if ea is None or eb is None:
+            return None                      # padding inside the cluster
+        out = {"cluster": n, "a": _resolved(ea, oa), "b": _resolved(eb, ob)}
+        if c["ext"]:
+            out["imm"] = dict(c["imm"])
+            out["imm_high"] = high
+        return out
+    return None
+
+
+def covers(frame, word):
+    """Does this frame's block contain the codepoint the selector word names?"""
+    cp = word >> (WBITS - frame["depth"])
+    return frame["base_cp"] <= cp < frame["base_cp"] + (1 << frame["opsel"])
+
+
+def decode(frames, word, rd=None):
+    """Resolve a selector word — opcode5:funct3:g:h, MSB first — into the frame
+    and the two opcodes it names, or None if nothing is assigned there.
+
+    `rd` is the rd field's register name or number. A hosted frame rides inside
+    its host's codepoints and is told apart by rd holding the one reserved
+    sentinel its rows name (x0 or x2); any other rd means the host owns the
+    codepoint."""
+    name = SENTINEL_REGS.get(rd, rd if rd in SENTINEL_PATTERNS.values() else None)
+    if name is not None:
+        for f in frames:
+            if f.get("sentinel") == name and covers(f, word):
+                cp = word >> (WBITS - f["depth"])
+                hit = resolve_index(f, cp - f["base_cp"])
+                return dict(hit, frame=f["name"]) if hit else None
+    for f in frames:
+        if not f.get("host") and covers(f, word):
+            cp = word >> (WBITS - f["depth"])
+            hit = resolve_index(f, cp - f["base_cp"])
+            return dict(hit, frame=f["name"]) if hit else None
+    return None
 
 
 def word_chars(frame):
@@ -205,7 +456,7 @@ def frame_rows(spec):
 def _tokens(cells, w):
     """Per operand-column cell: (display_text, span, pos, body) with the
     selector bits injected — fn3 as its 3 bits, a discrete g/h cell as its
-    bit, everything else as its span-stripped label."""
+    bit, and everything else as its span-stripped label."""
     fn3 = " ".join(w[5:8])
     g_char, h_char = w[8], w[9]
     out, pos = [], 0
@@ -293,21 +544,21 @@ def matches(row_cells, tag, a_ops, b_ops, sp_template, has_sp_rows):
     return True
 
 
-def render_frame_body(frame, colwidths, header):
-    """Print the frame's plain form, then, per template, the encoding twice —
-    once keeping only the A-slot's fields and once only the B-slot's — with the
-    asm instruction on the right. Fields used by both slots survive both copies,
+def frame_body_lines(frame, colwidths):
+    """The frame's plain form, then, per template, the encoding twice — once
+    keeping only the A-slot's fields and once only the B-slot's — with the asm
+    instruction on the right. Fields used by both slots survive both copies,
     exposing the shared operands."""
     spec = frame["spec"]
     w = word_chars(frame)
     o5 = " ".join(w[0:5])
     rows = frame_rows(spec)
     has_sp = any(tag == "SP-relative" for _, tag in rows)
+    out = []
 
-    print("\n".join(header))
     for cells, tag in rows:                         # the form as it stands
         line = render_line(_tokens(cells, w), o5, colwidths)
-        print(line + (f" ({tag})" if tag else ""))
+        out.append(line + (f" ({tag})" if tag else ""))
 
     for pair in spec["templates"]:
         a_line, b_line = pair[0].strip(), pair[1].strip()
@@ -325,23 +576,30 @@ def render_frame_body(frame, colwidths, header):
             cand.sort(key=lambda ct: -len(row_operands(ct[0]) & (a_ops | b_ops)))
             if cand and row_operands(cand[0][0]) & (a_ops | b_ops):
                 hits, approx = [cand[0]], True
-        print()
+        out.append("")
         if not hits:
-            print(f"    (no row realises: {a_line} ; {b_line})")
+            out.append(f"    (no row realises: {a_line} ; {b_line})")
             continue
         if approx:
-            print("    (closest-fit encoding — this frame shares rows across forms)")
+            out.append("    (closest-fit encoding — this frame shares rows across forms)")
         for cells, tag in hits:
             rops = row_operands(cells)
             toks = _tokens(cells, w)
             a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
             b = render_line(toks, o5, colwidths, keep=lambda base: base in b_ops)
-            print(f"{a}   {specialize(a_line, rops)}")
-            print(f"{b}   {specialize(b_line, rops)}")
+            out.append(f"{a}   {specialize(a_line, rops)}")
+            out.append(f"{b}   {specialize(b_line, rops)}")
+    while out and not out[-1].strip():
+        out.pop()
+    return out
 
 
-def main():
-    spec = yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
+# --- loading ---------------------------------------------------------------
+def load(path=None):
+    """Read encoding.yaml and assign every frame its block, its identifier and
+    its op tables. Returns (frames, info) with frames in codepoint order."""
+    spec = yaml.safe_load(open(path or os.path.join(ROOT, "encoding.yaml")))
+    grid = spec["grid"]
     frames = []
     for node in spec["doc"]:
         if "frame" not in node:
@@ -350,19 +608,19 @@ def main():
         if not f.get("ops"):
             continue
         base = opcode_demand(f.get("ops"))          # a×b combos, before ext
-        d = opcode_codepoints(f, spec["grid"])      # real codepoints, ext-aware
+        d = opcode_codepoints(f, grid)              # real codepoints, ext-aware
         budget = f.get("budget") or d               # reserve current fill if none
         fmt = a_format(f)
         frames.append({
             "name": f["name"], "spec": f, "demand": d, "base": base,
             "budget": budget, "opsel": opsel_bits(budget),
             "fmt": fmt, "a_rank": _FMT_RANK[fmt],
-            "role": rd_column_role(f, spec["grid"]),
+            "role": rd_column_role(f, grid),
         })
 
     complaints = []
     for f in frames:
-        complaints += lint_frame(f["spec"], spec["grid"])
+        complaints += lint_frame(f["spec"], grid)
 
     # A1.11 — hosting.  A frame whose rd column carries the sentinel is
     # selected by that bit pattern, not by an opcode of its own, so it needs no
@@ -394,7 +652,6 @@ def main():
 
     hosted = [f for f in frames if f.get("host")]
     order, reserved, W = allocate_blocks([f for f in frames if not f.get("host")])
-    overflow = reserved > (1 << WBITS)
 
     # Place each guest at the top of its host's block, largest first so every
     # sub-block stays aligned to its own size.  The guest's identifier is a
@@ -413,12 +670,304 @@ def main():
         g["id_len"] = max(0, W - g["opsel"])
         g["id_val"] = g["base_cp"] >> g["opsel"]
         g["depth"] = min(W, WBITS)
-    widths = list(spec["grid"]["display"]) + [9, 3]
-    header = header_lines(widths)
 
-    if complaints:
+    overfull = []
+    for f in frames:
+        f["tables"], f["used"] = frame_tables(f["spec"], grid)
+        f["space"] = 1 << sel_bits(f)
+        if f["used"] > f["space"]:
+            overfull.append(f["name"])
+
+    frames.sort(key=lambda f: (f["base_cp"], -f["opsel"]))
+    info = {
+        "grid": grid, "reserved": reserved, "W": W, "blocks": len(order),
+        "opsets": spec.get("opsets") or {},
+        "pseudo_ops": spec.get("pseudo_ops") or {},
+        "complaints": complaints, "unhosted": unhosted, "hosted": hosted,
+        "overflow": reserved > (1 << WBITS), "overfull": overfull,
+        "overbudget": [f["name"] for f in frames
+                       if f["demand"] > (1 << f["opsel"])],
+    }
+    return frames, info
+
+
+# --- self-check ------------------------------------------------------------
+def check(frames, grid):
+    """Every assigned codepoint must resolve to exactly one frame and one op
+    pair, every combination the tables encode must be one the yaml allows, and
+    every op the yaml declares must be reachable. Returns a list of complaints;
+    empty means the tables and the namespace agree."""
+    bad = []
+    seen = {}
+    for f in frames:
+        allowed = {(op_name(x), op_name(y))
+                   for c in f["spec"].get("ops") or [] for x, y in cluster_pairs(c)}
+        found = set()
+        for index in range(1 << sel_bits(f)):
+            hit = resolve_index(f, index)
+            if hit is None:
+                continue
+            found.add((hit["a"]["op"], hit["b"]["op"]))
+            cp = f["base_cp"] + index
+            rd = f.get("sentinel")
+            key = (cp, rd)
+            if key in seen:
+                bad.append(f"codepoint {cp} (rd={rd}) claimed by both "
+                           f"{seen[key]} and {f['name']}")
+            seen[key] = f["name"]
+            word = cp << (WBITS - f["depth"])
+            got = decode(frames, word, rd or "x1")
+            if not got or got["frame"] != f["name"]:
+                bad.append(f"{f['name']}: index {index} does not decode back "
+                           f"(got {got and got['frame']})")
+        if found - allowed:
+            bad.append(f"{f['name']}: tables encode op pairs the yaml forbids: "
+                       f"{sorted(found - allowed)}")
+        if allowed - found:
+            bad.append(f"{f['name']}: op pairs with no codepoint: "
+                       f"{sorted(allowed - found)}")
+        # The enumeration must cost exactly what the pricing model charges,
+        # before the rounding that buys the bit-fields.
+        dense = sum(sum(e["n"] for e in c["pairs"]) * (1 << c["ext"])
+                    if c["diagonal"] else
+                    sum(e["n"] for e in c["a"]) * sum(e["n"] for e in c["b"])
+                    * (1 << c["ext"])
+                    for c in f["tables"])
+        priced = opcode_codepoints(f["spec"], grid)
+        if dense != priced:
+            bad.append(f"{f['name']}: tables enumerate {dense} codepoints, "
+                       f"pricing charges {priced}")
+    return bad
+
+
+# --- yaml emission ---------------------------------------------------------
+BANNER = "# Generated by util/encoding_assign.py from encoding.yaml — do not edit by hand."
+
+PREAMBLE = """\
+#
+# One entry per packet frame: a pair of RISC-V instructions encoded in a single
+# 32-bit packet.  `layout` is the frame's bit layout, with the frame identifier
+# filled in as constants and only the op-select bits left as letters.
+#
+# READING THE OP-SELECT BITS
+#
+# Every 'o' in a layout is one bit of that frame's op-select index, taken MSB
+# first in the order  opcode5[4:0], funct3[2:0], g, h.  That is NOT the drawing's
+# left-to-right order: read the `opcode` box first (dropping its trailing `1 0`
+# packet marker), then `fn3` in the middle, then the `g` column, then `h` at the
+# far left.  A hosted frame (`hosted_in`) rides inside its host's codepoints and
+# is told apart by its `rd` sentinel, which its rows draw as a constant: the
+# sentinel selects the frame and contributes no index bit.
+#
+# `select` on a frame spells the whole 10-bit selector word: '0'/'1' are the
+# identifier, 'o' the op-select bits, '.' a bit the frame does not reach.
+# `block` is how many op-select indices the frame has — 2^(number of 'o's).
+#
+# RESOLVING AN INDEX TO A PAIR OF OPCODES
+#
+# `opcodes` is a list of clusters, disjoint in both the index and the pairs they
+# allow.  Each has its own aligned sub-block of the index and spells it out in
+# `select`:
+#
+#     constant bits select the cluster
+#     'a' bits index the cluster's `a` table       (the first instruction)
+#     'b' bits index the cluster's `b` table       (the second)
+#     'p' bits index the cluster's `pairs` table   (a cluster that states a
+#                                                   diagonal rather than a
+#                                                   cross-product; its 'a'/'b'
+#                                                   bits then extend the two
+#                                                   immediates, nothing more)
+#     'i' bits, where present, carry `imm.ext`     (a shared immediate's
+#                                                   high bits)
+#
+# so, given an index i and a cluster whose sub-block is [at, at + n):
+#
+#     rel = i - at
+#     imm_high = rel & ((1 << i_bits) - 1)         # 'i' bits, if any
+#     j       = rel >> i_bits
+#     a_index = j // b_span                        # b_span = 1 << (# 'b' bits)
+#     b_index = j %  b_span
+#
+# and for a `pairs` cluster, j indexes that table instead — the allowed (A, B)
+# combinations are a LIST there, not a product, so a `same_op` cluster cannot
+# spell a mismatched pair at all.
+#
+# A table entry covers indices [at, at + n).  n > 1 means that op declares more
+# immediate range than the field its row draws: it takes 2^extra entries, and
+# the offset within them is the immediate's high bits — `imm.ext` names which.
+# `imm.bits` is the op's total immediate width, `imm.field` the width the row
+# draws, `imm.scale` the multiplier the field carries where the op has one.  An
+# entry with no `imm` takes the frame's field as drawn (a register-form op
+# names no immediate at all).  Indices no cluster or table entry claims are
+# unassigned — the room each frame has to grow.
+#
+# Two kinds of name in those tables are not RISC-V mnemonics: `xlen_switchable`
+# ops, one opcode whose width follows the base ISA, and `pseudo_ops`, which are
+# register/immediate patterns on a real instruction — both are listed below
+# with what they encode as.
+"""
+
+
+def _q(s):
+    """A double-quoted yaml scalar (JSON strings are valid yaml)."""
+    return json.dumps(str(s))
+
+
+def _flow(value):
+    """A yaml value on one line, passed through unchanged."""
+    return yaml.safe_dump(value, default_flow_style=True,
+                          sort_keys=False, width=10 ** 6).strip()
+
+
+def _imm_yaml(imm, n=1):
+    """Flow-mapped immediate contract, with the bits the index carries named."""
+    if not imm:
+        return None
+    parts = [f"bits: {imm['bits']}"] if imm.get("bits") is not None else []
+    if "signed" in imm:
+        parts.append(f"signed: {json.dumps(bool(imm['signed']))}")
+    if imm.get("scale"):
+        parts.append(f"scale: {imm['scale']}")
+    if imm.get("field") is not None:
+        parts.append(f"field: {imm['field']}")
+    if n > 1 and imm.get("bits") is not None and imm.get("field") is not None:
+        ext = "imm[%d:%d]" % (imm["bits"] - 1, imm["field"])
+        parts.append(f"ext: {_q(ext)}")
+    return "{" + ", ".join(parts) + "}"
+
+
+def _entry_yaml(e):
+    imm = _imm_yaml(dict(e["imm"], field=e["field"]) if e["imm"] else {}, e["n"])
+    parts = [f"at: {e['at']}", f"n: {e['n']}", f"op: {_q(e['op'])}"]
+    if imm:
+        parts.append(f"imm: {imm}")
+    return "{" + ", ".join(parts) + "}"
+
+
+def _slot_yaml(e):
+    """One side of a `pairs` entry: the op, and the immediate it extends."""
+    imm = _imm_yaml(dict(e["imm"], field=e["field"]) if e["imm"] else {}, e["n"])
+    return "{" + f"op: {_q(e['op'])}" + (f", imm: {imm}" if imm else "") + "}"
+
+
+def emit_yaml(frames, info):
+    """The ciscv-proto.yml data file: every frame, its layout, its opcode
+    tables and the bit-level meaning of every op-select bit."""
+    widths = list(info["grid"]["display"]) + [9, 3]
+    out = [BANNER, PREAMBLE.rstrip("\n"), ""]
+    out.append("selector:")
+    out.append(f"  word: [opcode5, funct3, g, h]        # {WBITS} bits, MSB first")
+    out.append(f"  bits: {WBITS}")
+    out.append(f"  codepoints: {1 << WBITS}")
+    out.append(f"  reserved: {info['reserved']}")
+    out.append(f"  blocks: {info['blocks']}")
+    out.append("  sentinels: {rd: [x0, x2]}"
+               "        # reserved rd patterns; a hosted frame names one")
+    out.append("")
+    out.append("header: |")
+    for line in header_lines(widths):
+        out.append("  " + line)
+    out.append("")
+    opsets = info["opsets"]
+    if opsets.get("xlen_switchable"):
+        out.append("xlen_switchable:")
+        for name, by_xlen in opsets["xlen_switchable"].items():
+            out.append(f"  {name}: {_flow(by_xlen)}")
+        out.append("")
+    if info["pseudo_ops"]:
+        out.append("pseudo_ops:")
+        for name, d in info["pseudo_ops"].items():
+            keep = {k: v for k, v in d.items() if k in ("base", "encode")}
+            out.append(f"  {name}: {_flow(keep)}")
+        out.append("")
+    out.append("frames:")
+    for f in frames:
+        out.append(f"- name: {_q(f['name'])}")
+        if f["spec"].get("does"):
+            out.append(f"  does: {_q(' '.join(str(f['spec']['does']).split()))}")
+        out.append(f"  a_format: {f['fmt']}")
+        idl = f["id_len"]
+        out.append(f"  id: {_q(format(f['id_val'], f'0{idl}b') if idl else '')}")
+        out.append(f"  select: {_q(''.join(word_chars(f)))}")
+        if f.get("host"):
+            out.append(f"  hosted_in: {_q(f['host'])}")
+            out.append(f"  rd: {f['sentinel']}"
+                       f"                      # the sentinel its rows draw:"
+                       f" what tells it from its host")
+        out.append(f"  block: {f['space']}"
+                   f"          # op-select indices; {f['used']} used, "
+                   f"{f['space'] - f['used']} free")
+        out.append("  layout: |")
+        for line in frame_body_lines(f, widths):
+            out.append(("    " + line).rstrip())
+        out.append("  opcodes:")
+        for c in f["tables"]:
+            out.append(f"  - select: {_q(cluster_word(f, c))}")
+            out.append(f"    at: {c['at']}")
+            out.append(f"    n: {c['size']}")
+            if c["ext"]:
+                out.append(f"    imm: {_imm_yaml(c['imm'], 1 << c['ext'])}")
+            if c["diagonal"]:
+                out.append(f"    {c['diagonal']}: true")
+                out.append("    pairs:")
+                for p in c["pairs"]:
+                    out.append(f"    - {{at: {p['at']}, n: {p['n']}, "
+                               f"a: {_slot_yaml(p['a'])}, b: {_slot_yaml(p['b'])}}}")
+            else:
+                for slot in ("a", "b"):
+                    out.append(f"    {slot}:")
+                    for e in c[slot]:
+                        out.append(f"    - {_entry_yaml(e)}")
+    return "\n".join(out) + "\n"
+
+
+# --- text report -----------------------------------------------------------
+def _op_text(e):
+    """`op` plus the immediate contract it carries, if any."""
+    imm = dict(e["imm"], field=e["field"]) if e["imm"] else {}
+    tail = ""
+    if imm.get("bits") is not None:
+        sign = "s" if imm.get("signed") else "u"
+        tail = f"   imm {imm['bits']}{sign}"
+        if imm.get("scale"):
+            tail += f" x{imm['scale']}"
+        if e["n"] > 1:
+            tail += f" = field[{imm['field']-1}:0] + index[{imm['bits']-1}:{imm['field']}]"
+    return f"{e['op']:<10}{tail}".rstrip()
+
+
+def _span_text(e):
+    """The indices a table entry covers."""
+    return f"{e['at']}" if e["n"] == 1 else f"{e['at']}..{e['at']+e['n']-1}"
+
+
+def print_tables(f):
+    for n, c in enumerate(f["tables"]):
+        head = f"    cluster {n}: index {cluster_word(f, c)}"
+        diag = f", {c['diagonal']}" if c["diagonal"] else ""
+        print(f"{head}   ({c['size']} codepoint(s) at {c['at']}{diag})")
+        if c["ext"]:
+            imm = c["imm"]
+            print(f"      shared immediate {imm['bits']} bits = "
+                  f"field[{imm['field']-1}:0] + index[{imm['bits']-1}:{imm['field']}]")
+        if c["diagonal"]:
+            for p in c["pairs"]:
+                print(f"      {_span_text(p):>9}  {_op_text(p['a'])} ; "
+                      f"{_op_text(p['b'])}")
+            continue
+        for slot in ("a", "b"):
+            for e in c[slot]:
+                print(f"      {slot} {_span_text(e):>7}  {_op_text(e)}")
+
+
+def report(frames, info):
+    widths = list(info["grid"]["display"]) + [9, 3]
+    header = header_lines(widths)
+    reserved, order = info["reserved"], info["blocks"]
+
+    if info["complaints"]:
         print("## Codepoint-accounting complaints\n")
-        for c in complaints:
+        for c in info["complaints"]:
             print(f"  ✗ {c}")
         print()
 
@@ -427,9 +976,10 @@ def main():
           f"{1<<WBITS} codepoints, read MSB->LSB.")
     print("'0'/'1' = frame identifier (constant), 'o' = op-select, "
           "'.' = free/unused.\n")
-    print(f"Reserved {reserved}/{1<<WBITS} codepoints across {len(order)} frames "
+    print(f"Reserved {reserved}/{1<<WBITS} codepoints across {order} frames "
           f"({100*reserved/(1<<WBITS):.0f}%), each frame a fixed block sized to its\n"
           f"budget so it can grow into its own free slots without moving the rest.\n")
+    hosted = info["hosted"]
     if hosted:
         print("Hosted frames (rd = x0/x2 sentinel) take NO block of their own — each\n"
               "rides in a host's codepoints, in the rd slice that host cannot reach.\n"
@@ -442,56 +992,147 @@ def main():
                   f"{g['host_cp']:>3} codepoint(s) of {g['host']} (rd = {g['sentinel']})")
         print(f"    {'':20} {sum(g['budget'] for g in hosted):>10} codepoints "
               f"returned to the namespace\n")
-    if unhosted:
-        print(f"⚠ Sentinel frames with no host large enough: {', '.join(unhosted)}\n")
+    if info["unhosted"]:
+        print(f"⚠ Sentinel frames with no host large enough: "
+              f"{', '.join(info['unhosted'])}\n")
     print("Each frame prints its form, then per template the encoding twice — the\n"
           "A instruction then the B — with the fields that slot does NOT use erased.\n"
           "A field kept in both copies is shared by both instructions.\n")
+    print("Then its op tables: which op-select index selects which pair of opcodes.\n"
+          "Constant bits pick the ops cluster, 'a'/'b' index that cluster's two op\n"
+          "tables, 'i' carries a shared immediate's high bits.  An op spanning\n"
+          "several indices is one that buys immediate range by opcode repetition.\n")
 
-    overbudget = []
-    for f in order:
+    for f in frames:
         idl, opsel, depth = f["id_len"], f["opsel"], f["depth"]
         block = 1 << opsel
         room = block - f["demand"]
         opc = _FMT_OPC[f["fmt"]]
         opc_s = f"opcode[6:2]≈{opc:05b}" if opc is not None else "opcode[6:2]=mixed"
         tag = ""
-        if f["demand"] > block:
+        if f["used"] > f["space"]:
+            tag = "   [⚠ op tables exceed the block]"
+        elif f["demand"] > block:
             tag = "   [⚠ current fill exceeds its block]"
-            overbudget.append(f["name"])
         idbits = f"{f['id_val']:0{idl}b}" if idl else "(none)"
         print(f"## {f['name']}{tag}")
-        print(f"    A-slot: {f['fmt']:7} ({opc_s})   "
-              f"block {block} (budget {f['budget']}); using {f['demand']}, "
-              f"{room} free to grow; identifier {idl} bit(s) = {idbits}; "
-              f"depth {depth}/{WBITS}")
+        if f.get("host"):
+            print(f"    A-slot: {f['fmt']:7} ({opc_s})   no block of its own; "
+                  f"selected by rd = {f['sentinel']}\n"
+                  f"    inside {f['host_cp']} codepoint(s) of {f['host']}; "
+                  f"identifier {idl} bit(s) = {idbits}")
+        else:
+            print(f"    A-slot: {f['fmt']:7} ({opc_s})   "
+                  f"block {block} (budget {f['budget']}); using {f['demand']}, "
+                  f"{room} free to grow; identifier {idl} bit(s) = {idbits}; "
+                  f"depth {depth}/{WBITS}")
+        print(f"    op-select: {sel_bits(f)} bit(s), {f['space']} index/es, "
+              f"{f['used']} used by the tables below, {f['space']-f['used']} free")
         print()
-        render_frame_body(f, widths, header)
+        print("\n".join(header))
+        print("\n".join(frame_body_lines(f, widths)))
         print()
-
-    for g in hosted:
-        print(f"## {g['name']}  [hosted]")
-        print(f"    A-slot: {g['fmt']:7}   no block of its own; selected by the "
-              f"rd = x0/x2 sentinel\n"
-              f"    inside {g['host_cp']} codepoint(s) of {g['host']} "
-              f"(rd = {g['sentinel']}); "
-              f"using {g['demand']} of budget {g['budget']}")
-        print()
-        render_frame_body(g, widths, header)
+        print_tables(f)
         print()
 
     print("─" * 72)
-    if overflow:
+    if info["overflow"]:
         print(f"⚠ OVERFLOW: reserved {reserved} > {1<<WBITS} codepoints — the planned\n"
               f"  budgets do not fit the namespace. Shrink some budgets or op-lists.")
     else:
         print(f"Planned budgets FIT: {reserved}/{1<<WBITS} reserved, "
               f"{(1<<WBITS)-reserved} spare. Every frame can grow to its full budget\n"
               f"without overflowing the namespace or perturbing another frame.")
-    if overbudget:
+    if info["overbudget"]:
         print(f"\n⚠ Frames whose current fill already exceeds their block "
-              f"(raise the budget): {', '.join(overbudget)}")
-    return 1 if (overflow or overbudget) else 0
+              f"(raise the budget): {', '.join(info['overbudget'])}")
+    if info["overfull"]:
+        print(f"\n⚠ Frames whose op tables do not fit their block once rounded to\n"
+              f"  power-of-two fields: {', '.join(info['overfull'])}")
+
+
+def show(hit):
+    """One decoded packet as text."""
+    if hit is None:
+        return "unassigned"
+    def slot(s):
+        d = hit[s]
+        out = d["op"]
+        if "imm_high" in d:
+            imm = d.get("imm") or hit.get("imm") or {}
+            out += (f"  [imm[{imm.get('bits', 0)-1}:{imm.get('field', 0)}] "
+                    f"= {d['imm_high']}]")
+        return out
+    line = f"{hit['frame']}  cluster {hit['cluster']}:  A {slot('a')} ; B {slot('b')}"
+    if "imm_high" in hit:
+        imm = hit["imm"]
+        line += (f"   shared imm[{imm['bits']-1}:{imm['field']}] "
+                 f"= {hit['imm_high']}")
+    return line
+
+
+def _rd_value(text):
+    """--rd as either a register name or a bit pattern."""
+    if text is None:
+        return None
+    text = text.strip()
+    if text.startswith("x") and text[1:].isdigit():
+        return text
+    return SENTINEL_REGS.get(int(text, 0), int(text, 0))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--yaml", default=os.path.join(ROOT, "encoding.yaml"))
+    ap.add_argument("-o", "--output", help="write the data file here")
+    ap.add_argument("--text", action="store_true",
+                    help="the human-readable report instead of the data file")
+    ap.add_argument("--decode", metavar="WORD",
+                    help="resolve one selector word (opcode5:funct3:g:h)")
+    ap.add_argument("--rd", metavar="REG",
+                    help="rd field for --decode; x0/x2 select a hosted frame")
+    ap.add_argument("--check-tables", action="store_true",
+                    help="only self-check the tables; print nothing on success")
+    args = ap.parse_args()
+
+    frames, info = load(args.yaml)
+    bad = check(frames, info["grid"])
+
+    if args.decode is not None:
+        print(show(decode(frames, int(args.decode, 0), _rd_value(args.rd))))
+        return 1 if bad else 0
+
+    if args.check_tables:
+        for b in bad:
+            print(f"  ✗ {b}", file=sys.stderr)
+        return 1 if (bad or info["overfull"]) else 0
+
+    if args.text:
+        report(frames, info)
+    else:
+        text = emit_yaml(frames, info)
+        if args.output:
+            with open(args.output, "w") as fh:
+                fh.write(text)
+        else:
+            sys.stdout.write(text)
+        # The data file stays clean: warnings go to stderr.
+        for c in info["complaints"]:
+            print(f"  ✗ Codepoint-accounting complaints: {c}", file=sys.stderr)
+        if info["overflow"]:
+            print(f"⚠ OVERFLOW: reserved {info['reserved']} > {1<<WBITS} codepoints",
+                  file=sys.stderr)
+        if info["overbudget"]:
+            print(f"⚠ Frames whose current fill exceeds their block: "
+                  f"{', '.join(info['overbudget'])}", file=sys.stderr)
+        if info["overfull"]:
+            print(f"⚠ Frames whose op tables exceed their block: "
+                  f"{', '.join(info['overfull'])}", file=sys.stderr)
+
+    for b in bad:
+        print(f"  ✗ {b}", file=sys.stderr)
+    return 1 if (info["overflow"] or info["overbudget"] or info["overfull"]
+                 or bad) else 0
 
 
 if __name__ == "__main__":
