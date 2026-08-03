@@ -1169,3 +1169,106 @@ Using `ra` as the base register does not help either, for two reasons:
 not.** 2587 distinct targets is 11.3 bits of information, scattered across
 19–20 bits of address. The table is a dictionary that buys back the
 difference; no choice of base register does, because sparsity is the problem.
+
+## The indexed-call A slot, chosen from what is REACHABLE (2026-08)
+
+The adjacency census picked ops from whatever happened to sit next to the
+call. Redone properly: run the real scheduler and pairer, then for every
+direct call left solo, enumerate EVERY solo instruction in its block that can
+legally be moved down beside it (conservative — no branch crossed, no register
+hazard, no memory reordering), and record every operand shape of ten bits or
+fewer that each could be encoded in. The frame gets to choose its op set and
+the scheduler gets to choose which candidate to move, so the population that
+matters is "shapes reachable at this call".
+
+Marginal reach of each shape (overlapping — one call may offer several):
+
+| shape                  | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|------------------------|----------|---------------|-------------|
+| `mv rd5,rs5`           | 31.5%    | 36.0%         | 40.5%       |
+| `addi rd3,sp,imm7`     | 24.4%    | 2.1%          | 2.9%        |
+| `addi rd3,sp,imm7*4`   | 21.2%    | 2.5%          | 4.1%        |
+| `addi rd5,sp,imm5`     | 20.7%    | 1.4%          | 1.3%        |
+| `load rd3,imm7*4(sp)`  | 6.3%     | 4.0%          | 7.2%        |
+| `load rd3,imm7(sp)`    | 5.7%     | 4.0%          | 6.9%        |
+| `li rd3,imm7`          | 3.7%     | 7.3%          | 9.6%        |
+| `store rs5,imm5*4(sp)` | 1.5%     | 11.8%         | 2.2%        |
+| `store rs5,imm5(sp)`   | 1.2%     | 6.6%          | 1.3%        |
+| `store rs3,imm7(sp)`   | 0.5%     | 6.3%          | 0.5%        |
+| `load rd5,0(rs5)`      | 1.3%     | 2.5%          | 3.8%        |
+| `store rs5,0(rs5)`     | 0.9%     | 3.0%          | 0.7%        |
+| `addi rsd5,imm5`       | 1.0%     | 1.0%          | 0.9%        |
+| `addi rd3,rs3,imm4`    | 0.9%     | 0.4%          | 0.7%        |
+| `<alu> rsd5,rs5`       | 0.5%     | 1.1%          | 0.3%        |
+| `<shift> rsd5,shamt5`  | 0.1%     | 0.3%          | 0.3%        |
+| `shadd rsd3,rs5,sh2`   | 0.1%     | 0.1%          | 0.0%        |
+
+Three things the adjacency census got wrong:
+
+* **Scaling wins for load and store, loses for `addi rd,sp`.** `load
+  rd3,imm7*4(sp)` beats the raw `imm7` form on every corpus, and `store
+  rs5,imm5*4(sp)` beats both the raw-imm5 and the rs3+imm7 store — spilled and
+  reloaded values are word-aligned. `addi rd,sp,imm` is the opposite (24.4%
+  raw vs 21.2% scaled on cpp): C++ takes the address of byte- and short-sized
+  stack temporaries, and 10.7% of its `addi rd,sp` are not 4-aligned.
+* **The RSD family is real but tiny.** `add rsd, rs2` and friends fit in ten
+  bits (5+5) where the three-register form never can, but they reach 0.3–1.1%.
+  `shadd` stays dead at 0.0–0.1% even in this generous formulation.
+* **`addi rd5,sp,imm5` is a trap.** It looks strong on cpp (20.7%) but it is
+  almost entirely the same calls `addi rd3,sp,imm7` already covers.
+
+The op set, evaluated as a fixed set across all three corpora (percentage of
+ALL direct calls that get a partner):
+
+| cumulative op set        | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|--------------------------|----------|---------------|-------------|
+| `mv rd5,rs5`             | 31.5%    | 36.0%         | 40.5%       |
+| + `addi rd3,sp,imm7`     | 55.6%    | 38.1%         | 43.3%       |
+| + `li rd3,imm7`          | 58.8%    | 44.5%         | 52.2%       |
+| + `load rd3,imm7*4(sp)`  | 64.7%    | 46.6%         | 56.2%       |
+| + `store rs5,imm5*4(sp)` | 65.5%    | 52.6%         | 57.2%       |
+| + `load rd5,0(rs5)`      | 66.3%    | 54.0%         | 59.3%       |
+| + `store rs5,0(rs5)`     | 66.6%    | 55.4%         | 59.6%       |
+| + `addi rsd5,imm5`       | **66.9%** | **56.0%**    | **60.3%**   |
+
+Each corpus's own greedy optimum is 67.9 / 57.2 / 61.6%, so the common set
+gives away about a point. Everything past the eighth op is worth under 0.3
+points anywhere. Eight A ops × two B ops = 16 codepoints, which is the budget
+already proposed.
+
+20484 pairs on cpp-rv32 is ~82 KiB against a 4 KiB table.
+
+Ceiling: 31.9 / 42.4 / 38.2% of solo calls have NO movable solo candidate at
+all, so ~68 / ~58 / ~62% is the hard limit for any A-slot choice whatsoever.
+The eight-op set is within 1–2 points of it.
+
+## Splitting the call instead of indexing it: measured, and it is small
+
+The alternative to a table: expand a call to `adduipc ra, hi10` +
+`jalr ra, imm10(ra)`, hard-coding the temporary as `ra` so neither half needs a
+register field. Both halves are then ten bits and BOTH can ride in a packet;
+hi10+lo10 is twenty bits of packet displacement, which covers 100% of all
+three corpora (see the displacement table above). No table, no `jvt`, no Zcmt,
+and per-site opt-in, so it is never worse than emitting a plain `jal`.
+
+The arithmetic decides it. A plain `jal` is one unpairable word; the split is
+two words. So the split only WINS when both halves find a partner, and merely
+breaks even when one does. That means it needs TWO movable candidates at the
+call, not one:
+
+| movable solo candidates at a solo call | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|----------------------------------------|----------|---------------|-------------|
+| 0                                      | 31.9%    | 42.4%         | 38.2%       |
+| 1                                      | 63.7%    | 46.0%         | 53.5%       |
+| **2 or more**                          | **4.4%** | **11.6%**     | **8.3%**    |
+
+1340 / 598 / 583 calls, against the index's 20484 / 2898 / 4224 — between a
+sixteenth and a fifth. The reason is visible in the table: the overwhelmingly
+common case is exactly ONE spare instruction beside a call, which is precisely
+the case the split cannot exploit and the index can.
+
+Worth keeping in the back pocket for the genuinely far calls that already pay
+two instructions (`auipc;jalr`: 2463 on cpp-rv32, 2147 on cpp-rv64, zero on
+musl and sqlite) — there the jalr half is pairable for free and needs only one
+partner. But a 20-bit `jal` reaches 100% of these corpora, so in the packet
+ISA that case may not exist at all.
