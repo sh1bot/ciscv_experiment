@@ -33,7 +33,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis.anchors import scan, coverage, direct_call
+from analysis.anchors import scan, coverage, any_call
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,7 +108,7 @@ def main():
         in_table = sum(v for _, v in freq.most_common(entries))
         q = in_table / transfers if transfers else 0
 
-        n_anchor, n_scored, rows = scan(corpus, anchor=direct_call)
+        n_anchor, n_scored, rows = scan(corpus, anchor=any_call)
         p = coverage(rows, A_OPS) / n_scored if n_scored else 0
 
         near = n["near call"] + n["near tail call"]

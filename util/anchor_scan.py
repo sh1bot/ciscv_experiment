@@ -22,11 +22,13 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis.anchors import scan, greedy, coverage, direct_call
+from analysis.anchors import scan, greedy, coverage, direct_call, any_call
 
 
 def anchor_for(spec):
     if spec == "call":
+        return any_call
+    if spec == "near-call":
         return direct_call
     if spec == "jalr":
         return lambda r: r.mnem == "jalr"
@@ -79,7 +81,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("corpora", nargs="+")
     ap.add_argument("--anchor", default="call",
-                    help="call (default), jalr, branch, or a mnemonic")
+                    help="call (near+far, default), near-call, jalr, branch, or a mnemonic")
     ap.add_argument("--budget", type=int, default=10,
                     help="operand bits the anchor leaves for its partner")
     ap.add_argument("--fixed", nargs="*", default=None,

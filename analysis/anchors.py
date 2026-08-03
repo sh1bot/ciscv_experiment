@@ -279,8 +279,15 @@ def shapes(r, budget=10):
 # ------------------------------------------------------------------ scanning
 
 def direct_call(r):
-    """The usual anchor: a call whose target is a label, not a register."""
+    """A call whose target is a label: `jal f`. Excludes the far form."""
     return r.is_call and r.mnem != "jalr"
+
+
+def any_call(r):
+    """Every call, near or far. `jalr imm(ra)` after an `auipc` is a call too,
+    and it is the form an indexed table jump replaces along with `jal`, so it
+    belongs in the anchor set whenever the question is about the call frame."""
+    return r.is_call
 
 
 def scan(corpus, anchor=direct_call, solo_anchor_only=True, budget=10,

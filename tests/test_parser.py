@@ -198,3 +198,22 @@ class TestUnresolvedImmediate:
     def test_numeric_load_offset_still_parses(self):
         i = dec("lw", "a0", "8(a1)")
         assert i.imm == 8 and i.imm_expr is None and i.rs1 == 11
+
+
+def test_jalr_with_a_displacement_is_a_call_not_a_jump():
+    """`jalr imm(rs)` and `jalr rd, imm(rs)` link; only `jr` does not.
+
+    This is the form the linker leaves behind when it cannot relax a far call.
+    Decoding it with rd=x0 hid every far call in the corpus.
+    """
+    from analysis.parser import parse_file
+    blocks, _fns = parse_file(
+        "f:\n\tauipc\tra,0x11b\n\tjalr\t-0x722(ra)\n"
+        "g:\n\tauipc\tra,0x11b\n\tjalr\tra,-0x722(ra)\n"
+        "h:\n\tauipc\tt1,0x11a\n\tjr\t0x4b6(t1)\n")
+    jalrs = [i for b in blocks for i in b.instructions if i.mnemonic == "jalr"]
+    assert len(jalrs) == 3
+    assert jalrs[0].rd == 1 and jalrs[0].rs1 == 1 and jalrs[0].imm == -0x722
+    assert jalrs[1].rd == 1 and jalrs[1].rs1 == 1
+    assert jalrs[2].rd == 0 and jalrs[2].rs1 == 6      # jr t1: no link
+    assert jalrs[0].is_call and jalrs[1].is_call and not jalrs[2].is_call

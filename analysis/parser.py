@@ -299,13 +299,20 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
             insn.rs2 = REG_ALIASES.get(ops[1].lower())
             return insn
 
-        # --- jr pseudo-op: jr rs1  →  jalr x0, rs1, 0 ---
+        # --- jr pseudo-op: jr rs1 → jalr x0, rs1, 0; jr imm(rs1) keeps the
+        # displacement. The latter is the far TAIL call the linker leaves
+        # behind, and it uses t1 rather than ra precisely because the auipc
+        # would destroy the return address the callee still needs. ---
         if m == "jr":
             insn.mnemonic = "jalr"
             insn.rd = 0
-            if len(ops) >= 1:
-                insn.rs1 = REG_ALIASES.get(ops[0].lower())
             insn.imm = 0
+            if len(ops) >= 1:
+                imm_r = _parse_mem_operand(ops[0])
+                if imm_r[1] is not None:
+                    insn.rs1, insn.imm, insn.imm_expr = imm_r[1], imm_r[0], imm_r[2]
+                else:
+                    insn.rs1 = REG_ALIASES.get(ops[0].lower())
             return insn
 
         # --- ret, call, tail: retain as-is ---
@@ -367,7 +374,8 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                 else:
                     imm_r = _parse_mem_operand(ops[1])
                     if imm_r[1] is not None:
-                        insn.rd = 0
+                        # `jalr rd, imm(rs1)` -- rd is spelled out, use it
+                        insn.rd = rd_maybe
                         insn.rs1 = imm_r[1]
                         insn.imm = imm_r[0]
                         insn.imm_expr = imm_r[2]
@@ -386,7 +394,13 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                 # when cpp-rv32 alone has 2246.
                 imm_r = _parse_mem_operand(ops[0])
                 if imm_r[1] is not None:
-                    insn.rd = 0                       # jalr imm(rs1): a jump
+                    # `jalr imm(rs1)` is the same pseudo-op with a displacement
+                    # and is equally a CALL: rd = ra. The rd=x0 spelling is
+                    # `jr imm(rs1)`, handled above. This is the form the linker
+                    # leaves behind when it cannot relax a far call, so
+                    # decoding it as a jump hid every far call in the corpus --
+                    # godot's 6694 and testcase0's 724 among them.
+                    insn.rd = 1
                     insn.rs1 = imm_r[1]
                     insn.imm = imm_r[0]
                     insn.imm_expr = imm_r[2]
