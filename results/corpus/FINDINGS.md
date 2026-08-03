@@ -790,3 +790,57 @@ SCHEDULING and run structure rather than by encoding: a run of N consecutive
 same-base accesses offers N-1 adjacencies but only floor(N/2) pairs, and the
 sp-based majority is already taken by `mem-sp-pair`.
 
+## Indirect calls: a correctness fix, not a pairing win (2026-08)
+
+Estimated at ~1.7k pairs on cpp-rv32.  MEASURED: **+3**.
+
+| corpus | before | after | load-call-chain |
+|---|--:|--:|--:|
+| cpp-rv32 | 89484 | 89487 | 46 |
+| sqlite-rv32 | — | 44380 | 22 |
+| musl-rv32 | 27436 | 27430 | 2 |
+
+The estimate assumed the population was unreached.  It was already being
+paired — by accident.  `analysis/parser.py` decoded the one-operand `jalr rs`
+with `rd = 0`, the encoding of `jr rs`, so every indirect call looked like a
+jump: `is_call` was false and `setup-jump-pair` took it.  Fixing the parser
+and admitting register-target calls to the B slot deliberately therefore
+*preserved* those pairs rather than adding them (`setup-jump-pair` 4773 ->
+4669, `load-call-chain` +46, net +3).
+
+`load-call-chain` is likewise near-redundant: `setup-jump-pair` already
+accepts a load in its A slot and does not care that the load happens to
+define the call target, spending two register fields where one would do —
+wasteful but encodable.  Of cpp-rv32's target-defining loads, 455 go to
+`setup-jump-pair` and 34 to `load-call-chain`, which wins only where its
+6-bit scaled offset beats the other's 5.  It earns its 2 codepoints (82 pairs
+across three corpora, ~41/cp) but it is a margin, not a mechanism.
+
+**What the work was actually worth**: `ra` is now modelled as written by an
+indirect call, `is_call` is true for them, and a false claim was retracted
+(see the RETRACTED block above).  The pairs were already there.
+
+**The lesson for estimating**: an adjacency census counts a population, not an
+OPPORTUNITY.  Before pricing a candidate, check what the scheduler already
+does with that population — `grep` the annotated output for the shape.  Three
+of this session's estimates (arith-mem's kill cost, setup-call's 14k,
+indirect calls' 1.7k) were wrong in exactly this way, and the correction is
+always the same: measure the delta, never the census.
+
+## What precedes an indirect call
+
+For the record, since the frame design turned on it:
+
+| precedes | cpp-rv32 (2246) | sqlite-rv32 (1815) |
+|---|--:|--:|
+| `mv` (argument marshalling) | 1477 (66%) | 1267 (70%) |
+| `lw` — of which defines the target | 569 (458) | 205 (158) |
+| `addi` / `li` | 176 | 280 |
+
+Argument marshalling dominates, not the pointer load.  This is also the real
+content of the retracted "the vtable load and the call are separated" remark:
+the method pointer is loaded early and the `this` pointer marshalled last, so
+`mv` sits between them.  The observation was right; the conclusion drawn from
+it was not.  `setup-jump-pair`'s A set (`addi`->`mv`/`li`, `lbu`, `lw`, `ld`)
+already spans every one of these.
+
