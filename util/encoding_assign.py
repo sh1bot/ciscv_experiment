@@ -58,9 +58,21 @@ from encoding_render import (_center, _cell, _spanned, header_lines,
                              _OPERAND, _IMPLICIT)
 
 # Sentinel bit patterns reserved in the rd column (encoding.yaml `reserved`):
-# x0 and x2.  A hosted guest is selected by one of them, so each codepoint a
-# host lends can carry this many guest identities.
-SENTINELS = 2
+# x0 = "0 0 0 0 0" and x2 = "0 0 0 1 0".  A guest row NAMES one of them, so a
+# lent codepoint carries one guest per DISTINCT sentinel value in use -- not
+# two automatically.  Charging every guest as if it had both was an error:
+# every frame drew x2 and left x0 empty, so each lent codepoint really held
+# one identity and the arithmetic was optimistic by 2x.
+SENTINEL_PATTERNS = {"0 0 0 0 0": "x0", "0 0 0 1 0": "x2"}
+
+
+def guest_sentinel(frame, grid):
+    """Which reserved pattern a guest frame's rows put in the rd column."""
+    from encoding_render import rd_column_cells
+    for s in rd_column_cells(frame, grid):
+        if s in SENTINEL_PATTERNS:
+            return SENTINEL_PATTERNS[s]
+    return None
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
@@ -361,14 +373,19 @@ def main():
     guests = [f for f in frames if f["role"] == "guest"]
     hosts = sorted((f for f in frames if f["role"] == "host"),
                    key=lambda f: -(1 << f["opsel"]))
+    # A codepoint can carry one guest per distinct sentinel, so guests on
+    # DIFFERENT sentinels overlay the same codepoints for free.  Track the
+    # lending per (host, sentinel).
     lend = {}
     unhosted = []
     for g in guests:
-        need = -(-g["budget"] // SENTINELS)      # ceil: identities per codepoint
+        g["sentinel"] = guest_sentinel(g["spec"], spec["grid"]) or "x2"
+        need = g["budget"]                       # rd is fixed: one op per codepoint
         for h in hosts:
-            free = (1 << h["opsel"]) - lend.get(h["name"], 0)
+            key = (h["name"], g["sentinel"])
+            free = (1 << h["opsel"]) - lend.get(key, 0)
             if free >= need:
-                lend[h["name"]] = lend.get(h["name"], 0) + need
+                lend[key] = lend.get(key, 0) + need
                 g["host"] = h["name"]
                 g["host_cp"] = need
                 break
@@ -388,8 +405,9 @@ def main():
     for g in sorted(hosted, key=lambda f: -f["host_cp"]):
         h = by_name[g["host"]]
         need = g["host_cp"]
-        off = taken.get(h["name"], 0) + need
-        taken[h["name"]] = off
+        key = (h["name"], g["sentinel"])
+        off = taken.get(key, 0) + need
+        taken[key] = off
         g["opsel"] = max(0, (need - 1).bit_length())
         g["base_cp"] = h["base_cp"] + (1 << h["opsel"]) - off
         g["id_len"] = max(0, W - g["opsel"])
@@ -417,10 +435,11 @@ def main():
               "rides in a host's codepoints, in the rd slice that host cannot reach.\n"
               "The host loses nothing: it keeps every one of those codepoints for its\n"
               "own encodings, which all name a real register there.  Each lent\n"
-              f"codepoint carries {SENTINELS} guest identities (rd = x0 and rd = x2).\n")
+              "Each guest names ONE reserved pattern, so a codepoint carries one\n"
+              "guest per distinct sentinel -- guests on x0 and x2 overlay for free.\n")
         for g in hosted:
             print(f"    {g['name']:20} budget {g['budget']:>3} -> "
-                  f"{g['host_cp']:>3} codepoint(s) of {g['host']}")
+                  f"{g['host_cp']:>3} codepoint(s) of {g['host']} (rd = {g['sentinel']})")
         print(f"    {'':20} {sum(g['budget'] for g in hosted):>10} codepoints "
               f"returned to the namespace\n")
     if unhosted:
@@ -455,7 +474,7 @@ def main():
         print(f"    A-slot: {g['fmt']:7}   no block of its own; selected by the "
               f"rd = x0/x2 sentinel\n"
               f"    inside {g['host_cp']} codepoint(s) of {g['host']} "
-              f"({SENTINELS} identities each); "
+              f"(rd = {g['sentinel']}); "
               f"using {g['demand']} of budget {g['budget']}")
         print()
         render_frame_body(g, widths, header)

@@ -1108,10 +1108,11 @@ doc:
         - {a: {op: lw, rd: 31, rs1: 12, imm: 0},
            b: {op: jalr, rd: 1, rs1: 31, imm: 0}}
       rows:
-        - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 1 0"]
+        - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 0 0"]
       notes: |
-         * The `rd` column carries the jump-marker sentinel, so this frame is
-           hosted rather than holding a block of its own.
+         * The `rd` column carries the x0 sentinel, not the x2 one every other
+           hosted frame uses.  Both are reserved, so x0 was standing empty --
+           this frame rides there and competes with nothing.
 
   - frame:
       name: macro-op-pair
