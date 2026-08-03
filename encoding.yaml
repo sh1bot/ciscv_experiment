@@ -1086,18 +1086,29 @@ doc:
       # No target is encoded -- it is read from a register -- so the direct
       # call's unencodable-displacement problem does not arise, and the link
       # value needs no field either: ra = packet + 4.
+      #
+      # Contrast setup-jump-pair, which is the INDEPENDENT case (A's result is
+      # not B's target -- argument marshalling).  It must field rda, rs1a and
+      # rs1b, so its load row is full at 20 bits and its offset can never
+      # exceed five.  Here A's result IS B's target, so neither is encoded and
+      # the whole word is free for the base and offset: ten bits, costing
+      # nothing, since idle operand bits are not codepoints.  (Beware: pricing
+      # would report a 6-bit offset as free for setup-jump-pair too, because
+      # imm_field_bits takes the WIDEST row and that frame's `li` row draws
+      # ten -- but no load row could hold it.  TODO A8's row-versus-op
+      # residue.)
       budget: 2
       level: 2
       templates:
         - ["load    tmp, k*imma(rs1a)", "jalr    tmp"]
       ops:
-        - {a: [{op: lw, imm: {bits: 6, signed: false}},
-               {op: ld, imm: {bits: 6, signed: false}}], b: [jalr]}
+        - {a: [{op: lw, imm: {bits: 10, signed: false}},
+               {op: ld, imm: {bits: 10, signed: false}}], b: [jalr]}
       probe:
         - {a: {op: lw, rd: 31, rs1: 12, imm: 0},
            b: {op: jalr, rd: 1, rs1: 31, imm: 0}}
       rows:
-        - ["h", "imma[5:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 1 0"]
+        - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 1 0"]
       notes: |
          * The `rd` column carries the jump-marker sentinel, so this frame is
            hosted rather than holding a block of its own.

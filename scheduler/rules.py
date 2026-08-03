@@ -1534,7 +1534,7 @@ def _load_store_chain(a: Instruction, b: Instruction) -> None:
 
 _LOAD_CALL_A_MN = frozenset({"lw", "ld"})
 _LOAD_CALL_B_MN = frozenset({"jalr"})
-_LOAD_CALL_OFF_BITS = _w("load-call-chain", "a", "lw")
+_LOAD_CALL_OFF_BITS = _w("load-call-chain", "a", "lw")   # 10: the whole word is free
 
 
 @must_chain_base
