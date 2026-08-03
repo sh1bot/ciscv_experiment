@@ -1368,3 +1368,77 @@ What it corrects, in one pass:
 
 It reports the candidate-count distribution, the marginal reach of every
 shape, the greedy op-set order, and the cumulative coverage of a fixed set.
+
+## The indexed-call frame, priced end to end (2026-08)
+
+`util/call_frame_value.py` sweeps every control transfer that names a function
+and prices three effects separately, because they cost very different things
+to buy:
+
+* **PAIRING** — a table jump is ten bits, so an A instruction rides beside it.
+  One word per transfer that has a partner to absorb.
+* **WART** — a far call is two instructions today and a table jump is one,
+  paired or not. This is the Zcmt effect proper: an unpaired `cm.jalt` still
+  fits a packet beside a derived nop, so it needs no pairing opportunity at
+  all.
+* **TABLE** — the `jvt` table costs one XLEN-sized entry per distinct target,
+  and it need be no larger than the target set.
+
+At a 10-bit index and the eight-op A set:
+
+| corpus | near call | far call | tail | A partner | pairing | wart | table | NET |
+|--------|-----------|----------|------|-----------|---------|------|-------|-----|
+| cpp-rv32 | 30603 | 2463 | 149 | 66.9% | 20461 | 2360 | −1024 | **+85.1 KiB** |
+| cpp-rv64 | 30594 | 2147 | 121 | 67.1% | 20333 | 2048 | −2048 | **+79.4 KiB** |
+| musl-gcc-rv32 | 5172 | 0 | 669 | 56.5% | 3300 | 0 | −890 | **+9.4 KiB** |
+| musl-gcc-rv64 | 5311 | 0 | 490 | 46.5% | 2696 | 0 | −1760 | **+3.7 KiB** |
+| sqlite-rv32 | 7008 | 0 | 302 | 60.8% | 4447 | 0 | −816 | **+14.2 KiB** |
+| sqlite-rv64 | 6900 | 0 | 301 | 60.8% | 4375 | 0 | −1622 | **+10.8 KiB** |
+
+(pairing, wart and table are WORDS; NET is the same figure in KiB.)
+
+Notes on the shape of that table:
+
+* **The wart is a C++ phenomenon.** Only cpp needed the linker to leave
+  `auipc; jalr` behind (2463 / 2147 sites, all PLT); musl and sqlite have
+  none, so Zcmt's wart-removal earns them nothing and the whole value is the
+  pairing.
+* **RV64 pays double for the table and gets a worse A slot.** Entries are
+  eight bytes, and musl-gcc-rv64's A-partner rate is 46.5% against rv32's
+  56.5%. Its net falls to 3.7 KiB — the frame is still positive on every
+  corpus, but only just, there.
+* **Index width barely matters once the table is priced.** On cpp: 9 bits
+  81.6 KiB, 10 bits 85.1, 11 bits 86.4, 12 bits 85.6. Eleven is the optimum
+  and it is worth 1.3 KiB over ten. Everywhere else the target set is under
+  1024 so the index width is irrelevant — the table is sized by the program.
+
+### The `auipc` temporary is already `ra`, and the exception cannot be moved
+
+Every far CALL in the corpora already uses `ra` as the address temporary
+(2462 cpp-rv32, 2146 cpp-rv64, 6693 godot; one stray each). There is nothing
+to rewrite. The only non-`ra` users are far TAIL calls — `auipc t1; jr
+0x…(t1)`, 101 on cpp-rv32, 74 on cpp-rv64, 125 on godot — and those cannot be
+rewritten to `ra` at all: the `auipc` would overwrite the return address the
+tail-called function needs. That is exactly why the compiler picked `t1`. The
+constraint is real, not an accident of code generation.
+
+### `lui; jalr` is not a thing
+
+Four occurrences in the entire corpus set: 2 in sqlite (rv32 and rv64, the
+same site) and 2 in godot. Absolute addressing is not generated for calls in
+any of these builds — everything is PC-relative. No analysis needed and no
+frame warranted.
+
+### Tail calls need no extra codepoints
+
+Near tail calls (`j f` where `f` is a function, not a local label) are 48 /
+669 / 302 on cpp / musl / sqlite rv32; far tail calls are 101 / 0 / 0. Every
+one of them is already a `cm.jt` — the non-linking table jump that the frame
+carries as its second B op. They cost nothing extra: they share the same
+table, the same index field and the same A rows. The residue that a table
+cannot reach is the 8% of cpp transfers outside the top 1024, and buying that
+back is an index-width question (worth 1.3 KiB), not a codepoint question.
+
+musl is the corpus where tail calls matter most (669, 11% of its transfers) —
+the wrapper-heavy libc idiom — and it is also the corpus with no far calls at
+all, so `cm.jt` is the whole of its wart story.

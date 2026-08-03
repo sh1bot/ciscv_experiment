@@ -30,6 +30,9 @@ import pickle
 import sys
 from collections import namedtuple
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from util.encoding_render import MEM_WIDTH
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, "results", "cache")
 
@@ -180,8 +183,8 @@ def shapes(r, budget=10):
     """Every operand shape of `budget` bits or fewer that could encode `r`.
 
     A shape name reads as its row would be drawn: `rd3` is a three-bit
-    destination restricted to a0-a7, `imm7*4` is a seven-bit field scaled by
-    four, `rsd5` is a five-bit register used as both source and destination.
+    destination restricted to a0-a7, `k*imm7` is a seven-bit field scaled by
+    the ACCESS WIDTH, `rsd5` is a five-bit register used as both source and destination.
     Widening a field past five bits is free only while the row still fits the
     budget; that is what makes this the right unit to count.
     """
@@ -226,11 +229,16 @@ def shapes(r, budget=10):
         return out
 
     if r.is_load:
+        k = MEM_WIDTH.get(m)
         for b in (5, 7):
             if rd in ARG and rs1 == SP and _u(i, b):
                 add(f"load rd3,imm{b}(sp)", 3 + b)
-            if rd in ARG and rs1 == SP and _u(i, b + 2) and i % 4 == 0:
-                add(f"load rd3,imm{b}*4(sp)", 3 + b)
+            # k is the ACCESS width, as the templates write it: a spill slot is
+            # aligned to the width of the access, so `k*imm5` reaches 4x or 8x
+            # further than `imm5` for no bits. This is what c.lwsp/c.ldsp do.
+            if rd in ARG and rs1 == SP and k and _u(i, b + k.bit_length() - 1) \
+               and i % k == 0:
+                add(f"load rd3,k*imm{b}(sp)", 3 + b)
         if rd not in (0, None) and rs1 is not None and i == 0:
             add("load rd5,0(rs5)", 10)
         if rd in ARG and rs1 is not None and _u(i, 2):
@@ -238,11 +246,12 @@ def shapes(r, budget=10):
         return out
 
     if r.is_store:
+        k = MEM_WIDTH.get(m)
         if rs1 == SP:
             if _u(i, 5):
                 add("store rs5,imm5(sp)", 10)
-            if _u(i, 7) and i % 4 == 0:
-                add("store rs5,imm5*4(sp)", 10)
+            if k and _u(i, 4 + k.bit_length()) and i % k == 0:
+                add("store rs5,k*imm5(sp)", 10)
             if rs2 in ARG and _u(i, 7):
                 add("store rs3,imm7(sp)", 10)
         if i == 0 and rs1 is not None and rs2 is not None:

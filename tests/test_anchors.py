@@ -72,8 +72,8 @@ def test_shapes_know_the_argument_register_class():
 def test_shapes_offer_the_scaled_form_only_when_aligned():
     aligned = rec("lw", rd=10, rs1=2, imm=64, is_load=True)
     odd = rec("lw", rd=10, rs1=2, imm=65, is_load=True)
-    assert "load rd3,imm5*4(sp)" in shapes(aligned)
-    assert "load rd3,imm5*4(sp)" not in shapes(odd)
+    assert "load rd3,k*imm5(sp)" in shapes(aligned)
+    assert "load rd3,k*imm5(sp)" not in shapes(odd)
     assert "load rd3,imm7(sp)" in shapes(odd)
 
 
