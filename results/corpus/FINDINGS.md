@@ -844,3 +844,39 @@ the method pointer is loaded early and the `this` pointer marshalled last, so
 it was not.  `setup-jump-pair`'s A set (`addi`->`mv`/`li`, `lbu`, `lw`, `ld`)
 already spans every one of these.
 
+## Two ways to bias an immediate-width census (2026-08)
+
+Both have now happened in this project, in opposite directions.  Recorded
+together because the fix differs.
+
+**Censoring — measuring only what the rule ACCEPTED.**  A rule that caps a
+field at 5 bits reports 100% fit at 5 bits, because everything wider was
+rejected before it could be counted.  Fix: lift the caps in a scratch tree
+and re-census (IMMEDIATES.md's uncensored study; `load-store-chain`'s "100%
+fit at 5 bits" that was really 39%).
+
+**Selection — measuring only what the rule REJECTED.**  Censusing the SOLO
+residue to size a field measures the failures, not the population: the frames
+have already taken everything that fits, so the leftovers are selected for
+NOT fitting.  Measured on cpp-rv32's `addi -> sw`:
+
+| statistic | solo residue (832) | full population (4353) |
+|---|--:|--:|
+| addi immediate fits 5 bits | 20.8% | **59.9%** |
+| addi immediate fits 7 bits | 75.2% | 83.7% |
+| addi source == store base | 82% | **42%** |
+
+The residue showed a dramatic "cliff" at 7 bits and an 82% shared-base rate,
+both artifacts.  The real population is dominated by small values (`1` 1016
+times, `8` 828, then 12, 4, 16, 24) and has no cliff.  Acting on the residue
+would have sized the field twice too wide AND picked the wrong frame shape:
+a shared-register frame covers 40.5% of the real population where a plain
+split-register one covers 69.3%.
+
+**Rule: size fields from the FULL adjacency population (uncensored), find
+missing shapes from the SOLO residue, and take yields only from a measured
+scheduler delta.**  All three use different data and none substitutes for
+another.  (Not confusing `li` with `addi`, incidentally: zero `addi` in
+cpp-rv32 are spelled `addi rd, x0, imm` — the disassembler always writes
+`li`.)
+
