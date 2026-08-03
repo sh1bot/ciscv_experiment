@@ -375,14 +375,23 @@ def _decode_instruction(mnemonic: str, operands: list, raw: str, label: Optional
                         insn.rd = rd_maybe; insn.rs1 = rs1_maybe
                         _set_imm(insn, ops[1])
             elif len(ops) == 1:
-                # jalr rs1  or  jalr imm(rs1)
-                insn.rd = 0
+                # `jalr rs1` is the ASSEMBLER's one-operand pseudo-op and means
+                # `jalr ra, rs1, 0` -- an indirect CALL.  (The bare machine
+                # encoding defaults rd to x0, but that spelling is `jr rs1`,
+                # which the disassembler emits as `jr`.)  Decoding this as rd=0
+                # made every indirect call look like a plain jump: `is_call`
+                # was false, ra was not recorded as written, and the corpus
+                # appeared to contain none of them -- which is how
+                # FINDINGS.md came to claim "jalr writing ra occurs 0 times"
+                # when cpp-rv32 alone has 2246.
                 imm_r = _parse_mem_operand(ops[0])
                 if imm_r[1] is not None:
+                    insn.rd = 0                       # jalr imm(rs1): a jump
                     insn.rs1 = imm_r[1]
                     insn.imm = imm_r[0]
                     insn.imm_expr = imm_r[2]
                 else:
+                    insn.rd = 1                       # ra
                     insn.rs1 = REG_ALIASES.get(ops[0].lower())
                     insn.imm = 0
             return insn

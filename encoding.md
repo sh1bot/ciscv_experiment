@@ -421,6 +421,21 @@ Also chain rules with surviving first result, but also sometimes a second result
 * Both offsets are width-scaled and unsigned; the loaded value is the
   chain temporary and is not encoded.
 
+## load-call-chain
+
+*Load a function pointer and call through it (virtual dispatch).*
+
+    load    tmp, k*imma(rs1a)
+    jalr    tmp
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│imma[5:5]│g│imma[4:0]│  rs1a   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
+
+* The `rd` column carries the jump-marker sentinel, so this frame is
+  hosted rather than holding a block of its own.
+
 # macro-op-pair
 
 *Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them.*

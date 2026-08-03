@@ -92,9 +92,18 @@ class TestJumpSlotPairs:
         a = make_insn("lw", rd=10, rs1=11, imm=128)     # 128 > 31*4, the field max
         assert "setup-jump-pair" not in self._rules(a, self._ret())
 
-    def test_call_not_a_jump_slot(self):
+    def test_direct_call_not_a_jump_slot(self):
+        """A direct call's target is a displacement with nowhere to live:
+        only 1.7% of cpp-rv32's calls fit a 10-bit packet field."""
         a = make_add(10, 10, 11)
-        assert self._rules(a, self._call()) == []       # calls excluded
+        assert self._rules(a, make_call()) == []
+
+    def test_indirect_call_is_a_jump_slot(self):
+        """`jalr ra, rs` reads its target from a REGISTER and encodes no
+        target at all, so the exclusion's reason does not reach it; the link
+        value needs no field either (ra = packet + 4)."""
+        a = make_add(10, 10, 11)
+        assert "arith-jump-pair" in self._rules(a, self._call())
 
     def test_high_reg_pairs(self):
         """Registers are a full 5-bit field here: the frame's row spends the

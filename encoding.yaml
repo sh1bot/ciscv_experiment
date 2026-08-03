@@ -1068,6 +1068,41 @@ doc:
            chain temporary and is not encoded.
 
   - frame:
+      name: load-call-chain
+      does: "Load a function pointer and call through it (virtual dispatch)."
+      # C++ virtual dispatch: load the vtable slot, then call it.  The loaded
+      # pointer is the chain temporary -- it feeds the call and dies there --
+      # so the frame encodes only the base register and the offset, leaving
+      # most of the operand budget unused.
+      #
+      # This shape was previously believed absent.  FINDINGS.md recorded
+      # "jalr writing ra occurs 0 times ... even C++ virtual dispatch produced
+      # none", which was a census matching the explicit `jalr ra, rs, 0`
+      # spelling the disassembler never emits; the corpus writes the
+      # one-operand pseudo-op `jalr rs`.  cpp-rv32 has 2246 of them, 458 in
+      # this exact adjacency, and 100% of those offsets fit the 6-bit scaled
+      # field.
+      #
+      # No target is encoded -- it is read from a register -- so the direct
+      # call's unencodable-displacement problem does not arise, and the link
+      # value needs no field either: ra = packet + 4.
+      budget: 2
+      level: 2
+      templates:
+        - ["load    tmp, k*imma(rs1a)", "jalr    tmp"]
+      ops:
+        - {a: [{op: lw, imm: {bits: 6, signed: false}},
+               {op: ld, imm: {bits: 6, signed: false}}], b: [jalr]}
+      probe:
+        - {a: {op: lw, rd: 31, rs1: 12, imm: 0},
+           b: {op: jalr, rd: 1, rs1: 31, imm: 0}}
+      rows:
+        - ["h", "imma[5:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 1 0"]
+      notes: |
+         * The `rd` column carries the jump-marker sentinel, so this frame is
+           hosted rather than holding a block of its own.
+
+  - frame:
       name: macro-op-pair
       does: "Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them."
       budget: 16

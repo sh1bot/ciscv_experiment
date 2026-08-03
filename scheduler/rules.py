@@ -1413,14 +1413,25 @@ _MVLOAD_JUMP_LI_J_BITS = 5
 
 def _is_small_jump(insn: Instruction) -> bool:
     """B-slot control transfer: return, register-indirect jump (jr / jalr with
-    zero offset), or direct jump (j / jal x0).  Calls are excluded."""
-    if insn.is_call:
-        return False
+    zero offset), direct jump (j / jal x0), or an INDIRECT call.
+
+    Direct calls are excluded because their target is a displacement with
+    nowhere to live: resolved against in-file symbols, only 1.7% of cpp-rv32's
+    calls fit a 10-bit packet displacement and 45% fit eighteen bits
+    (FINDINGS.md).  An INDIRECT call is a different animal -- `jalr rs` reads
+    its target from a register, encoding no target at all -- so the reason for
+    the exclusion does not reach it.  The link value is well defined without a
+    field: `ra = packet + 4`, exactly as for any other instruction, because
+    packets are four bytes and 4-byte aligned."""
     m = insn.mnemonic
     if m == "ret":
         return True
     if m == "jalr":
-        return insn.imm in (0, None)
+        # covers jr (rd=x0) and the indirect call (rd=ra); a nonzero offset
+        # would need a field this frame does not draw
+        return insn.imm in (0, None) and insn.rd in (0, 1, None)
+    if insn.is_call:
+        return False                      # direct call: unencodable target
     if m in ("j", "jal"):
         return insn.rd in (0, None)
     return False
@@ -1509,6 +1520,39 @@ def _load_store_chain(a: Instruction, b: Instruction) -> None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# load-call-chain
+# ---------------------------------------------------------------------------
+# C++ virtual dispatch: A loads a function pointer, B calls through it, and the
+# pointer dies there.  No target is encoded -- it is read from a register -- so
+# the direct call's unencodable-displacement problem does not arise, and the
+# link value needs no field either (ra = packet + 4).
+#
+# The shape was long believed absent: a census matching the explicit
+# `jalr ra, rs, 0` spelling found none, but the corpus writes the one-operand
+# pseudo-op `jalr rs` (2246 in cpp-rv32, 458 in this adjacency).
+
+_LOAD_CALL_A_MN = frozenset({"lw", "ld"})
+_LOAD_CALL_B_MN = frozenset({"jalr"})
+_LOAD_CALL_OFF_BITS = _w("load-call-chain", "a", "lw")
+
+
+@must_chain_base
+@no_escape
+@a_base_not_from_auipc
+def _load_call_chain(a: Instruction, b: Instruction) -> None:
+    """Load a function pointer, then call through it; the pointer dies."""
+    if a.rd is None or a.rbase is None:
+        raise NotPair("MALFORMED: missing base or destination")
+    if b.imm not in (0, None):
+        raise NotPair("B-nonzero-offset")
+    if b.rd not in (1, 5):
+        raise NotPair("B-not-a-call")          # jr, not an indirect call
+    if not a.uimm_fits(_LOAD_CALL_OFF_BITS, a.access_shift or 0):
+        raise NotPair("A-big-imm")
+    return None
+
+
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
@@ -1582,6 +1626,12 @@ RULES: list[PairingRule] = [
         a_mnemonic_set=_LOAD_STORE_A_MN,
         b_mnemonic_set=_LOAD_STORE_B_MN,
         check=_load_store_chain,
+    ),
+    PairingRule(
+        name="load-call-chain",
+        a_mnemonic_set=_LOAD_CALL_A_MN,
+        b_mnemonic_set=_LOAD_CALL_B_MN,
+        check=_load_call_chain,
     ),
     PairingRule(
         name="macro-op-pair",

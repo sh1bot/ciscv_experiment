@@ -436,11 +436,35 @@ nowhere in the packet.** The `is_call` guard is therefore well founded — not
 because of a 12-bit linker fixup, but because call targets are genuinely
 distant.
 
-The zero-immediate escape does not exist either. `jalr` writing ra — an
+~~The zero-immediate escape does not exist either. `jalr` writing ra — an
 indirect call, target in a register, needing no immediate at all — occurs
 **0 times** in cpp-rv64, sqlite-rv64 and musl-rv64. Every call in the corpus
 is a direct `jal`, including PLT calls. Even C++ virtual dispatch produced
-none, because the vtable load and the call are separated.
+none, because the vtable load and the call are separated.~~
+
+**RETRACTED (2026-08) — this paragraph was wrong, and wrong twice over.**
+The census matched the explicit `jalr ra, rs, 0` spelling, which a
+disassembler never emits: the corpus writes the assembler's one-operand
+pseudo-op `jalr rs`, which MEANS `jalr ra, rs, 0`.  Real counts: **2246 in
+cpp-rv32, 1815 in sqlite-rv32, 91 in musl-rv32**, including **458 sites of
+`lw t, off(b) ; jalr t`** — C++ virtual dispatch, perfectly adjacent, with
+100% of the offsets fitting a 6-bit scaled field.  The "vtable load and call
+are separated" explanation was rationalising an artifact.
+
+`analysis/parser.py` shared the error from the other side: it decoded the
+one-operand form with `rd = 0`, which is the encoding of `jr rs` — a jump.
+So indirect calls were invisible as calls (`is_call` false, `ra` never
+recorded as written) while quietly pairing as jumps (1638 of them on
+cpp-rv32).  The two mistakes agreed with each other, which is why neither
+showed up as a discrepancy.
+
+The pattern is this project's recurring failure: **matching on a spelling
+instead of on decoded semantics.**  Same as `addi-branch-pair` missing
+`beqz`/`bnez` (438 phantom pairs, A10) and as `mv` meaning `addi rd,rs,0` in
+one place and `add rd,x0,rs` in another.  RISC-V gives one operation many
+spellings; a census that greps text loses whole populations silently.  The
+yaml's `pseudo_ops` section, with its liberal `match` list, exists for
+exactly this reason.
 
 So: strike the setup-call frame. Its ~14k pairs were resting on an assumption
 the data refutes.
