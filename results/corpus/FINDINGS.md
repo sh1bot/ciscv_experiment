@@ -1077,3 +1077,95 @@ opportunities, not yield.  The scheduler may already be pairing some of these
 predecessors with something else, and it may be able to hoist a non-fitting
 predecessor out of the way to expose a fitting one.  Both effects are
 unmeasured.
+
+### The census above is optimistic — corrected for absorption and reordering
+
+The table counts the instruction that HAPPENS to be adjacent. Two corrections,
+both measured by running the real scheduler and pairer first:
+
+* **The call itself is never stolen.** `already paired: 0` for direct calls on
+  all three corpora — with no frame able to encode a direct call's
+  displacement, every one of them is solo today. So every hit is pure gain.
+* **The predecessor often IS stolen.** Requiring the predecessor to be solo
+  in the scheduled stream drops the count sharply.
+* **Hoisting recovers a little.** Where the adjacent instruction does not fit,
+  search up the block for a solo instruction that fits an A row and can
+  legally be moved down to the call (conservative: no branch crossed, no
+  register hazard, no memory reordering).
+
+| of all direct calls        | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|----------------------------|----------|---------------|-------------|
+| naive adjacency (table above) | 78.9% | 51.4%         | 88.1%       |
+| adjacent AND solo          | 19043 62.2% | 2006 38.8% | 3485 49.7%  |
+| + hoistable from the block | +752     | +574          | +485        |
+| **realistic total**        | **19795 64.7%** | **2580 49.9%** | **3970 56.7%** |
+
+sqlite loses the most (88.1 → 56.7): its `li` predecessors are largely absorbed
+by other frames already. cpp holds up best because `addi rda, sp, imm` — its
+biggest form — has no other frame competing for it.
+
+19795 pairs on cpp-rv32 is ~79 KiB, against a 4 KiB table.
+
+### `addi4spn`-style scaling: cheap, and the freed bits are better spent on reach
+
+`addi rda, sp, imm`, whole corpus, rd ∈ a0–a7:
+
+| field            | bits | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|------------------|------|----------|---------------|-------------|
+| all `addi rd,sp` |      | 16488    | 1798          | 1447        |
+| rd ∈ a0–a7       |      | 16024    | 947           | 1350        |
+| imm7 raw (0..127)| 3+7  | 14753    | 779           | 998         |
+| imm5×4 (0..124)  | 3+5  | 13103    | 771           | 967         |
+| imm6×4 (0..252)  | 3+6  | 13607    | 849           | 1146        |
+| imm7×4 (0..508)  | 3+7  | 14276    | 895           | 1255        |
+| 4-byte aligned   |      | 14313 89.3% | 936 98.8% | 1314 97.3%  |
+| 8-byte aligned   |      | 7763     | 739           | 881         |
+
+Scaling by four costs only what is unaligned, and that is 1–3% on musl and
+sqlite but **10.7% on cpp** — C++ puts byte- and short-sized temporaries on the
+stack. So imm5×4 alone is 11% worse than imm7 raw on the corpus that matters
+most.
+
+But scaling frees two bits, and spending them back on reach (imm7×4, 0..508)
+is +26% on sqlite, +15% on musl and −3% on cpp against imm7 raw. That is the
+better trade: the alignment loss is real but the reach gain more than repays it
+everywhere except cpp, where it roughly cancels. Spending the freed bits on rd
+instead is worth far less (rd outside a0–a7 is 2.8% of cpp's `addi rd,sp`).
+
+## Displacement can never replace the index — it is a sparsity problem (2026-08)
+
+Asked whether a `jalr rda, rs1, offset` form, with function addresses forced
+to 4-byte alignment, needs the same ten bits the index needs. It does not —
+it needs eighteen to twenty. Displacement from call site to target, in PACKET
+units (instruction distance × 0.8, the project convention), signed:
+
+| field width | reach   | cpp-rv32 | musl-gcc-rv32 | sqlite-rv32 |
+|-------------|---------|----------|---------------|-------------|
+| 8 bits      | ±0.5 KiB| 0.9%     | 5.0%          | 3.0%        |
+| 10 bits     | ±2 KiB  | 1.7%     | 13.2%         | 6.8%        |
+| 12 bits     | ±8 KiB  | 3.0%     | 24.6%         | 13.9%       |
+| 14 bits     | ±32 KiB | 5.9%     | 38.2%         | 26.4%       |
+| 16 bits     | ±128 KiB| 12.5%    | 69.1%         | 52.5%       |
+| 18 bits     | ±512 KiB| 45.0%    | 100%          | 93.3%       |
+| 20 bits     | ±2 MiB  | 100%     | 100%          | 100%        |
+
+Compare the index at ten bits: 93.4 / 100 / 100%.
+
+Forcing 4-byte function alignment buys nothing, because packets are already
+4-byte and the table above is already in packet units — the problem is reach,
+not granularity.
+
+Using `ra` as the base register does not help either, for two reasons:
+
+* `ra` is statically known at only 24.4 / 29.3 / 11.2% of direct calls (a
+  previous call in the SAME basic block). Allowing any earlier call in the
+  function raises that to 98.8 / 89.9 / 91.1%, but only under a dominance
+  argument this measurement does not make.
+* Even where it is known, `ra` sits within a few instructions of the call, so
+  the displacement distribution is the one above. Naming `ra` implicitly saves
+  five bits, giving a 15-bit offset — around 9% of cpp calls. Not close.
+
+**The index works because the target set is dense and the address space is
+not.** 2587 distinct targets is 11.3 bits of information, scattered across
+19–20 bits of address. The table is a dictionary that buys back the
+difference; no choice of base register does, because sparsity is the problem.
