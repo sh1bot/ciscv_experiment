@@ -555,7 +555,7 @@ Also chain rules with surviving first result, but also sometimes a second result
   available would emit the two halves adjacently and in order. Treat
   the low score as a measurement of clang and GCC, not of the frame.
 
-# indep-pair
+# dual-setup-pair
 
 *Two independent small moves or constants -- argument marshalling.*
 

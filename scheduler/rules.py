@@ -723,7 +723,7 @@ def _base_load_chain(a: Instruction, b: Instruction) -> None:
 #                 sum/difference, min/max), declared as a pair so hardware can
 #                 fuse them instead of issuing twice — see encoding.yaml's
 #                 macro-op-pair notes.  Kept despite a near-zero score.
-#   "indep_pair"  two independent small pseudo-ops (li / mv / addi4spn).
+#   "dual_setup_pair"  two independent small pseudo-ops (li / mv / addi4spn).
 #
 # Canonical order is (tuple[0], tuple[1]).  The reverse order is accepted only
 # when the two instructions are fully independent (neither destination is a
@@ -852,7 +852,7 @@ _DUAL_TUPLES: dict = {
     # ("addi", "addi") is overloaded: it covers three pseudo-ops (li, mv,
     # addi4spn) giving 6 order-insensitive combinations: li+li, mv+mv,
     # addi4spn+addi4spn, li+mv, li+addi4spn, mv+addi4spn.
-    ("addi", "addi"):     "indep_pair",
+    ("addi", "addi"):     "dual_setup_pair",
 }
 
 # post-inc-pair tuples, in strict (memory-op, base-update) order.  The op-sets
@@ -899,7 +899,7 @@ def _width_stride_ok(mem: Instruction, stride_insn: Instruction) -> bool:
 
 
 def _is_li_mv_addi4spn(insn: Instruction) -> bool:
-    """True for the three addi pseudo-ops that qualify for indep_pair."""
+    """True for the three addi pseudo-ops that qualify for dual_setup_pair."""
     return insn.is_li or insn.is_mv or insn.is_addi4spn
 
 # The dual-op families below share one mechanism (distinct destinations, order-
@@ -998,13 +998,13 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
         raise NotPair("B-addi-imm-mismatch")
 
 
-_DUAL_ADDI4SPN_BITS = _w("indep-pair", "a", "addi4spn")
-_DUAL_LI_BITS = _w("indep-pair", "a", "li")
+_DUAL_ADDI4SPN_BITS = _w("dual-setup-pair", "a", "addi4spn")
+_DUAL_LI_BITS = _w("dual-setup-pair", "a", "li")
 # The un-extended field width: mv declares nothing, so its width IS the field.
-_DUAL_FIELD_BITS = _w("indep-pair", "a", "mv")
+_DUAL_FIELD_BITS = _w("dual-setup-pair", "a", "mv")
 
 
-@dual_family("indep_pair")
+@dual_family("dual_setup_pair")
 def _dual_indep(a: Instruction, b: Instruction) -> None:
     """Two fully independent small pseudo-ops (li / mv / addi4spn)."""
     li_lim = 1 << (_DUAL_LI_BITS - 1)
@@ -1788,9 +1788,9 @@ RULES: list[PairingRule] = [
         check=_post_inc_addi,
     ),
     PairingRule(
-        name="indep-pair",
-        a_mnemonic_set=_role_mnems("indep_pair"),
-        b_mnemonic_set=_role_mnems("indep_pair"),
+        name="dual-setup-pair",
+        a_mnemonic_set=_role_mnems("dual_setup_pair"),
+        b_mnemonic_set=_role_mnems("dual_setup_pair"),
         check=_dual_indep,
     ),
     PairingRule(

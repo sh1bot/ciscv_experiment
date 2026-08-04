@@ -166,7 +166,7 @@ re-check if a future corpus disagrees.
 `addi4spn` at 6 bits scale-4 does not survive the matched corpora:
 musl-rv32 has 4242 sites, 9.7% not 4-aligned, and u6x4 fits only **39.7%**
 (u7x4 55.1%, u8x4 70.4%). Widening to 7 bits costs ~16 codepoints and pushes
-`indep-pair` from its 16-block to 32. Apply the §6 concentration check
+`dual-setup-pair` from its 16-block to 32. Apply the §6 concentration check
 first — musl-rv32's big-frame functions may own that tail. Scale 8 is
 re-refuted for RV32 (u6x8 fits 43.9%).
 

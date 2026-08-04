@@ -39,7 +39,7 @@
 # powers of two, so a frame at 11 and a frame at 10 reserve the same 16 and the
 # waste costs nothing real. It only becomes a decision if the waste is what
 # pushes a count across a power-of-two boundary and doubles the reservation.
-# indep-pair pays 1 codepoint of it today, at 11 of 16 — five to spare
+# dual-setup-pair pays 1 codepoint of it today, at 11 of 16 — five to spare
 # before it would matter.
 #
 # Ordering the two immediates by VALUE (not just by range band) would be more
@@ -1325,7 +1325,7 @@ doc:
            the low score as a measurement of clang and GCC, not of the frame.
 
   - frame:
-      name: indep-pair
+      name: dual-setup-pair
       does: "Two independent small moves or constants -- argument marshalling."
       # `li` is 6 bits: a 5-bit field plus one opcode repeat (the *li_6s
       # anchor), charged in both slots -- demand 11 -> 17, a 32-block, +169
