@@ -174,18 +174,13 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode,
 
     _blocks, functions = parse_file(chunk)
 
-    # Drop nops that exist for no reason before anything measures them.  See
-    # analysis.parser.annotate_padding_nops for the policy: a nop survives only
-    # on evidence of purpose -- something jumps to it, or it leads a function
-    # and is therefore a patch sled.  They are counted, not silently vanished:
-    # the total rides back with the packets and is reported on its own line.
-    from analysis.parser import annotate_padding_nops
-    annotate_padding_nops(_blocks)
+    # Nops are excluded from the counts on both sides: what they are for is
+    # out of scope for this experiment.  Counted, not silently vanished.
+    from analysis.parser import is_nop
     pad_nops = 0
     for fn in functions:
         for block in fn.blocks:
-            keep = [i for i in block.instructions
-                    if not getattr(i, "is_padding_nop", False)]
+            keep = [i for i in block.instructions if not is_nop(i)]
             pad_nops += len(block.instructions) - len(keep)
             block.instructions = keep
 

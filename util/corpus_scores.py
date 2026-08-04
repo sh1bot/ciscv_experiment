@@ -26,11 +26,9 @@ TESTS = os.path.join(ROOT, "tests")
 def real_rvc(name):
     """(instructions, compressed, compressed_nops) from the -noalias dump.
 
-    The nop count is split by width because padding is zero-rated on BOTH
-    sides: RVC does not get charged for a nop we are not charged for either.
-    A `c.nop` would cost RVC two bytes and a 32-bit one four, so the widths
-    cannot be lumped together -- though measured, every padding nop in every
-    corpus is the 32-bit form and `c_nops` is zero throughout."""
+    Nops are excluded from the counts on both sides -- what they are for is out
+    of scope for this experiment -- so they are split by width: a `c.nop` costs
+    RVC two bytes and a 32-bit one four."""
     path = os.path.join(TESTS, f"{name}-noalias.s")
     if not os.path.exists(path):
         return None
@@ -61,7 +59,7 @@ def schedule(name):
         pass
     if not m:
         return None
-    pad = re.search(r"padding nops: (\d+) discarded", out)
+    pad = re.search(r"nops: (\d+) \(excluded", out)
     return tuple(int(g) for g in m.groups()) + (int(pad.group(1)) if pad else 0,)
 
 
@@ -70,7 +68,7 @@ def main():
         f[:-2] for f in os.listdir(TESTS)
         if f.endswith(".s") and not f.endswith("-noalias.s")
         and os.path.exists(os.path.join(TESTS, f[:-2] + "-noalias.s")))
-    print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'pad':>6}{'packets':>9}"
+    print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'nops':>6}{'packets':>9}"
           f"{'packet %':>10}{'real RVC':>10}{'vs RVC':>9}{'P/(C/2)':>9}"
           f"{'to parity':>11}")
     print("-" * 96)
@@ -90,19 +88,8 @@ def main():
             continue
         if n_dis != N + pad:
             print(f"{name:16} ! -noalias has {n_dis} instructions, "
-                  f"scheduled file has {N}+{pad} discarded — not the same build")
-        # Padding is ZERO-RATED ON BOTH SIDES. We discard the nops, so they
-        # cost us nothing; RVC is not charged for them either, rather than us
-        # banking the difference as a win. Neither scheme should be scored on
-        # bytes that exist only to move the next thing onto a boundary, and
-        # whether a packet ISA would really inherit the PLT's 16-byte stride
-        # is a psABI question we do not get to decide by arithmetic.
-        #
-        # The books balance exactly: RVC drops 4 bytes per 32-bit pad (2 per
-        # c.nop, of which there are none) and its instruction count drops by
-        # the same `pad` our own already excludes, so `n_rvc == N` and the
-        # break-even line returns to its plain form, P > C/2. The `pad` column
-        # is now a fact about the corpus, not a term in the score.
+                  f"scheduled file has {N}+{pad} nops — not the same build")
+        # Nops are excluded from both sides: out of scope for this experiment.
         n_rvc = n_dis - pad
         rvc = 2 * comp + 4 * (n_rvc - comp) - (2 * min(c_nops, pad))
         comp_eff = comp - min(c_nops, pad)
@@ -119,10 +106,8 @@ def main():
               f"{need:>+11}")
     print("-" * 96)
     print(f"{'TOTAL to parity':16}{to_parity_total:>+74}")
-    print("\n`pad` is nops discarded as purposeless. They are ZERO-RATED ON "
-          "BOTH SIDES: we do\nnot encode them and RVC is not charged for them "
-          "either, so the column describes the\ncorpus and does not move the "
-          "score.\n")
+    print("\n`nops` are excluded from the counts on both sides: what they are "
+          "for is out of\nscope for this experiment.\n")
     print("packet % and real RVC are size against a 4-byte-per-instruction "
           "baseline;\nvs RVC under 100% means packets are smaller. P/(C/2) is "
           "progress toward the\nbreak-even point where pairs exceed half the "

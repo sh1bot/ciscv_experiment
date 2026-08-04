@@ -1559,54 +1559,12 @@ On cpp-rv32 the table jump is worth **forty times** the buildable frame, and
 two thirds of that corpus's entire remaining gap to parity. The buildable frame
 is the floor; Zcmt is the case.
 
-## Purposeless nops discarded (2026-08-04)
+## Nops (2026-08-04)
 
-Policy in `analysis.parser.annotate_padding_nops`, stated as burden of proof:
-a nop is DISCARDED unless something jumps to it, or it leads a function and is
-therefore a patch sled (`-fpatchable-function-entry`, ftrace, hot-patching —
-space reserved for an out-of-band tool, or space that tool has written back).
-
-| corpus | nops | discarded | kept | why kept |
-|--------|------|-----------|------|----------|
-| cpp-rv32       | 2521 | 2521 | 0 | — |
-| cpp-rv64       | 2487 | 2487 | 0 | — |
-| sqlite-gcc-rv64|  156 |  156 | 0 | — |
-| sqlite-rv32    |   80 |   80 | 0 | — |
-| musl-gcc-rv32  |   37 |   37 | 0 | — |
-| godot          |    1 |    1 | 0 | — |
-| testcase0      |    1 |    0 | 1 | it is a branch target |
-
-5710 packets across the suite, 5008 of them cpp's.
-
-**They are ZERO-RATED ON BOTH SIDES, not banked as a win.** An earlier pass
-credited the discard to us and left RVC paying for the nops, which took the
-total to parity from 108780 to 101491. That was the wrong call: neither scheme
-should be scored on bytes that exist only to move the next thing onto a
-boundary, and whether a packet ISA would inherit the PLT's 16-byte stride is a
-psABI question rather than one arithmetic settles. RVC is now not charged for
-them either, the books balance exactly (it loses 4 bytes per 32-bit pad and
-the same instruction count our side already excludes), and the total returns
-to **108780** with `pad` as a descriptive column.
-
-Two things are still worth knowing about them:
-
-* **RVC gets no compression from them.** Every one is the 32-bit
-  `addi zero,zero,0` in the `-noalias` dump — not a single `c.nop` — so
-  zero-rating removes four bytes from each side, not two from one.
-* **They are provably dead.** The stated policy discards on absence of
-  purpose, but on this corpus set every discarded nop ALSO follows a `jalr` or
-  a `ret` with no label on it, so it is unreachable code by any reading. The
-  two framings agree exactly here; the stated one is the better rule because
-  it also catches reachable loop-head alignment, which these corpora happen
-  not to contain.
-* **The one nop with a purpose was kept.** testcase0's single nop is a branch
-  target and survives, which is the check that the policy is doing work rather
-  than matching a mnemonic.
-
-The PLT caveat is what settled the accounting: 2518 of cpp-rv32's 2521 are the
-fourth slot of a PLT stub, where the 16-byte stride is a psABI contract — the
-dynamic linker indexes `(plt_entry - plt0) / 16`. Claiming that space needs a
-revised psABI, not an alignment argument, so neither side gets to bill for it.
+Excluded from the counts on both sides — what they are for is out of scope for
+this experiment. Totals: cpp-rv32 2521, cpp-rv64 2487, sqlite-gcc-rv64 156,
+sqlite-rv32 80, sqlite-rv64 75, sqlitem-rv64 82, musl 30–37, godot 1,
+testcase0 1.
 
 ### While counting them: what the PLT actually costs
 

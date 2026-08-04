@@ -858,84 +858,16 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
 PACKETS_PER_INSN = 0.8
 
 
-# Unconditional control transfers: nothing falls through one, so an
-# instruction after one is reachable only via a label.
-_UNCONDITIONAL = frozenset({"j", "jr", "ret", "tail", "jalr", "unimp", "ebreak"})
+def is_nop(insn) -> bool:
+    """A nop, however it is spelled.
 
-# How many leading nops of a function to treat as a patch sled.  GCC and clang
-# spell it -fpatchable-function-entry=N; the kernel's ftrace sled and MSVC-style
-# hot-patch pads are the same shape.  Eight covers every N in common use.
-PATCH_SLED_MAX = 8
-
-
-def annotate_padding_nops(blocks) -> None:
-    """Mark every `nop` that exists for no reason, as `is_padding_nop`.
-
-    THE POLICY, stated as burden of proof: a nop is DISCARDED unless there is
-    positive evidence it is doing a job.  Two things count as evidence:
-
-      * something jumps to it -- it is a branch or jump target, so the address
-        is meaningful and deleting it would delete a label's destination;
-      * it leads a function -- a run of nops at a referenced function entry is
-        a patch sled, space reserved for an out-of-band tool to overwrite
-        (-fpatchable-function-entry, ftrace, hot-patching), or space that tool
-        has already written back to nops.  That space is the point of it.
-
-    Everything else goes.  A nop with no target on it and no sled position is
-    there to move the NEXT thing onto a boundary, and a packet is four bytes
-    and four-byte aligned, so the boundary is already there.
-
-    Stating it this way round matters for corpora we do not have yet.  The
-    narrower test -- discard only what is provably unreachable, i.e. sits after
-    an unconditional transfer -- gives the SAME answer on every corpus here,
-    because all of their padding follows a `jalr` or a `ret`.  But it would
-    keep a reachable alignment run in the middle of a fallthrough path, which
-    a compiler emits for loop-head alignment and which we equally do not need.
-
-    Measured: every padding nop in the corpus is the 32-bit `addi zero,zero,0`,
-    not `c.nop`, so RVC pays four bytes for each one and we pay nothing.
-
-    Caveat kept in view: 2518 of cpp-rv32's 2521 are the fourth slot of a PLT
-    stub, where the 16-byte stride is a psABI contract -- the dynamic linker
-    indexes `(plt_entry - plt0) / 16`.  A packet ISA would restate that stride
-    rather than inherit it, so the saving is real but it is a claim about a
-    revised psABI, not about alignment alone.  Reported separately for exactly
-    that reason.
+    Nops are excluded from the counts on both sides: what they are for --
+    alignment, PLT stride, patch sleds -- is out of scope for this experiment.
     """
-    referenced = set()
-    for bb in blocks:
-        for insn in bb.instructions:
-            for tok in (getattr(insn, "imm_expr", None), getattr(insn, "target", None)):
-                if isinstance(tok, str):
-                    referenced.add(tok.strip())
-            for op in getattr(insn, "operands", ()) or ():
-                if isinstance(op, str):
-                    referenced.add(op.strip())
-
-    for bb in blocks:
-        label = getattr(bb, "label", None)
-        at_entry = bool(label) and label in referenced
-        sled = 0
-        for insn in bb.instructions:
-            m = insn.mnemonic
-            is_nop = m in ("nop", "c.nop") or (
-                m in ("addi", "addiw") and insn.rd in (0, None)
-                and insn.rs1 in (0, None) and (insn.imm or 0) == 0)
-            if not is_nop:
-                insn.is_padding_nop = False
-                at_entry = False           # past the sled position
-                continue
-            # evidence 1: this nop IS the label's destination
-            if at_entry and sled == 0:
-                insn.is_padding_nop = False
-                sled += 1
-                continue
-            # evidence 2: it continues a sled that began at the entry
-            if at_entry and sled < PATCH_SLED_MAX:
-                insn.is_padding_nop = False
-                sled += 1
-                continue
-            insn.is_padding_nop = True
+    m = insn.mnemonic
+    return m in ("nop", "c.nop") or (
+        m in ("addi", "addiw") and insn.rd in (0, None)
+        and insn.rs1 in (0, None) and (insn.imm or 0) == 0)
 
 
 def annotate_branch_distances(blocks) -> None:

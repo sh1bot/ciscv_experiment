@@ -17,7 +17,7 @@ are unresolved labels in the corpus and are not range-checked (plus the
 declared `measures_also` folds).
 
 ```
-corpus             insns   pairs   pad  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
+corpus             insns   pairs  nops  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------------
 testcase0          21876    4159     0    17717     81.0%     81.6%    99.2%   103.5%       -141
 musl-os-rv32      109844   25424    36    84420     76.9%     74.7%   102.9%    91.4%      +2382
@@ -107,19 +107,8 @@ Note the frame is not the only thing pairing calls: of cpp-rv32's 35312 calls,
 1625 are paired, 531 of them by `arg-call-pair` and the rest by
 `load-call-chain` and the jump frames, which take the register-indirect forms.
 
-`pad` is nops discarded as purposeless — see `annotate_padding_nops` for the
-policy: a nop survives only on evidence of a job (something jumps to it, or it
-leads a function and is therefore a patch sled).
-
-They are **zero-rated on both sides**. We discard them, so they cost us
-nothing; RVC is not charged for them either, rather than us banking the
-difference. Neither scheme should be scored on bytes that exist only to move
-the next thing onto a boundary — and whether a packet ISA would really inherit
-the PLT's 16-byte stride is a psABI question, not one arithmetic gets to
-settle. The books balance exactly (RVC loses 4 bytes per 32-bit pad and the
-same instruction count our side already excludes), so the break-even line
-stays at its plain `P > C/2` and the column describes the corpus without
-moving the score.
+`nops` are excluded from the counts on both sides: what they are for —
+alignment, PLT stride, patch sleds — is out of scope for this experiment.
 
 ## A correction inside these numbers
 
