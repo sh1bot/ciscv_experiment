@@ -17,24 +17,24 @@ are unresolved labels in the corpus and are not range-checked (plus the
 declared `measures_also` folds).
 
 ```
-corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
-------------------------------------------------------------------------------------------
-testcase0          21876    4159    17717     81.0%     81.6%    99.2%   103.5%       -141
-musl-rv32         119026   27433    91593     77.0%     74.9%   102.7%    91.8%      +2438
-musl-os-rv32      109880   25424    84456     76.9%     74.7%   102.9%    91.4%      +2382
-godot              90172   15959    74213     82.3%     76.3%   107.9%    74.7%      +5409
-musl-rv64         102040   21838    80202     78.6%     72.7%   108.1%    78.5%      +5978
-musl-os-rv64       93289   19921    73368     78.6%     72.5%   108.5%    77.6%      +5745
-musl-gcc-rv32     119956   25801    94155     78.5%     71.9%   109.1%    76.6%      +7875
-musl-gcc-rv64     103442   20401    83041     80.3%     72.9%   110.1%    72.9%      +7589
-sqlite-rv32       192768   44585   148183     76.9%     72.1%   106.6%    82.9%      +9185
-sqlite-rv64       189677   41589   148088     78.1%     72.1%   108.3%    78.5%     +11366
-sqlitem-rv64      201905   43998   157907     78.2%     71.8%   108.9%    77.3%     +12944
-sqlite-gcc-rv64   167510   33124   134386     80.2%     71.2%   112.7%    68.7%     +15124
-cpp-rv32          420866   89480   331386     78.7%     71.1%   110.7%    73.7%     +31973
-cpp-rv64          411687   84184   327503     79.6%     71.4%   111.5%    71.4%     +33754
-------------------------------------------------------------------------------------------
-TOTAL to parity                                                                   +108780
+corpus             insns   pairs   pad  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
+------------------------------------------------------------------------------------------------
+testcase0          21876    4159     0    17717     81.0%     81.6%    99.2%   103.5%       -141
+musl-os-rv32      109844   25424    36    84420     76.9%     74.7%   102.9%    91.5%      +2337
+musl-rv32         118990   27433    36    91557     76.9%     74.9%   102.7%    91.9%      +2393
+godot              90171   15959     1    74212     82.3%     76.3%   107.9%    74.7%      +5408
+musl-os-rv64       93259   19921    30    73338     78.6%     72.5%   108.5%    77.6%      +5707
+musl-rv64         102010   21838    30    80172     78.6%     72.7%   108.0%    78.5%      +5939
+musl-gcc-rv64     103412   20401    30    83011     80.3%     72.9%   110.0%    72.9%      +7550
+musl-gcc-rv32     119919   25801    37    94118     78.5%     71.9%   109.1%    76.6%      +7827
+sqlite-rv32       192688   44585    80   148103     76.9%     72.1%   106.6%    83.0%      +9083
+sqlite-rv64       189602   41589    75   148013     78.1%     72.1%   108.3%    78.6%     +11270
+sqlitem-rv64      201823   43998    82   157825     78.2%     71.8%   108.9%    77.3%     +12839
+sqlite-gcc-rv64   167354   33124   156   134230     80.2%     71.2%   112.7%    68.7%     +14923
+cpp-rv32          418345   89480  2521   328865     78.6%     71.1%   110.6%    73.9%     +29452
+cpp-rv64          409200   84184  2487   325016     79.4%     71.4%   111.3%    71.8%     +30555
+------------------------------------------------------------------------------------------------
+TOTAL to parity                                                                    +101491
 ```
 
 ## Where each corpus stands
@@ -106,6 +106,14 @@ ones included — and the A slot is adjacent by construction.
 Note the frame is not the only thing pairing calls: of cpp-rv32's 35312 calls,
 1625 are paired, 531 of them by `arg-call-pair` and the rest by
 `load-call-chain` and the jump frames, which take the register-indirect forms.
+
+`pad` is nops discarded as purposeless — see `annotate_padding_nops` for the
+policy: a nop survives only on evidence of a job (something jumps to it, or it
+leads a function and is therefore a patch sled). It is kept in its own column
+and never folded into `pairs`, because it is a claim about padding we do not
+need rather than pairing we achieved. RVC keeps every one of them: measured,
+all are the 32-bit `addi zero,zero,0`, not `c.nop`. Across the suite it is
+worth 5710 packets, of which 5008 are cpp's PLT-stub padding.
 
 ## A correction inside these numbers
 

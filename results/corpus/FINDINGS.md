@@ -1558,3 +1558,61 @@ and the A slot is adjacent by construction.
 On cpp-rv32 the table jump is worth **forty times** the buildable frame, and
 two thirds of that corpus's entire remaining gap to parity. The buildable frame
 is the floor; Zcmt is the case.
+
+## Purposeless nops discarded (2026-08-04)
+
+Policy in `analysis.parser.annotate_padding_nops`, stated as burden of proof:
+a nop is DISCARDED unless something jumps to it, or it leads a function and is
+therefore a patch sled (`-fpatchable-function-entry`, ftrace, hot-patching —
+space reserved for an out-of-band tool, or space that tool has written back).
+
+| corpus | nops | discarded | kept | why kept |
+|--------|------|-----------|------|----------|
+| cpp-rv32       | 2521 | 2521 | 0 | — |
+| cpp-rv64       | 2487 | 2487 | 0 | — |
+| sqlite-gcc-rv64|  156 |  156 | 0 | — |
+| sqlite-rv32    |   80 |   80 | 0 | — |
+| musl-gcc-rv32  |   37 |   37 | 0 | — |
+| godot          |    1 |    1 | 0 | — |
+| testcase0      |    1 |    0 | 1 | it is a branch target |
+
+Worth 5710 packets across the suite; the total to parity falls 108780 →
+101491, and cpp-rv32's own gap falls 31973 → 29452, about 8% of it.
+
+Three things make this a real differential rather than an accounting trick:
+
+* **RVC pays for them and we do not.** Every one is the 32-bit
+  `addi zero,zero,0` in the `-noalias` dump — not a single `c.nop`. So RVC
+  spends four bytes on each and a packet stream spends nothing.
+* **They are provably dead.** The stated policy discards on absence of
+  purpose, but on this corpus set every discarded nop ALSO follows a `jalr` or
+  a `ret` with no label on it, so it is unreachable code by any reading. The
+  two framings agree exactly here; the stated one is the better rule because
+  it also catches reachable loop-head alignment, which these corpora happen
+  not to contain.
+* **The one nop with a purpose was kept.** testcase0's single nop is a branch
+  target and survives, which is the check that the policy is doing work rather
+  than matching a mnemonic.
+
+Caveat, and the reason it has its own column rather than being folded into
+pairs: 2518 of cpp-rv32's 2521 are the fourth slot of a PLT stub, where the
+16-byte stride is a psABI contract — the dynamic linker indexes
+`(plt_entry - plt0) / 16`. A packet ISA would restate that stride rather than
+inherit it, so the saving is real but it rests on a revised psABI, not on
+alignment alone. Subtract the column to get the alignment-only claim: 3 nops
+on cpp, 1 on godot, 1 kept on testcase0.
+
+### While counting them: what the PLT actually costs
+
+The stub is `auipc t3, hi; lw t3, lo(t3); jalr t1, t3; nop`, and it runs on
+EVERY call, not just the first — lazy binding only decides what the GOT slot
+holds when the first call arrives. `-z now` removes the resolver trip, not the
+trampoline. So an external call costs 3 executed instructions and a dependent
+load, permanently, on top of the call site's own 1-2.
+
+On cpp-rv32 that is 2518 stubs × 4 = 10072 instructions, 2.1% of .text, that
+neither scheme can compress, sitting in the denominator of its parity gap.
+godot shows the alternative: `-fno-plt`, 6818 `auipc ra; jalr` at the call
+sites and zero stubs — one shared 4-instruction stub traded for 2 inline
+instructions per call site, which wins for rarely-called symbols and loses for
+hot ones.
