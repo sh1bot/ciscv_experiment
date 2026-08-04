@@ -50,7 +50,10 @@ def schedule(name):
     m = None
     for m in re.finditer(r"instructions: (\d+)\s+packets: (\d+)\s+pairs: (\d+)", out):
         pass
-    return tuple(int(g) for g in m.groups()) if m else None
+    if not m:
+        return None
+    pad = re.search(r"padding nops: (\d+) discarded", out)
+    return tuple(int(g) for g in m.groups()) + (int(pad.group(1)) if pad else 0,)
 
 
 def main():
@@ -58,17 +61,17 @@ def main():
         f[:-2] for f in os.listdir(TESTS)
         if f.endswith(".s") and not f.endswith("-noalias.s")
         and os.path.exists(os.path.join(TESTS, f[:-2] + "-noalias.s")))
-    print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'packets':>9}"
+    print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'pad':>6}{'packets':>9}"
           f"{'packet %':>10}{'real RVC':>10}{'vs RVC':>9}{'P/(C/2)':>9}"
           f"{'to parity':>11}")
-    print("-" * 90)
+    print("-" * 96)
     to_parity_total = 0
     for name in names:
         s, r = schedule(name), real_rvc(name)
         if not s or not r:
             print(f"{name:16} (missing scheduler result or -noalias variant)")
             continue
-        N, packets, pairs = s
+        N, packets, pairs, pad = s
         n_dis, comp = r
         if comp == 0:
             # A no-C build has no real RVC to score against; those corpora
@@ -76,22 +79,28 @@ def main():
             print(f"{name:16} (no compressed instructions — skipped; "
                   f"see cross_parity)")
             continue
-        if n_dis != N:
+        if n_dis != N + pad:
             print(f"{name:16} ! -noalias has {n_dis} instructions, "
-                  f"scheduled file has {N} — not the same build")
+                  f"scheduled file has {N}+{pad} discarded — not the same build")
         base, pk = 4 * N, 4 * packets
         rvc = 2 * comp + 4 * (n_dis - comp)
         rvc = rvc * N / n_dis          # scale if the two files differ
         # Break-even: packets cost 4*(N-P), RVC costs 4N-2C, so packets win
         # exactly when P > C/2. This column is how many more pairs that takes;
         # negative means already past parity, by that margin.
-        need = round(comp / 2 * N / n_dis) - pairs
+        # A discarded padding nop removes a whole packet, so it moves the
+        # break-even line exactly as far as one more pair would -- but it is
+        # NOT a pair and is never reported as one. RVC keeps the nop (measured:
+        # every one is the 32-bit `addi zero,zero,0`, not `c.nop`), so this is
+        # a real differential, and `pad` is carried in its own column so it can
+        # be read back out of the total at any time.
+        need = round(comp / 2 * N / n_dis) - pairs - pad
         to_parity_total += need
-        print(f"{name:16}{N:>8}{pairs:>8}{packets:>9}"
+        print(f"{name:16}{N:>8}{pairs:>8}{pad:>6}{packets:>9}"
               f"{100*pk/base:>9.1f}%{100*rvc/base:>9.1f}%"
               f"{100*pk/rvc:>8.1f}%{100*pairs/(comp/2*N/n_dis):>8.1f}%"
               f"{need:>+11}")
-    print("-" * 90)
+    print("-" * 96)
     print(f"{'TOTAL to parity':16}{to_parity_total:>+74}")
     print("\npacket % and real RVC are size against a 4-byte-per-instruction "
           "baseline;\nvs RVC under 100% means packets are smaller. P/(C/2) is "

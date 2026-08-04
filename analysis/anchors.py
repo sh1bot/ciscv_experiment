@@ -63,7 +63,7 @@ def _fingerprint():
 
 def _build(corpus):
     """Parse, schedule and pair one corpus; reduce to plain tuples."""
-    from analysis.parser import parse_file
+    from analysis.parser import parse_file, annotate_padding_nops
     from analysis.liveness import compute_global_liveness, compute_local_liveness
     from analysis.depgraph import build_dep_graph
     from scheduler.reorder import schedule, ScheduleMode
@@ -72,6 +72,14 @@ def _build(corpus):
     path = os.path.join(ROOT, "tests", f"{corpus}.s")
     with open(path) as fh:
         _blocks, functions = parse_file(fh.read())
+
+    # Padding nops are discarded before anything looks at the stream, exactly
+    # as __main__ does, so a cached anchor scan and a scheduler run agree.
+    annotate_padding_nops(_blocks)
+    for fn in functions:
+        for b in fn.blocks:
+            b.instructions = [i for i in b.instructions
+                              if not getattr(i, "is_padding_nop", False)]
 
     out = []
     for fn in functions:

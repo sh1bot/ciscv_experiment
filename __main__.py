@@ -174,6 +174,21 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode,
 
     _blocks, functions = parse_file(chunk)
 
+    # Drop nops that exist for no reason before anything measures them.  See
+    # analysis.parser.annotate_padding_nops for the policy: a nop survives only
+    # on evidence of purpose -- something jumps to it, or it leads a function
+    # and is therefore a patch sled.  They are counted, not silently vanished:
+    # the total rides back with the packets and is reported on its own line.
+    from analysis.parser import annotate_padding_nops
+    annotate_padding_nops(_blocks)
+    pad_nops = 0
+    for fn in functions:
+        for block in fn.blocks:
+            keep = [i for i in block.instructions
+                    if not getattr(i, "is_padding_nop", False)]
+            pad_nops += len(block.instructions) - len(keep)
+            block.instructions = keep
+
     # Spread the chunk's weight evenly over its schedulable (non-empty) blocks so
     # the per-block increments sum back to chunk_weight.
     n_blocks = sum(1 for fn in functions for b in fn.blocks if b.instructions)
@@ -206,6 +221,8 @@ def _process_chunk(chunk: str, same_base_reorder: bool, mode: ScheduleMode,
 
         fn_packets.append((fn_name, fn_block_packets))
 
+    if pad_nops:
+        fn_packets.append(('pad_nops', pad_nops))
     return fn_packets
 
 
