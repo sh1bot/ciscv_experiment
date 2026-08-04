@@ -22,6 +22,11 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(ROOT, "tests")
 
+# Below this compressed fraction a corpus is treated as a no-C build and left
+# out of the table and the total entirely.  See the use site for why this is a
+# fraction rather than a test against zero.
+NO_C_COMPRESSED_FRACTION = 0.05
+
 
 def real_rvc(name):
     """(instructions, compressed, compressed_nops) from the -noalias dump.
@@ -80,9 +85,19 @@ def main():
             continue
         N, packets, pairs, pad = s
         n_dis, comp, c_nops = r
-        if comp == 0:
+        if comp < NO_C_COMPRESSED_FRACTION * n_dis:
             # A no-C build has no real RVC to score against; those corpora
             # exist for the cross-build parity table (util/cross_parity.py).
+            #
+            # Tested as a FRACTION, not against zero.  `sqlitem-noc-rv64` is a
+            # no-C build that still carries 2077 `c.*` (1.03%) from prebuilt
+            # objects linked into it, so a `comp == 0` test let it through and
+            # scored it at 99.5% of a baseline it never had -- a nonsense
+            # -42923 that was then folded into the printed TOTAL while the
+            # published table omitted the row, leaving the headline 42923
+            # below the sum of what it showed.  The two populations are not
+            # close: no-C builds measure 0-1.03% compressed and real C builds
+            # 36.7-57.7%, so any threshold in between separates them.
             print(f"{name:16} (no compressed instructions — skipped; "
                   f"see cross_parity)")
             continue

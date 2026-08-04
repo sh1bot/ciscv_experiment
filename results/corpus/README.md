@@ -81,11 +81,15 @@ stack before calls (`store rs, k*imm(sp)` reaches 12.6% of its calls, against
 
 **sqlite family — +9105 to +14944.**  Consistent, unremarkable, no far calls.
 `cm.jalt` is worth 3429 words on rv32 and 2540 on rv64.  `sqlite-gcc-rv64` is
-the worst of them at 112.5%.  `sqlitem-noc-rv64` is omitted from the rows above
-(a no-C build has no real RVC to score against) but `corpus_scores.py` still
-folds its meaningless -42923 into the printed TOTAL — so that figure is 42923
-lower than the sum of the rows shown.  Carried forward as printed, for
-continuity with the previous table; the tool should stop counting it.
+the worst of them at 112.5%, and `sqlitem-noc-rv64` is excluded — a no-C build
+has no real RVC to score against.  That exclusion is now real.  It was tested
+as `comp == 0`, which the corpus slipped past on 2077 stray `c.*` (1.03%) from
+prebuilt objects linked into it; it was then scored at 99.5% of a baseline it
+never had, and its nonsense -42923 was folded into the printed TOTAL while the
+published table omitted the row — leaving every headline since 42923 below the
+sum of the rows it showed.  The test is a fraction now (`corpus_scores.py`,
+`NO_C_COMPRESSED_FRACTION`), the two populations being 0–1.03% compressed
+against 36.7–57.7%, and the TOTAL is again the sum of the rows shown.
 
 **cpp-rv32 / cpp-rv64 — +29455 / +31267.**  Still the wall, and still 59% of
 everything owed.  `arg-call-pair` fires only 471 times here despite 2563 far
