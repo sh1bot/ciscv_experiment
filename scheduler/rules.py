@@ -689,9 +689,27 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 #
 # In both, B dereferences A's loaded value (rtmp), which is dead after B.  They
 # differ only in which load carries the imm10 offset.
+#
+# These were ONE frame until the split.  Sharing a frame meant sharing an
+# op-select, and nothing in the word said which row was in force -- both rows
+# carried the same identifier and the same aaabbb index over one 49-codepoint
+# block, so the offset in the word could not be attributed to a load.  Two
+# frames now, each with its own block and its own width.
+#
+# They are ALMOST disjoint: each demands the other load's offset be zero, so a
+# pair with two real offsets fits neither and a pair with one fits exactly one.
+# The exception is the pair with NO offset at all -- both loads at zero -- which
+# satisfies both.  That is 775 pairs of the corpus (results/corpus/CHAINS.md),
+# credited to deref-load-chain because it comes first in RULES.  It fits at
+# every width, so widening either frame cannot move it or the other's count.
 
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
+# Two frames since the split, so two widths: the forms are disjoint populations
+# (deref needs B's offset zero, base needs A's) and no longer share a field, so
+# neither is constrained by what the other needs.  They are equal today only
+# because both draw the same two free columns.
 _DEREF_OFF_BITS = _w("deref-load-chain", "a", "lw")   # split imma cells
+_BASE_OFF_BITS = _w("base-load-chain", "b", "lw")     # split immb cells
 
 
 @must_chain_base
@@ -721,7 +739,7 @@ def _base_load_chain(a: Instruction, b: Instruction) -> None:
     if a.imm != 0:
         raise NotPair("A offset must be zero")
     shift = b.access_shift or 0
-    if not b.uimm_fits(_DEREF_OFF_BITS, shift):
+    if not b.uimm_fits(_BASE_OFF_BITS, shift):
         raise NotPair("big-imm")
     return None
 

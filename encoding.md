@@ -155,20 +155,50 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * A covers li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) as
   register/immediate choices, so they need no opcodes of their own.
 
-## deref-load-chain, base-load-chain
+## deref-load-chain
 
-*Pointer chase in two forms: which of the two loads carries the offset.*
+*Pointer chase: the FIRST load carries the offset, the second reads 0(tmp).*
 
     load    tmp, k*imma(rs1a)
-    load    rdb, k*immb(tmp)
+    load    rdb, 0(tmp)
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│imma[9:5]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+
+* Split from a single "deref-load-chain, base-load-chain" frame that
+  drew BOTH rows over one 49-codepoint op-select.  Nothing selected
+  between them: the two rows carried the same identifier and the same
+  `aaabbb` index, so a decoder holding the word could not tell whether
+  the 10-bit field was the first load's offset or the second's.  Two
+  frames now, each paying for its own op-select.
+* The two forms are ALMOST disjoint -- each demands the other load's
+  offset be zero -- but a chase with NO offset on either load satisfies
+  both, and those 775 pairs land here only because this frame comes
+  first in RULES.  Its own exclusive population is 1676.
+* imma is 10 bits: five from `funct5`, five from `rs2`, which the pair
+  leaves free because `tmp` is implicit.  Widening past 10 costs an
+  opcode doubling per bit (49 -> 98 codepoints at 11), which the width
+  sweep in results/corpus/CHAINS.md prices against what it returns.
+
+## base-load-chain
+
+*Pointer chase: the SECOND load carries the offset, the first reads 0(rs1a).*
+
+    load    tmp, 0(rs1a)
+    load    rdb, k*immb(tmp)
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│immb[9:5]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
-* TODO: decide how to balance imma and immb sizes.
+* The sibling of deref-load-chain; see its notes for why the two were
+  split.  Same shape, same cost, and the offset sits on the other load.
+* immb is sized independently of imma now that the two rows no longer
+  share a field.  Both are 10 bits because the columns are free at
+  that width, not because the two demands happen to match.
 
 ## li-branch-chain
 

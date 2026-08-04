@@ -1,0 +1,37 @@
+# Pointer-chase offset width sweep.  14 corpora.
+#
+# Both frames swept together: their populations are disjoint, so one
+# run reports both curves.  `total` is ALL corpus pairs -- the number
+# that says whether a width bought anything or merely moved it.
+
+  w     deref    base    both     total   d.cp   b.cp  block
+--------------------------------------------------------------
+  6      2463    4893    7356    502425     49     49     64
+  7      2465    5901    8366    503417     49     49     64  +992
+  8      2466    6017    8483    503529     49     49     64  +112
+  9      2467    6017    8484    503529     49     49     64  +0
+ 10      2467    6017    8484    503529     49     49     64  +0
+ 11      2467    6017    8484    503529     98     98    128  +0
+ 12      2467    6017    8484    503529    196    196    256  +0
+
+per-base detail at each width:
+  w=6   RV32  deref     940  base    2071  total   219269
+  w=6   RV64  deref    1523  base    2822  total   283156
+  w=7   RV32  deref     942  base    2387  total   219578
+  w=7   RV64  deref    1523  base    3514  total   283839
+  w=8   RV32  deref     942  base    2405  total   219595
+  w=8   RV64  deref    1524  base    3612  total   283934
+  w=9   RV32  deref     943  base    2405  total   219595
+  w=9   RV64  deref    1524  base    3612  total   283934
+  w=10  RV32  deref     943  base    2405  total   219595
+  w=10  RV64  deref    1524  base    3612  total   283934
+  w=11  RV32  deref     943  base    2405  total   219595
+  w=11  RV64  deref    1524  base    3612  total   283934
+  w=12  RV32  deref     943  base    2405  total   219595
+  w=12  RV64  deref    1524  base    3612  total   283934
+
+independence check — widening one form must not move the other:
+  wa=12  wb=6    deref    2467  base    4893  total   502425
+  wa=6   wb=12   deref    2463  base    6017  total   503529
+  compare each against the matching w= row above: deref should
+  match the wa row and base the wb row, exactly.
