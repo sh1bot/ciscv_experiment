@@ -515,7 +515,7 @@ class TestDualOpPair:
 
 
 # ---------------------------------------------------------------------------
-# indep_pair (li+li, mv+mv, mv+li)
+# dual_setup_pair (li+li, mv+mv, mv+li)
 # ---------------------------------------------------------------------------
 
 class TestIndepPair:

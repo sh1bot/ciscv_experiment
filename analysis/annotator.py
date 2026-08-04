@@ -16,6 +16,7 @@ from scheduler.rules import RULES
 class PairingStats:
     pairs:     int = 0
     solos:     int = 0
+    pad_nops:  int = 0   # excluded from the counts: out of scope
     rvc_total: int = 0   # instructions that are RVC-eligible
     rule_hits: dict = field(default_factory=dict)  # rule_name -> int
 
@@ -36,6 +37,7 @@ class PairingStats:
     def __iadd__(self, other: "PairingStats") -> "PairingStats":
         self.pairs     += other.pairs
         self.solos     += other.solos
+        self.pad_nops  += other.pad_nops
         self.rvc_total += other.rvc_total
         for rule, count in other.rule_hits.items():
             self.rule_hits[rule] = self.rule_hits.get(rule, 0) + count
@@ -51,6 +53,8 @@ def _stats_comment_lines(stats: PairingStats, label: str, rule_breakdown: bool =
     lines.append(f"#   instructions: {n}  packets: {pk}  pairs: {p}  solos: {s}")
     lines.append(f"#   pair rate:    {stats.pair_rate()*100:.1f}%  ({p*2}/{n} instructions paired)")
     lines.append(f"#   RVC-eligible: {stats.rvc_rate()*100:.1f}%  ({stats.rvc_total}/{n} instructions)")
+    if stats.pad_nops:
+        lines.append(f"#   nops: {stats.pad_nops} (excluded from the counts)")
     if rule_breakdown:
         lines.append("#   rule hits:")
         # List every rule in definition order, including those that never fired,
@@ -72,6 +76,11 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
     packet_num = 1
 
     for fn_name, packets in fn_packets:
+        # A worker reports its nop total as a bare entry rather than a
+        # function, so it survives the parallel split.
+        if fn_name == 'pad_nops':
+            total_stats.pad_nops += packets
+            continue
         fn_stats = PairingStats()
 
         for item in packets:

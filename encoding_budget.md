@@ -36,7 +36,7 @@ mem-base-pair                  15841     8    3    4    6      2      5      5
 arith-mem-pair              182    23   14   17   22      5      5      0
 macro-op-pair             26     3    2    2    3      1      0      0
 post-inc-pair         2033     4    2    2    3      1      4      9
-indep-pair           11883    11    4    5    7      3      7      5
+dual-setup-pair           11883    11    4    5    7      3      7      5
 li-branch-chain            1692     6    4    5    6      3      7      0
 addi-branch-pair            377    12    8    9   12      4      6      0
 bit-test-branch-chain       995     6    2    3    5      2      7      0
@@ -83,7 +83,7 @@ Register-field pressure (share of matches with all regs <= x15):
     arith-mem-pair            56.6%  <- 4-bit cut costly
     macro-op-pair          65.4%  <- 4-bit cut costly
     post-inc-pair        43.1%  <- 4-bit cut costly
-    indep-pair           28.8%  <- 4-bit cut costly
+    dual-setup-pair           28.8%  <- 4-bit cut costly
     li-branch-chain           84.9%  <- 4-bit cut costly
     addi-branch-pair          55.7%  <- 4-bit cut costly
     bit-test-branch-chain     93.2%  <- 4-bit cut costly

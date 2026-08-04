@@ -48,6 +48,7 @@ another).
 | `dual-indep-pair` | `indep-pair` | `dual-` was a family prefix with one member left |
 | `mvload-jump-pair` | `setup-jump-pair` | `mvload` was a portmanteau, not an op |
 | `post-inc-addi-pair` (rule) | `post-inc-pair` | rule name now matches its frame |
+| `indep-pair` | `dual-setup-pair` | named a constraint, not an operation |
 
 Unchanged, already regular: `inc-branch-pair`, `pre-inc-pair`,
 `post-inc-pair`, `rsd-alu-pair`, `prologue-pair`, `epilogue-pair`,
@@ -69,7 +70,7 @@ branch as it stood.
 | `incw`/`decw` forms | **rejected** | signed counters are provably width-equivalent (overflow is UB); the unprovable unsigned residue forgoes the pairing, never correctness; halves the block | TODO A11; inc-branch yaml note |
 | `dual-mem-pair` / `dual-mem-shadd-pair` families | **retired / cut** | post-inc semantics subsumed the useful half; the shadd variant scheduled zero pairs on every corpus under both compilers for 8 codepoints | commits 58dd0cc, 25ab322 |
 | `post-inc` shXadd clusters (register-stride writeback) | **cut** | real idiom, but neither clang nor GCC ever emits it adjacent to the access — zero scheduled pairs everywhere | post-inc-pair yaml note |
-| `macro-op-pair` mv/li members | **dropped from that frame** | outgrew the slot (immediate demand did not fit the paired-ALU rows); the population went to `indep-pair` | session record; macro-op note |
+| `macro-op-pair` mv/li members | **dropped from that frame** | outgrew the slot (immediate demand did not fit the paired-ALU rows); the population went to `dual-setup-pair` | session record; macro-op note |
 | `const-store-pair` (li + store) | **generalised away** | subsumed by `addi-store-chain`: `addi tmp, rs1a, imma` covers li (rs1a=x0), mv (imma=0), addi4spn (rs1a=sp) as register choices, not opcodes | commit a8c64ef |
 | `[czero, czero]` dual-select | **refuted as a frame** | exists at scale (~1464 pooled) but both temporaries stay live into the following `or` — five live register fields against 20 bits; serve the 3-insn select by pairing the second czero with the `or` instead (`czero-or-chain`) | FINDINGS.md §4 |
 | `li-czero` addi/rsd form, and a surviving-constant 5-bit variant | **not built** | the addi addends are wide (3–16% fit 6 bits) and the surviving-constant minority (16–25%) mostly crosses a branch; two populations, no shared width | li-czero yaml note |
@@ -101,7 +102,7 @@ Every surviving frame has at least one independent industry endorsement:
 | `macro-op-pair` | ISA manual M-extension: `MULH*; MUL` and `DIV; REM` same-operand sequences named so "microarchitectures can then fuse these into a single operation" — the frame's premise verbatim | <https://github.com/riscv/riscv-isa-manual/blob/main/src/m-st-ext.adoc> |
 | `czero-or-chain`, `li-czero-chain` | Qualcomm Zics conditional move/select; the same idioms documented precisely in the separate Xqci vendor line (Xqcicm/Xqcics/Xqcicli); SiFive short-forward-branch predication | deck above; <https://github.com/llvm/llvm-project/pull/121752>, /119504, /121292; <https://reviews.llvm.org/D135814> |
 | `prologue-pair`, `epilogue-pair` | ratified Zcmp `cm.push`/`cm.popret` (10–15% on stack-heavy code); Qualcomm push/pop & frame-pointer proposal | <https://github.com/riscvarchive/riscv-code-size-reduction/blob/main/Zc-specification/Zc.adoc>; <https://lists.riscv.org/g/tech-unprivileged/attachment/812/0/Qualcomm%20RISC-V%20Push&Pop&FP%20Proposal.pdf> |
-| `indep-pair` (mv+mv…) | Zcmp `cm.mva01s`/`cm.mvsa01` paired moves — ours is register-agnostic | Zc.adoc above |
+| `dual-setup-pair` (mv+mv…) | Zcmp `cm.mva01s`/`cm.mvsa01` paired moves — ours is register-agnostic | Zc.adoc above |
 | `arith-jump-pair`, `setup-jump-pair` | argument-setup-before-transfer; SiFive auipc/jalr CallImm patent family (US10996952B2) is the call-side cousin | <https://patents.google.com/patent/US10996952B2/en> |
 
 ## 3. Suggested by the prior art, NOT yet evaluated here

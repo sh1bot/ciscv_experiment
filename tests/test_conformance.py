@@ -92,7 +92,7 @@ def test_immediate_contracts_derive():
     assert not missing, f"rules with no frame contract: {missing}"
     # Spot values this session got wrong in both directions at some point.
     assert width_of("li-branch-chain", "a", "li") == 8
-    assert width_of("indep-pair", "b", "li") == 6
+    assert width_of("dual-setup-pair", "b", "li") == 6
     assert width_of("mem-base-pair", "a", "lw") == 6
 
 

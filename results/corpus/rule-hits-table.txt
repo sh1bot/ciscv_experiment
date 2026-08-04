@@ -1,3 +1,5 @@
+# HISTORICAL: measured 2026-08-02; predates the 2026-08-04 parser corrections
+# and arg-call-pair. Live scores: results/corpus/README.md.
 rule                          testcase0        godot    musl-rv32    musl-rv64  sqlite-rv32  sqlite-rv64
 mem-base-pair                            897         2676         9026         4883         9740         8242
 indep-pair                     651         2489         3691         4918         7037         6858

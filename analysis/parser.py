@@ -858,6 +858,18 @@ def parse_file(source: str) -> tuple[list[BasicBlock], list[Function]]:
 PACKETS_PER_INSN = 0.8
 
 
+def is_nop(insn) -> bool:
+    """A nop, however it is spelled.
+
+    Nops are excluded from the counts on both sides: what they are for --
+    alignment, PLT stride, patch sleds -- is out of scope for this experiment.
+    """
+    m = insn.mnemonic
+    return m in ("nop", "c.nop") or (
+        m in ("addi", "addiw") and insn.rd in (0, None)
+        and insn.rs1 in (0, None) and (insn.imm or 0) == 0)
+
+
 def annotate_branch_distances(blocks) -> None:
     """Estimate, for every branch/jump with a resolvable label, how far its
     target is in PACKETS.

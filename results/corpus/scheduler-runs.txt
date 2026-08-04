@@ -1,3 +1,5 @@
+# HISTORICAL: measured 2026-07-29; predates the 2026-08-04 parser corrections
+# and arg-call-pair. Live scores: results/corpus/README.md.
 musl-rv64 # --- file totals ---
 musl-rv64 #   instructions: 102040  packets: 80166  pairs: 21874  solos: 58292
 musl-rv64 #   pair rate:    27.3%  (43748/102040 instructions paired)

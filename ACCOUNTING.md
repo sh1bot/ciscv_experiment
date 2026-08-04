@@ -227,7 +227,7 @@ This is a structural fact, not a sampling artefact: a chain frame's whole
 purpose is to feed A's result into B's input, so an op that ignores that input
 wastes the link. A unary op in a chain slot leaves an encoded register field
 unused. Independent pairs have no link to waste, so they can lean into unary
-ops — which is also why `indep-pair` exists.
+ops — which is also why `dual-setup-pair` exists.
 
 **Consequence for `encoding.yaml`:** `alu-alu-chain` and `rsd-alu-pair`
 currently share one anchored list (`*rsd_alu`). That list must serve two

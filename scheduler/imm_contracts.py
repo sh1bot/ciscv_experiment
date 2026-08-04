@@ -24,13 +24,14 @@ which is the honest reading — a bare op cannot extend anything (see
 `lint_frame`, which rejects bare ops on a widened field).
 
 Widths are the bulk of it, but the principle is the module's real subject: a
-fact the yaml states is read from the yaml. `rd_column_slots` and
-`link_regs_for` follow the same rule for the two register facts a frame's rows
-and op-select declare.
+fact the yaml states is read from the yaml. `rd_column_slots`, `link_regs_for`
+and `accepts_pcrel_lo` follow the same rule for the register and relocation
+facts a frame declares.
 
-NOT derived here: which slot a rule reads, order sensitivity, scaling by access
-width, or the sentinel forms. Those are scheduler semantics and stay in
-`rules.py`.
+NOT derived here: which slot a rule reads, order sensitivity, or the sentinel
+forms.  (`scale_of` does report a declared scale, which a width census needs to
+avoid reporting a scaled field as starved.) Those are scheduler semantics and
+stay in `rules.py`.
 """
 import os
 from functools import lru_cache
@@ -43,7 +44,7 @@ _YAML = os.path.join(_ROOT, "encoding.yaml")
 
 @lru_cache(maxsize=1)
 def _contracts():
-    """{rule_name: {slot: {mnemonic: bits}}} for every frame in the yaml."""
+    """{rule_name: {slot: {mnemonic: (bits, scale)}}} for every frame."""
     import sys
     sys.path.insert(0, os.path.join(_ROOT, "util"))
     from encoding_render import op_name, op_imm, imm_field_bits
@@ -68,7 +69,8 @@ def _contracts():
                 for entry in cluster.get(slot, []):
                     c = op_imm(entry)
                     bits = c.get("bits") if c else None
-                    widths[op_name(entry)] = bits or (base or None)
+                    scale = (c.get("scale") or 1) if c else 1
+                    widths[op_name(entry)] = (bits or (base or None), scale)
             per_slot[slot] = widths
         for rn in names:
             out[rn] = per_slot
@@ -218,12 +220,21 @@ def rd_column_slots(rule):
 def width_of(rule, slot, mnemonic):
     """Declared immediate width in bits, or None if the frame gives this op no
     immediate. `mnemonic` is the yaml op name (`li`, not `addi`)."""
-    return _contracts().get(rule, {}).get(slot, {}).get(mnemonic)
+    e = _contracts().get(rule, {}).get(slot, {}).get(mnemonic)
+    return e[0] if e else None
+
+
+def scale_of(rule, slot, mnemonic):
+    """The multiplier the field carries (4 for addi4spn, the access width for a
+    scaled memory offset), or 1. A census that scores a scaled field unscaled
+    reports a starved frame that is not starved."""
+    e = _contracts().get(rule, {}).get(slot, {}).get(mnemonic)
+    return e[1] if e else 1
 
 
 def widths_for(rule, slot):
     """{mnemonic: bits} for one slot of one rule."""
-    return dict(_contracts().get(rule, {}).get(slot, {}))
+    return {m: e[0] for m, e in _contracts().get(rule, {}).get(slot, {}).items()}
 
 
 def signed_range(bits, signed=True):

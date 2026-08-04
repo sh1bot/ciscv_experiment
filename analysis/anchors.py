@@ -63,7 +63,7 @@ def _fingerprint():
 
 def _build(corpus):
     """Parse, schedule and pair one corpus; reduce to plain tuples."""
-    from analysis.parser import parse_file
+    from analysis.parser import parse_file, is_nop
     from analysis.liveness import compute_global_liveness, compute_local_liveness
     from analysis.depgraph import build_dep_graph
     from scheduler.reorder import schedule, ScheduleMode
@@ -72,6 +72,12 @@ def _build(corpus):
     path = os.path.join(ROOT, "tests", f"{corpus}.s")
     with open(path) as fh:
         _blocks, functions = parse_file(fh.read())
+
+    # Nops are excluded here as they are in __main__, so a cached anchor scan
+    # and a scheduler run agree.
+    for fn in functions:
+        for b in fn.blocks:
+            b.instructions = [i for i in b.instructions if not is_nop(i)]
 
     out = []
     for fn in functions:

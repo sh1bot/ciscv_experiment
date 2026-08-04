@@ -1,5 +1,8 @@
 # Remeasurement of the standing claims
 
+> **Historical measurement, 2026-08-02.** These numbers predate the 2026-08-04 parser corrections (`jalr imm(rs)` decoded as a jump, objdump's `<target>` annotation left on the operand) and the `arg-call-pair` frame, so both the pair counts and the per-corpus
+> ratios have moved. They are kept for the ARGUMENT they make, not as current figures; `results/corpus/README.md` holds the live scores.
+
 Every numeric claim in `TODO.md` and `ACCOUNTING.md` re-derived against the
 current tree and the current 17-file corpus, plus corrections to figures
 reported earlier in the session. The point is not the individual numbers — it

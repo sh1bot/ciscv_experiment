@@ -1,5 +1,8 @@
 # The other compiler: GCC 13.3 vs clang 18.1
 
+> **Historical measurement, 2026-08-02.** These numbers predate the 2026-08-04 parser corrections (`jalr imm(rs)` decoded as a jump, objdump's `<target>` annotation left on the operand) and the `arg-call-pair` frame, so both the pair counts and the per-corpus
+> ratios have moved. They are kept for the ARGUMENT they make, not as current figures; `results/corpus/README.md` holds the live scores.
+
 Every corpus before this one was built by clang 18. `results/corpus/TUNE.md`
 established that variation *within* clang is negligible — the whole rv32
 `-mtune` space moves the packets-vs-RVC ratio by 0.2 points — which left the

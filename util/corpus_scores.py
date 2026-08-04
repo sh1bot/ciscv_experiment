@@ -24,22 +24,29 @@ TESTS = os.path.join(ROOT, "tests")
 
 
 def real_rvc(name):
-    """(instructions, compressed) from the -noalias disassembly."""
+    """(instructions, compressed, compressed_nops) from the -noalias dump.
+
+    Nops are excluded from the counts on both sides -- what they are for is out
+    of scope for this experiment -- so they are split by width: a `c.nop` costs
+    RVC two bytes and a 32-bit one four."""
     path = os.path.join(TESTS, f"{name}-noalias.s")
     if not os.path.exists(path):
         return None
-    n = c = 0
+    n = c = c_nops = 0
     with open(path) as fh:
         for line in fh:
             if not line.startswith("\t"):
                 continue
-            mnem = line[1:].split(None, 1)[0] if line[1:].strip() else ""
+            parts = line[1:].split(None, 1)
+            mnem = parts[0] if line[1:].strip() else ""
             if not mnem or not mnem[0].islower():
                 continue
             n += 1
             if mnem.startswith("c."):
                 c += 1
-    return n, c
+                if mnem == "c.nop":
+                    c_nops += 1
+    return n, c, c_nops
 
 
 def schedule(name):
@@ -50,7 +57,10 @@ def schedule(name):
     m = None
     for m in re.finditer(r"instructions: (\d+)\s+packets: (\d+)\s+pairs: (\d+)", out):
         pass
-    return tuple(int(g) for g in m.groups()) if m else None
+    if not m:
+        return None
+    pad = re.search(r"nops: (\d+) \(excluded", out)
+    return tuple(int(g) for g in m.groups()) + (int(pad.group(1)) if pad else 0,)
 
 
 def main():
@@ -58,42 +68,47 @@ def main():
         f[:-2] for f in os.listdir(TESTS)
         if f.endswith(".s") and not f.endswith("-noalias.s")
         and os.path.exists(os.path.join(TESTS, f[:-2] + "-noalias.s")))
-    print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'packets':>9}"
+    print(f"{'corpus':16}{'insns':>8}{'pairs':>8}{'nops':>6}{'packets':>9}"
           f"{'packet %':>10}{'real RVC':>10}{'vs RVC':>9}{'P/(C/2)':>9}"
           f"{'to parity':>11}")
-    print("-" * 90)
+    print("-" * 96)
     to_parity_total = 0
     for name in names:
         s, r = schedule(name), real_rvc(name)
         if not s or not r:
             print(f"{name:16} (missing scheduler result or -noalias variant)")
             continue
-        N, packets, pairs = s
-        n_dis, comp = r
+        N, packets, pairs, pad = s
+        n_dis, comp, c_nops = r
         if comp == 0:
             # A no-C build has no real RVC to score against; those corpora
             # exist for the cross-build parity table (util/cross_parity.py).
             print(f"{name:16} (no compressed instructions — skipped; "
                   f"see cross_parity)")
             continue
-        if n_dis != N:
+        if n_dis != N + pad:
             print(f"{name:16} ! -noalias has {n_dis} instructions, "
-                  f"scheduled file has {N} — not the same build")
+                  f"scheduled file has {N}+{pad} nops — not the same build")
+        # Nops are excluded from both sides: out of scope for this experiment.
+        n_rvc = n_dis - pad
+        rvc = 2 * comp + 4 * (n_rvc - comp) - (2 * min(c_nops, pad))
+        comp_eff = comp - min(c_nops, pad)
         base, pk = 4 * N, 4 * packets
-        rvc = 2 * comp + 4 * (n_dis - comp)
-        rvc = rvc * N / n_dis          # scale if the two files differ
+        rvc = rvc * N / n_rvc          # scale if the two files differ
         # Break-even: packets cost 4*(N-P), RVC costs 4N-2C, so packets win
         # exactly when P > C/2. This column is how many more pairs that takes;
         # negative means already past parity, by that margin.
-        need = round(comp / 2 * N / n_dis) - pairs
+        need = round(comp_eff / 2 * N / n_rvc) - pairs
         to_parity_total += need
-        print(f"{name:16}{N:>8}{pairs:>8}{packets:>9}"
+        print(f"{name:16}{N:>8}{pairs:>8}{pad:>6}{packets:>9}"
               f"{100*pk/base:>9.1f}%{100*rvc/base:>9.1f}%"
-              f"{100*pk/rvc:>8.1f}%{100*pairs/(comp/2*N/n_dis):>8.1f}%"
+              f"{100*pk/rvc:>8.1f}%{100*pairs/(comp_eff/2*N/n_rvc):>8.1f}%"
               f"{need:>+11}")
-    print("-" * 90)
+    print("-" * 96)
     print(f"{'TOTAL to parity':16}{to_parity_total:>+74}")
-    print("\npacket % and real RVC are size against a 4-byte-per-instruction "
+    print("\n`nops` are excluded from the counts on both sides: what they are "
+          "for is out of\nscope for this experiment.\n")
+    print("packet % and real RVC are size against a 4-byte-per-instruction "
           "baseline;\nvs RVC under 100% means packets are smaller. P/(C/2) is "
           "progress toward the\nbreak-even point where pairs exceed half the "
           "compressed-instruction count.\n\n'to parity' is that same gap "
