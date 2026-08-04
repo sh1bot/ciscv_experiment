@@ -1,135 +1,136 @@
 # Immediate widths: budget against return, frame by frame
 
-> **Historical measurement, 2026-08-02.** These numbers predate the 2026-08-04 parser corrections (`jalr imm(rs)` decoded as a jump, objdump's `<target>` annotation left on the operand) and the `arg-call-pair` frame, so both the pair counts and the per-corpus
-> ratios have moved. They are kept for the ARGUMENT they make, not as current figures; `results/corpus/README.md` holds the live scores.
+Measured 2026-08-04 against the current tree.  Who is paying for range their
+population does not use, and who is starved by a cap a cheap bit would fix.
 
-Who is paying for immediate range their population does not use, and who is
-starved by a cap that a cheap bit would fix.  Three measurements:
+## Method
 
-**Uncensored census.**  Every scheduled-pair width table before this one was
-censored: rules reject immediates wider than the frame allows, so "100% fit"
-can mean "the cap binds", not "the population fits".  For this study every
-width cap in `rules.py` was lifted to 13 bits in a scratch tree and
-`util/needed.py` run over musl-rv32 + sqlite-rv64.  The ceiling: uncapped,
-musl-rv32 schedules 31949 pairs (+17.8% over 27124) and sqlite-rv64 47108
-(+16.6% over 40410) — the total mass beyond today's widths, most of it in
-tails that cost exponential codepoints.  Census populations are
-attribution-shifted (pairs migrate between rules when caps lift), so its
-percentages are trusted and its absolute pair counts are not; every
-recommendation below was re-measured with only the candidate widened.
+**The census must be uncensored.**  A rule rejects immediates wider than its
+frame allows, so measuring the pairs the scheduler produced reports "100% fit"
+whenever the cap binds — the frame looks fed because everything it could not
+encode was never counted.  Every number here comes from a run with
+`imm_contracts.width_of` returning 13 bits for every op, so the population is
+the one the corpus contains rather than the one the rules let through.
 
-**Extension audit.**  From the yaml: 276 of the 1018 reserved codepoints are
-opcode-duplication purchases of range above the drawn field.
+**Scaled fields are scored scaled.**  `pre-inc-pair` read 3% fitting five bits
+in the previous version of this file, on a field the yaml declares as ten bits
+times four.  `util/needed.py` now asks `imm_contracts.scale_of` for the
+declared multiplier instead of guessing from the mnemonic; that row now reads
+100%, which is the truth.
 
-**The concession.**  A 5- or 10-bit field is the natural size — it costs
-nothing beyond the register columns the frame drew anyway, so slack inside it
-is free and is not flagged.  (No, we are not reclaiming two bits of a natural
-field at the cost of format regularity.)  Judged here are only the two things
-that carry a price: duplication purchases, and caps that measurably starve.
+**The ceiling.**  With every cap lifted, musl-gcc-rv32 schedules 28207 pairs
+against 25801 (+9.3%) and sqlite-rv64 46441 against 41492 (+11.9%).  That is
+the whole of what immediate range could ever be worth, tails included — and
+the tails are what cost exponentially.
+
+**What is judged.**  A 5- or 10-bit field is the natural size: it costs
+nothing beyond the register columns the frame drew anyway, so slack inside one
+is free and is not flagged.  Only two things carry a price and are judged
+here: opcode-duplication purchases of range above the drawn field, and caps
+that measurably starve.
 
 ## Where the extension money sits
 
+343 of the reserved codepoints are duplication purchases (`encoding_assign`
+reports 838 of 1024 reserved after hosting, 186 spare).
+
 ```
-frame                     entries bought   what for            return
-rsd-alu-pair                 +156          addi@7, li@7 x2     ~5.5 pairs/cp
-load-alu-chain           +34          ld/lw@6, addi@6     ~5.6 pairs/cp
-alu-alu-chain                +31          addi@6 x2           FREE (block unchanged)
-li-branch-chain               +18          li@7                ~20 pairs/cp
-addi-branch-pair              +12          addi/addiw@6        ~2 pairs/cp
-bit-test-branch-chain         +12          andi/slli/srli@6    ~12 pairs/cp
-indep-pair               +11          li@6, addi4spn@6    ~10 pairs/cp
-alu-store-chain           +2          addi@6              FREE (block unchanged)
+frame                     entries bought   what for
+rsd-alu-pair                 +156          addi@7, li@7 (both slots)
+li-branch-chain               +42          li@8
+load-alu-chain                +34          addi@6, ld@6, lw@6
+alu-alu-chain                 +30          addi@6
+arith-jump-pair               +24          addi/addiw/andi/li/slli/srli@6
+load-store-chain              +12          all eight load/store ops @6
+bit-test-branch-chain         +12          andi/slli/srli@6
+addi-store-off-chain          +12          addi@6, sb/sh/sw/sd@6
+dual-setup-pair               +11          li@6, addi4spn@6
+mem-base-pair                  +8          all eight load/store ops @6
+alu-store-chain                +2          addi@6
 ```
 
-"FREE" means the frame's block is the same size with or without the extension
-— the bits are riding rounding slack, and there is nothing to reclaim.
+## Fit at the declared width — uncensored, musl-gcc-rv32 + sqlite-rv64
+
+Slots omitted below are at 100% already: every 10-bit field (mem-sp-pair,
+prologue, epilogue, setup-jump, deref/base-load, pre-inc A, addi-store A,
+li-czero, load-sp-branch, load-call) plus load-alu-chain A, inc-branch A and
+the register-only B slots.
+
+```
+frame                    slot      n  decl   @decl      +1      +2
+alu-store-chain             a    897     6   59.8%   64.1%   69.6%
+alu-alu-chain               b   1444     6   65.2%   81.4%   85.4%
+alu-alu-chain               a   2362     6   69.3%   81.9%   87.7%
+addi-store-off-chain        b    380     6   72.1%   97.9%   99.5%
+load-base-branch-pair       a   6160     5   74.6%   83.8%   98.5%
+arith-jump-pair             a   6617     6   75.9%   82.0%   88.5%
+bit-test-branch-chain       a   1172     6   76.9%   88.3%   91.5%
+rsd-alu-pair                a   6322     7   78.5%   83.9%   88.2%
+rsd-alu-pair                b   6237     7   80.2%   86.8%   90.7%
+addi-store-off-chain        a    380     6   82.1%   82.6%   83.2%
+post-inc-pair               b   1919     5   83.6%   93.1%   97.9%
+pre-inc-pair                b    605     5   84.8%   99.3%   99.3%
+li-branch-chain             a   2101     8   87.0%   95.0%   95.4%
+load-store-chain            b   1392     6   87.6%   96.0%   99.9%
+load-store-chain            a   1392     6   87.8%   96.1%   99.5%
+post-inc-pair               a   1919     5   91.3%   95.7%   98.5%
+dual-setup-pair             a  10897     6   91.6%   95.1%   98.2%
+load-alu-chain              b   1431     6   93.0%   97.3%   98.3%
+dual-setup-pair             b  10897     6   94.4%   96.4%   98.4%
+index-mem-chain             b    568     5   96.5%   98.9%   99.5%
+mem-base-pair               a  10299     6   97.1%   98.6%  100.0%
+mem-base-pair               b  10299     6   97.1%   98.6%  100.0%
+```
+
+## What a bit costs
+
+THE IMMEDIATE RULE prices it: an op declaring `bits: N` over a field of `f`
+occupies `2^(N-f)` entries, and a frame's codepoints are the product of its two
+slots' weights.  So one more bit doubles every immediate-carrying op in that
+slot, and the frame's whole block with it.
+
+```
+frame                  slot  bits   codepoints        fit gained
+load-base-branch-pair    a    +2    14 ->   56  (+42)   74.6% -> 98.5%
+addi-store-off-chain     b    +1    16 ->   32  (+16)   72.1% -> 97.9%
+post-inc-pair            b    +1     4 ->    8  (+4)    83.6% -> 93.1%
+pre-inc-pair             b    +1     8 ->   16  (+8)    84.8% -> 99.3%
+load-store-chain         a    +1    16 ->   32  (+16)   87.8% -> 96.1%
+li-branch-chain          a    +1    48 ->   96  (+48)   87.0% -> 95.0%
+arith-jump-pair          a    +2    64 ->  256  (+192)  75.9% -> 88.5%
+alu-alu-chain            a    +2   128 ->  512  (+384)  69.3% -> 87.7%
+rsd-alu-pair             a    +2   256 -> 1024  (+768)  78.5% -> 88.2%
+```
 
 ## Verdicts
 
-### Too much — paying for range the population does not use
+**Buy: `post-inc-pair` B and `pre-inc-pair` B.**  Four and eight codepoints for
++9.5 and +14.5 points of fit on populations of 1919 and 605.  The cheapest
+purchases on the board by an order of magnitude, and both frames sit inside
+budgets that already round up to the next power of two.
 
-* **`addi-branch-pair` `addi@6` — egregious.**  Twelve entries buy the
-  population's 52.9% → 56.6%: about 25 pairs across two corpora, ~2 per
-  codepoint against a portfolio floor around 6.  And no affordable width
-  rescues it — the census reaches only 77.4% at TWELVE bits, because
-  compare-and-branch constants have a long flat tail.  Dropping to 5 bits
-  halves the block: **reclaim 16 codepoints for ~25 pairs.**
+**Buy: `addi-store-off-chain` B and `load-store-chain` A/B.**  Sixteen
+codepoints each, and both curves are steep where it matters — 72.1% → 97.9%
+and 87.8% → 96.1% for a single bit.  Together with the two above that is 44
+codepoints of the 186 spare.
 
-* **`rsd-alu-pair` `addi/li@7` — the expensive question, but held.**  156
-  entries (61% of all extension spending) buy roughly 850–1000 pairs, ~5.5
-  per codepoint — below what the average frame earns.  But demand exactly
-  fills its 256-block, retreat to @6 reclaims nothing (144 still rounds to
-  256), and only full retreat to @5 frees 128 codepoints, at market-rate
-  return forgone.  The widths were chosen by the biclique search over this
-  population; hold unless 128 codepoints are needed for something measured
-  better.
+**Consider: `load-base-branch-pair` A.**  The largest starved population on the
+board (6160) and the largest gain (74.6% → 98.5%), but two bits cost 42
+codepoints because both slots carry the widening.  Worth it on the numbers;
+hold it until the block-placement question on that frame is settled, since the
+displacement estimate may move the population first.
 
-* **`load-alu-chain` +34 — borderline, held.**  ~190 pairs, ~5.6/cp
-  forgone if dropped (reclaims 32).  At the portfolio margin either way.
+**Refuse: the ALU family.**  `rsd-alu-pair` A at +2 costs 768 codepoints —
+more than the entire spare budget — for 9.7 points.  `alu-alu-chain` at +384
+for 18.4, `arith-jump-pair` at +192 for 12.6.  These are the frames with the
+widest op sets, so doubling a slot doubles the largest blocks in the encoding.
+No affordable width fixes them; their tails are long constants that belong in
+a `li`, not in a paired field.
 
-### Too little — starved, and cheap to fix (measured, not censused)
+**Leave alone: `addi-store-off-chain` A.**  82.1% at six bits and 83.2% at
+eight — the flattest curve measured.  Nothing to buy.
 
-One scratch run with only these widened, against current:
-**musl-rv32 27124 → 27247, sqlite-rv64 40410 → 40759: +472 pairs for +12
-codepoints (~39/cp).**
-
-* **`arith-jump-pair` imm ops 5 → 6: FREE.**  Demand 40 → 64 inside its
-  existing 64-block.  Census 73.7% → 79.7% of 4861.
-* **`mem-base-pair` base offset 5 → 6: +8 codepoints** (block 8 → 16).  Census
-  87.8% → 94.1% of 10326.  The post-split narrowing to 5 was itself set from
-  censored data; the true base population wants the sixth bit.
-* **`post-inc-pair` stride 5 → 6: +4 codepoints** (block 4 → 8).  Census
-  stride fit 73.3% → 85.2% of 1423.  This is also where the `k`-scale
-  disagreement between `rules.py` and `encoding_verify` lives (TODO A1.7) —
-  settle that when taking this.
-* **`arith-mem-pair` `addi` 5 → 6: FREE but nearly worthless** — measured at
-  +19 pairs on top of the +472 (demand 55 → 63 inside its 64-block).  The
-  census's 54.9% → 63.0% was attribution inflation; the frame's real matched
-  population is small.  Take it only because it is free.
-
-The arithmetic writes its own funding note: the +12 codepoints these need
-exceed the 6 spare, and `addi-branch`'s reclaim of 16 covers them with room
-left over — the one egregious over-provision pays for every verified
-under-provision.
-
-* **`li-branch-chain` li 7 → 8 is the best big-ticket buy left**: +32
-  codepoints (block 32 → 64) for census 66.9% → 85.3% of 2293, roughly +420
-  pairs at ~13/cp.  Priced, not recommended — it needs a block nothing
-  currently funds.
-
-### Structurally starved — no affordable width fixes them; do not widen
-
-* **`pre-inc-pair` A stride**: 26.4% at 5 bits and still 56.2% at TWELVE.
-  Pre-increment addends are offsets into running values, not small constants.
-  The frame needs a redesign or acceptance, not bits.
-* **`alu-store-chain` A value**: 42.6% at 5, 68.5% at 12 — stored
-  constants are wide.  Its @6 extension is free, keep it; nothing else helps.
-* **`addi-branch-pair` A**: see above — the tail is the problem.
-* **`arith-mem-pair` B offset**: the rows draw no `immb` field at all, and
-  the census says that constraint, not any width, is the binding one — with a
-  B offset allowed the frame's matched population is ~10x larger (90 → 2828
-  per corpus).  That is a row-layout question (a column would have to come
-  from somewhere), recorded here as the frame's real ceiling.
-
-### Right-sized (the concession list — natural fields, no purchase, good fit)
-
-`load-base-branch-pair` (100.0% at its 5 bits — perfectly cut), `index-mem-chain`
-(97.9%), `deref/base-load-chain` (96.8–100% at 10), `mem-sp-pair` (100% at
-10, and needs all ten: 41% at 5), `setup-jump` (100% at 10),
-`addi-store-chain` A (98.2% at 10), `prologue` (98.5%), `epilogue` (100%),
-`li-czero` (94.9% at 10), `indep` (99.8% at its declared 6),
-`alu-alu-chain` (@6 free), `bit-test-branch-chain` (@6 earning ~12/cp; the 7th bit
-would cost +32 for ~5.5/cp — skip).
-
-`load-sp-branch-pair` is excluded from verdicts: its sp/base split (TODO A9) will
-change both its field and its population.
-
-## Summary
-
-The immediate budget is broadly honest after this year's enforcement work:
-most fields are natural sizes with real occupancy, and the largest extension
-purchases either fill rounding slack (free) or were optimized against their
-population (`rsd-alu`).  The one egregious over-provision is
-`addi-branch-pair`'s sixth bit (~2 pairs/codepoint against a hopeless tail);
-the verified under-provisions total +12 codepoints for +491 pairs (measured:
-27124 → 27252 and 40410 → 40773) and are more than funded by reclaiming it.
+**Not starved, despite appearances:** every 10-bit field is at 100%, including
+`mem-sp-pair` (7629 per slot, the largest immediate population in the
+encoding) at a total cost of two codepoints.  `pre-inc-pair` A is at 100% too;
+its former 3% reading was the unscaled-census bug, not a starved frame.
