@@ -234,6 +234,16 @@ not the frame.  Do not cut it on pairing-rate evidence.
   the whole corpus, split RV32 / RV64.  Regenerate with `util/rule_hits.py`;
   the per-corpus stats blocks it reads are kept under `rule-hits/`, so
   `--from-raw results/corpus/rule-hits` re-tabulates without re-scheduling.
+  **Its hit counts are first-accepting-rule-wins**, so a frame late in `RULES`
+  order scores only what no earlier frame wanted — read it with the next file.
+- `rule-overlap.txt` — the same corpus measured for frame overlap
+  (`util/rule_overlap.py`): per frame, `reach` (pairs it could encode, whoever
+  won them) and `excl` (pairs only it can encode).  **`excl/cp`, not
+  `hits/cp`, is the number to spend codepoints on.**  28.1% of all pairs are
+  encodable by more than one frame.  `excl == 0` is a proof the frame is free
+  to delete, since rule identity never changes the schedule; `excl > 0` is an
+  estimate of the deletion cost, not a bound (greedy scheduling is not
+  monotone) — the true cost needs a leave-one-out re-run per frame.
 - `scores.txt`, `baseline.txt`, `scheduler-runs.txt` — raw outputs behind the
   tables.  HISTORICAL: all three predate the jalr decode fix and the frame
   additions since; `scores.txt` is superseded by the table at the top of this

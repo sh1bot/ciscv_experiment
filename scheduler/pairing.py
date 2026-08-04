@@ -81,6 +81,43 @@ def find_b_partners(a: Instruction, candidates: list[Instruction]) -> list[tuple
     return results
 
 
+def all_acceptors(a: Instruction, b: Instruction) -> list:
+    """Every rule that accepts (a, b), not just the first.
+
+    find_b_partners stops at the first accepting rule in RULES order, so the
+    rule a pair is LABELLED with is an artefact of that order.  Which rule wins
+    is pure labelling — no caller uses the rule identity to make a scheduling
+    decision (reorder.py keeps the returned rule only to test membership), so
+    the schedule and the pair count depend on whether ANY rule accepts, never
+    on which.  This returns the whole accepting set, which is what frame
+    overlap is measured from (util/rule_overlap.py).
+
+    Kept beside find_b_partners deliberately: the two gating sequences must
+    stay identical, or the overlap measurement stops describing the pairer.
+    """
+    out = []
+    for rule in _a_eligible_rules(a):
+        if rule.b_mnemonic_set is not None and b.mnemonic not in rule.b_mnemonic_set:
+            continue
+        if not all(getattr(b, p) for p in rule.b_prerequisites):
+            continue
+        try:
+            rule.check(a, b)
+        except NotPair:
+            continue
+        out.append(rule)
+    return out
+
+
+# Opt-in overlap instrumentation.  None (the default) leaves greedy_pair's hot
+# path untouched; set it to a callable taking (winner_name, [acceptor_names])
+# to record what else could have encoded each pair as it is taken.  It must be
+# installed in the process that does the pairing -- __main__ schedules in a
+# worker pool, and a module global set in the parent is not inherited under a
+# spawn-based pool.
+ACCEPTOR_SINK = None
+
+
 def can_pair(a: Instruction, b: Instruction) -> Optional[str]:
     """Return None if a and b may share a 32-bit packet, or a reason string if not.
 
@@ -141,6 +178,9 @@ def greedy_pair(instructions: list[Instruction]) -> list:
                 matches = find_b_partners(free, [curr])
                 if matches:
                     _b, rule = matches[0]
+                    if ACCEPTOR_SINK is not None:
+                        ACCEPTOR_SINK(rule.name,
+                                      [r.name for r in all_acceptors(free, curr)])
                     result.append(('pair', free, curr, rule.name))
                     free = None
                     i += 1
@@ -225,6 +265,9 @@ def _backward_pair(packets: list) -> list:
 
             if not conflict:
                 rule_name = find_b_partners(cand, [branch])[0][1].name
+                if ACCEPTOR_SINK is not None:
+                    ACCEPTOR_SINK(rule_name,
+                                  [r.name for r in all_acceptors(cand, branch)])
                 result[k] = ('pair', cand, branch, rule_name)
                 consumed[j] = True
                 break
