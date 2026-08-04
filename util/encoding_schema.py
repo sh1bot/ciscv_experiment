@@ -127,6 +127,12 @@ def validate(spec):
     # they get renamed and grepped in bulk; a name that is a substring of
     # another turns any careless sweep into silent corruption.  Keeping the set
     # containment-free means even a naive search cannot go wrong.
+    for node in spec.get("doc") or []:
+        if isinstance(node, dict) and "md" in node:
+            errs.append("doc carries an `md` prose block: frame prose belongs "
+                        "in that frame's own comments or `notes`, and a "
+                        "standing rule belongs in the code that enforces it")
+
     all_names = []
     for node in spec.get("doc") or []:
         frame = node.get("frame") if isinstance(node, dict) else None

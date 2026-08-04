@@ -119,10 +119,7 @@ def render(spec) -> str:
     header = header_lines(widths)
     out: list[str] = [BANNER, ""]
     for node in spec["doc"]:
-        if "md" in node:
-            out.append(node["md"].rstrip("\n"))
-            out.append("")
-        elif "reserved" in node:
+        if "reserved" in node:
             out.append("# Reserved register encodings")
             out.append("")
             for e in node["reserved"]:
@@ -470,9 +467,9 @@ def imm_field_bits(frame, grid, slot):
     slot 'a'→imma, 'b'→immb; a shared `imm` counts for either; the widest row
     governs, since the encoder may pick whichever row holds an op.
 
-    THE RULE (encoding.yaml Overview): a field is five bits per register
-    column it consumes, and grows incrementally past that by taking multiple
-    opcode-list entries — an op declaring `imm: {bits: N}` occupies
+    THE IMMEDIATE RULE, stated here because this is what enforces it: a field
+    is five bits per register column it consumes, and grows incrementally past
+    that by taking multiple opcode-list entries — an op declaring `imm: {bits: N}` occupies
     2^(N - field) entries, which `_slot_weight` charges. There is no other
     widening mechanism. A row that parks an immediate in `g`/`h`, or names a
     field the model does not know, is an error, not a wider field."""

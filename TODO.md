@@ -22,6 +22,13 @@ The planning documents name `encoding.yaml` as the source of truth (see
    default, but RVE (16 registers) has no x31 and needs another — x7 is the
    candidate.  Settle before any ABI claim; `yaml_migration.md`'s
    "compiler's own register, required dead" wording is now superseded.
+10. **Decoder alignment is an OBJECTIVE, not a coincidence.**
+   `encoding_assign.py` orders frames by A-slot RISC-V format so leading
+   identifier bits track real `opcode[6:2]`.  Hold it while it can be held; if
+   a future assignment cannot satisfy it AND fit the namespace, fitting wins
+   and the alignment degrades to a nicety for that frame — say so explicitly
+   at the point where it is given up, rather than quietly reordering.
+
 5. **Wide `li`** — CLOSED: an ACCEPTED LOSS.  Over 61033 `li` in five
    corpora: 68.8% fit 5 bits, 74.1% fit 6, 90.1% fit 8, 97.4% fit 10, against
    widths of 6 (`indep`), 8 (`li-branch-chain`), 10 (`li-czero`,

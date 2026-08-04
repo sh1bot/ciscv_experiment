@@ -1,86 +1,10 @@
 <!-- Generated from encoding.yaml by util/encoding_render.py — do not edit by hand. -->
 
-# RISC-V template
-
- 31         25 24     20 19     15 14 12 11      7 6           0
-┌─────────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│   funct7    │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │   R-type
-└─────────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│       imm[11:0]       │   rs1   │ fn3 │   rd    │   opcode    │   I-type
-│  imm[11:5]  │   rs2   │   rs1   │ fn3 │imm[4:0] │   opcode    │   S-type
-│imm[12|10:5] │   rs2   │   rs1   │ fn3 │[4:1|11] │   opcode    │   B-type
-│              imm[31:12]               │   rd    │   opcode    │   U-type
-│         imm[20|10:1|11|19:12]         │   rd    │   opcode    │   J-type
-
-# Overview
-
-## Constraints and general patterns
-
- * The rd field must not be x0 or x2 when it describes a register
-   (sometimes it is an immediate, and then the bit pattern is allowed).
-   Encoding these registers here is reserved for different
-   instructions, as is demonstrated in the prologue/epilogue pairs.
- * the value of `k` in instruction templates is the size of the
-   corresponding load or store data width.  The value of `X` in `shXadd`
-   mnemonics is the corresponding bit shift.
- * AN IMMEDIATE FIELD IS FIVE BITS PER REGISTER FIELD IT CONSUMES:
-   five bits from one register column, ten from two.  Beyond that it
-   grows INCREMENTALLY, one bit at a time, by taking multiple entries in
-   the opcode list: an op declaring `imm: {bits: N}` occupies
-   2^(N - field) entries, so field+1 bits costs 2 entries, field+2 costs
-   4, and so on (see the width-annotated entries in `opsets`).  There is
-   no other widening mechanism; `g` and `h` are opcode bits like any
-   other.
-
-# Enumeration policy (intent only)
-
-How codepoints are ASSIGNED — which bit patterns select which frames and
-ops — is a matter of decoder convenience, and we hold preferences for it.
-These are strictly enumeration policy: they change nothing about demand,
-budgets, or immediate widths, and no tool may read them as capacity.
-
- * Specific selector bits, `g` and `h` among them, have preferential
-   uses.  In particular, when a frame's op-select bits enumerate the
-   duplicated immediate-form entries of a width-annotated op, we prefer
-   to place those entries so the extension bits of the immediate land in
-   `g` (A-slot ops) and `h` (B-slot ops).  That is a naming of which
-   opcode bits carry the duplication — the codepoints are already paid —
-   so a decoder can route them straight into the immediate mux.
- * Frame identifiers are ordered so their leading bits track the real
-   RISC-V `opcode[6:2]` of the A slot (see `util/encoding_assign.py`),
-   letting an A-slot decoder branch on bits it already examines.
- * Block sizes round up to powers of two and blocks are allocated in
-   descending size, keeping every frame's identifier a contiguous prefix.
-
-Further ordering and rounding policies belong here as they are decided.
-
-**Decoder alignment is an OBJECTIVE, not a coincidence** (A1.10):
-`encoding_assign.py` orders frames by A-slot RISC-V format so leading
-identifier bits track real `opcode[6:2]`.  Hold it while it can be held;
-if a future assignment cannot satisfy it AND fit the namespace, fitting
-wins and the alignment degrades to a nicety for that frame — say so
-explicitly at the point where it is given up, rather than quietly
-reordering.
-
 # Reserved register encodings
 
  * **rd field — x0/x2** [active]: When rd names a register it may not be x0 or x2 (sp); those two bit patterns are sentinels selecting the prologue / epilogue / jump marker formats (drawn "0 0 0 1 0"). DECIDED (A1.11): this is enforced, not merely declared -- rules.py rejects rd in {x0, x2} wherever a row draws a register there. The payoff is hosting: a sentinel-selected frame can ride inside another rd-bearing frame's opcode word, in the slice that frame's rd cannot reach, at zero opcode cost. A frame may host only if its rd column holds a REGISTER in every row -- a frame whose rd carries immb[4:0] has no unreachable slice to lend.
 
 No general register block is reserved at present. Earlier drafts held out a contiguous block — the high registers x16..x31, or the low x0..x3 — to give dual-rsd and similar frames a fallback under encoding-space pressure, but the current layout fits without it. Such a block remains an option to reserve if a future frame ever needs one.
-
-# Chain rules
-
- * One defined output register, plus the chain temporary becomes
-   undefined.  The temporary is a FIXED architectural register, not
-   "any dead register" (A1.4): the compiler must know which register a
-   packet may corrupt, and an exception taken mid-packet has to put the
-   intermediate somewhere it can be saved and restored.  Which register
-   is not yet settled -- x31 is the default, but RVE (the 16-register
-   variant) has no x31 and would need another, x7 being the candidate.
-   An implementation is free not to corrupt anything.
- * First instruction produces result for use by second instruction
- * Generally second operation produces result, but second op may have no output
-   (eg., store, branch) meaning result comes from first, or there's no result at all.
 
 ## alu-alu-chain
 
@@ -202,8 +126,6 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│immb[9:5]│g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
-# Chain rules, but first op is result
-
 ## load-base-branch-pair
 
 *Load a value and branch on whether it is zero; the value survives.*
@@ -266,12 +188,6 @@ No general register block is reserved at present. Earlier drafts held out a cont
   unresolved labels in the corpus, so pairwise fit is unmeasured;
   the label-distance study puts 10-bit fit near 100%.
 
-# Scaled-index addressing
-
-RISC-V has no register+register addressing mode, so `array[i]` costs two
-instructions: form the address, then access it. The address is a pure
-temporary — it exists only because the ISA has that hole.
-
 ## li-czero-chain
 
 *Materialise a constant and conditionally zero it -- one arm of a select.*
@@ -299,10 +215,6 @@ temporary — it exists only because the ISA has that hole.
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs2a   │g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│  rs2a   │g│  rs2b   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
-
-# pre/post increment addressing
-
-Also chain rules with surviving first result, but also sometimes a second result.
 
 ## pre-inc-pair
 
@@ -364,8 +276,6 @@ Also chain rules with surviving first result, but also sometimes a second result
   They decouple under unrolling -- stride = offset + width holds at
   only 3-19% -- so neither a zero offset nor a delta encoding works
   here.
-
-# Other stuff
 
 # mem-sp-pair
 
@@ -601,11 +511,6 @@ Also chain rules with surviving first result, but also sometimes a second result
   not needed, and scheduler/rules.py enforcing x0..x15 was costing 377
   pairs across the corpus.
 
-# Function head and tail special cases
-
-Entry and exit into blocks makes alignment hard, so let's try to special-case as many common
-patterns as possible to tamp down the cost.
-
 ## prologue-pair
 
 *Function prologue: reserve the stack frame and save the return address.*
@@ -629,8 +534,6 @@ patterns as possible to tamp down the cost.
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 1 0│ opcode5 │1 0│
-
-# Other desperate measures
 
 ## arith-jump-pair
 
