@@ -1,7 +1,7 @@
 # sqlite-rv64 (RV64)
 # --- file totals ---
-#   instructions: 189602  packets: 148013  pairs: 41589  solos: 106424
-#   pair rate:    28.1%  (83178/189602 instructions paired)
+#   instructions: 189602  packets: 147938  pairs: 41664  solos: 106274
+#   pair rate:    28.2%  (83328/189602 instructions paired)
 #   RVC-eligible: 59.1%  (112141/189602 instructions)
 #   nops: 75 (excluded from the counts)
 #   rule hits:
@@ -18,7 +18,7 @@
 #     mem-base-pair: 1743
 #     load-store-chain: 670
 #     addi-store-off-chain: 200
-#     load-call-chain: 26
+#     load-call-chain: 102
 #     macro-op-pair: 0
 #     post-inc-pair: 697
 #     dual-setup-pair: 5722
@@ -32,5 +32,5 @@
 #     index-mem-chain: 432
 #     pre-inc-pair: 236
 #     arith-jump-pair: 4056
-#     setup-jump-pair: 3996
+#     setup-jump-pair: 3995
 #     arg-call-pair: 0

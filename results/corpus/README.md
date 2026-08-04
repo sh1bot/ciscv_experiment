@@ -239,7 +239,7 @@ not the frame.  Do not cut it on pairing-rate evidence.
 - `rule-overlap.txt` — the same corpus measured for frame overlap
   (`util/rule_overlap.py`): per frame, `reach` (pairs it could encode, whoever
   won them) and `excl` (pairs only it can encode).  **`excl/cp`, not
-  `hits/cp`, is the number to spend codepoints on.**  28.1% of all pairs are
+  `hits/cp`, is the number to spend codepoints on.**  27.8% of all pairs are
   encodable by more than one frame.  `excl == 0` is a proof the frame is free
   to delete, since rule identity never changes the schedule; `excl > 0` is an
   estimate of the deletion cost, not a bound (greedy scheduling is not

@@ -1,7 +1,7 @@
 # sqlite-gcc-rv64 (RV64)
 # --- file totals ---
-#   instructions: 167354  packets: 134230  pairs: 33124  solos: 101106
-#   pair rate:    24.7%  (66248/167354 instructions paired)
+#   instructions: 167354  packets: 134050  pairs: 33304  solos: 100746
+#   pair rate:    24.8%  (66608/167354 instructions paired)
 #   RVC-eligible: 61.5%  (103006/167354 instructions)
 #   nops: 156 (excluded from the counts)
 #   rule hits:
@@ -18,7 +18,7 @@
 #     mem-base-pair: 1223
 #     load-store-chain: 575
 #     addi-store-off-chain: 3
-#     load-call-chain: 16
+#     load-call-chain: 196
 #     macro-op-pair: 9
 #     post-inc-pair: 1068
 #     dual-setup-pair: 5725

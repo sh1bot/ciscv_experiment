@@ -1,7 +1,7 @@
 # musl-gcc-rv64 (RV64)
 # --- file totals ---
-#   instructions: 103412  packets: 83011  pairs: 20401  solos: 62610
-#   pair rate:    24.6%  (40802/103412 instructions paired)
+#   instructions: 103412  packets: 82975  pairs: 20437  solos: 62538
+#   pair rate:    24.6%  (40874/103412 instructions paired)
 #   RVC-eligible: 55.1%  (57009/103412 instructions)
 #   nops: 30 (excluded from the counts)
 #   rule hits:
@@ -18,7 +18,7 @@
 #     mem-base-pair: 1008
 #     load-store-chain: 174
 #     addi-store-off-chain: 2
-#     load-call-chain: 2
+#     load-call-chain: 38
 #     macro-op-pair: 11
 #     post-inc-pair: 1183
 #     dual-setup-pair: 3912
