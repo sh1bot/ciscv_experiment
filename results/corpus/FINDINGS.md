@@ -1576,14 +1576,23 @@ space reserved for an out-of-band tool, or space that tool has written back).
 | godot          |    1 |    1 | 0 | — |
 | testcase0      |    1 |    0 | 1 | it is a branch target |
 
-Worth 5710 packets across the suite; the total to parity falls 108780 →
-101491, and cpp-rv32's own gap falls 31973 → 29452, about 8% of it.
+5710 packets across the suite, 5008 of them cpp's.
 
-Three things make this a real differential rather than an accounting trick:
+**They are ZERO-RATED ON BOTH SIDES, not banked as a win.** An earlier pass
+credited the discard to us and left RVC paying for the nops, which took the
+total to parity from 108780 to 101491. That was the wrong call: neither scheme
+should be scored on bytes that exist only to move the next thing onto a
+boundary, and whether a packet ISA would inherit the PLT's 16-byte stride is a
+psABI question rather than one arithmetic settles. RVC is now not charged for
+them either, the books balance exactly (it loses 4 bytes per 32-bit pad and
+the same instruction count our side already excludes), and the total returns
+to **108780** with `pad` as a descriptive column.
 
-* **RVC pays for them and we do not.** Every one is the 32-bit
-  `addi zero,zero,0` in the `-noalias` dump — not a single `c.nop`. So RVC
-  spends four bytes on each and a packet stream spends nothing.
+Two things are still worth knowing about them:
+
+* **RVC gets no compression from them.** Every one is the 32-bit
+  `addi zero,zero,0` in the `-noalias` dump — not a single `c.nop` — so
+  zero-rating removes four bytes from each side, not two from one.
 * **They are provably dead.** The stated policy discards on absence of
   purpose, but on this corpus set every discarded nop ALSO follows a `jalr` or
   a `ret` with no label on it, so it is unreachable code by any reading. The
@@ -1594,13 +1603,10 @@ Three things make this a real differential rather than an accounting trick:
   target and survives, which is the check that the policy is doing work rather
   than matching a mnemonic.
 
-Caveat, and the reason it has its own column rather than being folded into
-pairs: 2518 of cpp-rv32's 2521 are the fourth slot of a PLT stub, where the
-16-byte stride is a psABI contract — the dynamic linker indexes
-`(plt_entry - plt0) / 16`. A packet ISA would restate that stride rather than
-inherit it, so the saving is real but it rests on a revised psABI, not on
-alignment alone. Subtract the column to get the alignment-only claim: 3 nops
-on cpp, 1 on godot, 1 kept on testcase0.
+The PLT caveat is what settled the accounting: 2518 of cpp-rv32's 2521 are the
+fourth slot of a PLT stub, where the 16-byte stride is a psABI contract — the
+dynamic linker indexes `(plt_entry - plt0) / 16`. Claiming that space needs a
+revised psABI, not an alignment argument, so neither side gets to bill for it.
 
 ### While counting them: what the PLT actually costs
 
