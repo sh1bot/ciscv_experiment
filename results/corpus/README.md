@@ -41,7 +41,7 @@ sqlite-gcc-rv64   167354   33304   156   134050     80.1%     71.2%   112.5%    
 cpp-rv32          418345   91998  2521   326347     78.0%     71.0%   109.9%    75.7%     +29455
 cpp-rv64          409200   86671  2487   322529     78.8%     71.2%   110.7%    73.5%     +31267
 ------------------------------------------------------------------------------------------------
-TOTAL to parity                                                                    +103065
+TOTAL to parity                                                                    +145988
 ```
 
 ## Where each corpus stands
@@ -91,8 +91,9 @@ sum of the rows it showed.  The test is a fraction now (`corpus_scores.py`,
 `NO_C_COMPRESSED_FRACTION`), the two populations being 0–1.03% compressed
 against 36.7–57.7%, and the TOTAL is again the sum of the rows shown.
 
-**cpp-rv32 / cpp-rv64 — +29455 / +31267.**  Still the wall, and still 59% of
-everything owed.  `arg-call-pair` fires only 471 times here despite 2563 far
+**cpp-rv32 / cpp-rv64 — +29455 / +31267.**  Still the wall, and 42% of
+everything owed (it read 59% while the total was being understated by
+sqlitem-noc-rv64 — the share fell, the gap did not).  `arg-call-pair` fires only 471 times here despite 2563 far
 transfers, because 1407 of them stay glued to their own `auipc` — the
 scheduler cannot find anything independent to slide between the two.  That is
 precisely the limitation a table jump removes, and cpp is where it pays: a

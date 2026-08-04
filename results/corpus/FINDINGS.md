@@ -1412,7 +1412,13 @@ pairs across the suite, which `arg-call-pair` then earns back honestly. Suite
 total moved +111593 → +108780.
 
 `load-call-chain`'s `accepts_pcrel_lo` declaration then moved it +108780 →
-+103065. That step is a convention change, not a scheduling improvement: the
++103065 — and then the basis changed. Every total quoted above is understated:
+`corpus_scores.py` folded `sqlitem-noc-rv64`'s nonsense −42923 into the printed
+TOTAL while the table omitted the row. On the corrected basis the same step
+reads **+151621 → +145988**, which is the number the current table shows. The
+suite did not jump by 43000 pairs; only the arithmetic did.
+
+That step is a convention change, not a scheduling improvement: the
 frame now pairs auipc-fed loads whose offset is a `%pcrel_lo` relocation, on
 the argument that the corpus value belongs to the layout the binary was linked
 for and the frame's field spans the whole pcrel-lo range regardless. Nearly all
