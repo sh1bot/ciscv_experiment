@@ -91,6 +91,7 @@ remaining gap.
 |--------|---------------|---------------------------|--------------|
 | godot         | 6818 | **3025** (44%) | 1894 words |
 | cpp-rv32      | 2563 | 531 (21%)      | **20956 words** |
+| cpp-rv64      | 2220 | 428 (19%)      | 19574 words |
 | testcase0     |  743 | 106 (14%)      | 229 words |
 | musl-gcc-rv32 |    0 | 0              | 2389 words |
 | musl-rv32     |    0 | 0              | 1824 words |
@@ -101,6 +102,10 @@ can only fire where the compiler already emitted a two-instruction call, and
 even there only when the scheduler can prise the `auipc` away from the `jalr`.
 A table jump has no `auipc` to prise, so every call becomes eligible — near
 ones included — and the A slot is adjacent by construction.
+
+Note the frame is not the only thing pairing calls: of cpp-rv32's 35312 calls,
+1625 are paired, 531 of them by `arg-call-pair` and the rest by
+`load-call-chain` and the jump frames, which take the register-indirect forms.
 
 ## A correction inside these numbers
 
