@@ -1,8 +1,9 @@
 # sqlite-rv32 (RV32)
 # --- file totals ---
-#   instructions: 192768  packets: 148183  pairs: 44585  solos: 103598
-#   pair rate:    30.1%  (89170/192768 instructions paired)
-#   RVC-eligible: 58.8%  (113274/192768 instructions)
+#   instructions: 192688  packets: 148103  pairs: 44585  solos: 103518
+#   pair rate:    30.1%  (89170/192688 instructions paired)
+#   RVC-eligible: 58.7%  (113194/192688 instructions)
+#   nops: 80 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 3397
 #     alu-alu-chain: 1694
@@ -20,7 +21,7 @@
 #     load-call-chain: 22
 #     macro-op-pair: 77
 #     post-inc-pair: 685
-#     indep-pair: 5938
+#     dual-setup-pair: 5938
 #     li-branch-chain: 1192
 #     inc-branch-pair: 257
 #     bit-test-branch-chain: 891

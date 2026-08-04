@@ -1,8 +1,9 @@
 # cpp-rv32 (RV32)
 # --- file totals ---
-#   instructions: 420866  packets: 331386  pairs: 89480  solos: 241906
-#   pair rate:    27.0%  (178960/420866 instructions paired)
-#   RVC-eligible: 60.1%  (253097/420866 instructions)
+#   instructions: 418345  packets: 328865  pairs: 89480  solos: 239385
+#   pair rate:    27.2%  (178960/418345 instructions paired)
+#   RVC-eligible: 59.9%  (250576/418345 instructions)
+#   nops: 2521 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 3524
 #     alu-alu-chain: 1996
@@ -20,7 +21,7 @@
 #     load-call-chain: 46
 #     macro-op-pair: 59
 #     post-inc-pair: 2677
-#     indep-pair: 13414
+#     dual-setup-pair: 13414
 #     li-branch-chain: 3112
 #     inc-branch-pair: 508
 #     bit-test-branch-chain: 4715

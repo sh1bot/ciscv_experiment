@@ -1,8 +1,9 @@
 # sqlitem-rv64 (RV64)
 # --- file totals ---
-#   instructions: 201905  packets: 157907  pairs: 43998  solos: 113909
-#   pair rate:    27.9%  (87996/201905 instructions paired)
-#   RVC-eligible: 59.6%  (120362/201905 instructions)
+#   instructions: 201823  packets: 157825  pairs: 43998  solos: 113827
+#   pair rate:    27.9%  (87996/201823 instructions paired)
+#   RVC-eligible: 59.6%  (120280/201823 instructions)
+#   nops: 82 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 3554
 #     alu-alu-chain: 1231
@@ -20,7 +21,7 @@
 #     load-call-chain: 9
 #     macro-op-pair: 4
 #     post-inc-pair: 763
-#     indep-pair: 5840
+#     dual-setup-pair: 5840
 #     li-branch-chain: 1371
 #     inc-branch-pair: 296
 #     bit-test-branch-chain: 886

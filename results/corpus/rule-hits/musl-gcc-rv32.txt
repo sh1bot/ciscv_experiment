@@ -1,8 +1,9 @@
 # musl-gcc-rv32 (RV32)
 # --- file totals ---
-#   instructions: 119956  packets: 94155  pairs: 25801  solos: 68354
-#   pair rate:    27.4%  (51602/119956 instructions paired)
-#   RVC-eligible: 56.8%  (68193/119956 instructions)
+#   instructions: 119919  packets: 94118  pairs: 25801  solos: 68317
+#   pair rate:    27.4%  (51602/119919 instructions paired)
+#   RVC-eligible: 56.8%  (68156/119919 instructions)
+#   nops: 37 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 2205
 #     alu-alu-chain: 1187
@@ -20,7 +21,7 @@
 #     load-call-chain: 2
 #     macro-op-pair: 27
 #     post-inc-pair: 1021
-#     indep-pair: 4135
+#     dual-setup-pair: 4135
 #     li-branch-chain: 837
 #     inc-branch-pair: 110
 #     bit-test-branch-chain: 200

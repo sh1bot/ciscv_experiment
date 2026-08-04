@@ -1,8 +1,9 @@
 # musl-os-rv64 (RV64)
 # --- file totals ---
-#   instructions: 93289  packets: 73368  pairs: 19921  solos: 53447
-#   pair rate:    27.2%  (39842/93289 instructions paired)
-#   RVC-eligible: 55.8%  (52092/93289 instructions)
+#   instructions: 93259  packets: 73338  pairs: 19921  solos: 53417
+#   pair rate:    27.2%  (39842/93259 instructions paired)
+#   RVC-eligible: 55.8%  (52062/93259 instructions)
+#   nops: 30 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 2083
 #     alu-alu-chain: 748
@@ -20,7 +21,7 @@
 #     load-call-chain: 0
 #     macro-op-pair: 0
 #     post-inc-pair: 856
-#     indep-pair: 4082
+#     dual-setup-pair: 4082
 #     li-branch-chain: 686
 #     inc-branch-pair: 155
 #     bit-test-branch-chain: 207
