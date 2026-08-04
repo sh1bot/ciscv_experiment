@@ -75,3 +75,43 @@ class TestProcessChunkProgress:
         chunk = "\t.type f, @function\nf:\n\taddi a0, a0, 1\n\tret\n"
         out = rv_main._process_chunk(chunk, False, rv_main.ScheduleMode.LIST)
         assert out and out[0][0] == "f"
+
+
+class TestSplitSource:
+    """The chunker feeds the process pool; one chunk means one worker."""
+
+    OBJDUMP = (
+        "# corpus:     file format elf32-littleriscv\n\n"
+        "\t.globl f\nf:\n\taddi\tsp,sp,-0x10\n\tjal\tg\n"
+        "\n.Lbranch_00010960:\n\tnop\n"
+        "\n\t.globl .LBB0_9\n.LBB0_9:\n\tnop\n"          # local: NOT a cut
+        "\n\t.globl g\ng:\n\tmv\ta0,a1\n\tret\n"
+    )
+
+    def test_objdump_shape_splits_on_globl_labels(self):
+        chunks = rv_main._split_source(self.OBJDUMP)
+        assert len(chunks) > 1, "objdump corpora must not collapse to one chunk"
+        assert "".join(chunks) == self.OBJDUMP, "chunking must be lossless"
+
+    def test_local_labels_are_not_function_boundaries(self):
+        # objdump keeps .L symbols in the table; cutting there would split a
+        # function in half and change the liveness result.
+        chunks = rv_main._split_source(self.OBJDUMP)
+        assert not any(c.lstrip().startswith(".globl .LBB0_9") for c in chunks)
+
+    def test_type_function_still_wins_when_present(self):
+        src = ("\t.globl a\n\t.type\ta, @function\na:\n\tnop\n"
+               "\t.globl b\n\t.type\tb, @function\nb:\n\tnop\n")
+        chunks = rv_main._split_source(src)
+        assert len(chunks) == 2
+        assert "".join(chunks) == src
+
+    def test_coalesce_preserves_order_and_content(self):
+        parts = [f"chunk{i}\n" for i in range(500)]
+        merged = rv_main._coalesce(parts)
+        assert "".join(merged) == "".join(parts)
+        assert len(merged) < len(parts)
+
+    def test_coalesce_leaves_small_lists_alone(self):
+        parts = ["a\n", "b\n"]
+        assert rv_main._coalesce(parts) == parts

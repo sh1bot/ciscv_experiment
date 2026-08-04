@@ -7,6 +7,7 @@ Usage: python -m rv_scheduler [options] input.s
 
 from __future__ import annotations
 import argparse
+import os
 import re
 import sys
 import time
@@ -32,7 +33,15 @@ def _split_source(source: str) -> list[str]:
     # Primary split points: .type @function lines.
     type_indices = [i for i, ln in enumerate(lines) if _type_fn.match(ln)]
     if not type_indices:
-        return [source]
+        # No .type markers: this is an objdump-derived corpus. `objdump_to_asm`
+        # writes a symbol start as `.globl NAME` + `NAME:` and never emits
+        # .type, so EVERY corpus in tests/ fell through to a single chunk here
+        # -- one future, one worker, and a progress bar with one unit in it.
+        # Cut on the shape it does emit, ignoring `.L` names: objdump keeps
+        # local labels in the symbol table, and cpp-rv32 has 52315 `.globl`
+        # lines against 5685 real function starts, so splitting on all of them
+        # would cut functions in half and change the liveness result.
+        return _coalesce(_split_on_globl_labels(lines)) or [source]
 
     # For each .type line, search backward to absorb any preceding .globl/.weak
     # lines (skipping over blank/comment-only lines) into the same chunk.
@@ -60,6 +69,58 @@ def _split_source(source: str) -> list[str]:
         prev = cut
     chunks.append("".join(lines[prev:]))
     return chunks
+
+
+
+def _split_on_globl_labels(lines: list[str]) -> list[str]:
+    """Chunk at `.globl NAME` immediately followed by `NAME:`, skipping `.L`."""
+    _decl = re.compile(r'^\s*\.(?:globl|global|weak)\s+(\S+)\s*$')
+    cuts = []
+    for i, ln in enumerate(lines):
+        m = _decl.match(ln)
+        if not m or m.group(1).startswith(".L"):
+            continue
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j < len(lines) and lines[j].strip() == m.group(1) + ":":
+            cuts.append(i)
+    if not cuts:
+        return []
+    chunks, prev = [], 0
+    for cut in cuts:
+        if cut > prev:
+            chunks.append("".join(lines[prev:cut]))
+        prev = cut
+    chunks.append("".join(lines[prev:]))
+    return chunks
+
+
+def _coalesce(chunks: list[str], per_cpu: int = 8) -> list[str]:
+    """Merge adjacent chunks down to a few per CPU.
+
+    One chunk per function is the right CUT but the wrong GRAIN: cpp-rv32 has
+    5685 of them, and each is pickled to a worker and back. Merging in order
+    keeps the scheduling identical (a chunk boundary is always a function
+    boundary either way) while bounding that overhead. Order is preserved, so
+    the caller's reassembly by index is unaffected.
+    """
+    if not chunks:
+        return chunks
+    target = max(1, (os.cpu_count() or 4) * per_cpu)
+    if len(chunks) <= target:
+        return chunks
+    budget = sum(len(c) for c in chunks) / target
+    out, cur, size = [], [], 0
+    for c in chunks:
+        cur.append(c)
+        size += len(c)
+        if size >= budget and len(out) < target - 1:
+            out.append("".join(cur))
+            cur, size = [], 0
+    if cur:
+        out.append("".join(cur))
+    return out
 
 
 def _fmt_duration(seconds: float) -> str:

@@ -119,8 +119,12 @@ def annotate_output(fn_packets: list[tuple], annotate_liveness: bool = False) ->
                 if insn.imm_unresolved:
                     reasons["unresolved immediate"].add("decoder")
                 if reasons:
-                    reasons_str=", ".join(
-                        (f"{r}[{'/'.join(s)}]" for r, s in reasons.items())
+                    # sorted, not set order: these are sets, so an unsorted
+                    # join makes the annotated output differ run to run and
+                    # between chunk layouts, which hides real diffs in noise
+                    reasons_str = ", ".join(
+                        f"{r}[{'/'.join(sorted(s))}]"
+                        for r, s in sorted(reasons.items())
                     )
                     comment = f"# {prefix}{{solo: {reasons_str}}}"
                 else:
