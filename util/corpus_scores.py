@@ -24,22 +24,31 @@ TESTS = os.path.join(ROOT, "tests")
 
 
 def real_rvc(name):
-    """(instructions, compressed) from the -noalias disassembly."""
+    """(instructions, compressed, compressed_nops) from the -noalias dump.
+
+    The nop count is split by width because padding is zero-rated on BOTH
+    sides: RVC does not get charged for a nop we are not charged for either.
+    A `c.nop` would cost RVC two bytes and a 32-bit one four, so the widths
+    cannot be lumped together -- though measured, every padding nop in every
+    corpus is the 32-bit form and `c_nops` is zero throughout."""
     path = os.path.join(TESTS, f"{name}-noalias.s")
     if not os.path.exists(path):
         return None
-    n = c = 0
+    n = c = c_nops = 0
     with open(path) as fh:
         for line in fh:
             if not line.startswith("\t"):
                 continue
-            mnem = line[1:].split(None, 1)[0] if line[1:].strip() else ""
+            parts = line[1:].split(None, 1)
+            mnem = parts[0] if line[1:].strip() else ""
             if not mnem or not mnem[0].islower():
                 continue
             n += 1
             if mnem.startswith("c."):
                 c += 1
-    return n, c
+                if mnem == "c.nop":
+                    c_nops += 1
+    return n, c, c_nops
 
 
 def schedule(name):
@@ -72,7 +81,7 @@ def main():
             print(f"{name:16} (missing scheduler result or -noalias variant)")
             continue
         N, packets, pairs, pad = s
-        n_dis, comp = r
+        n_dis, comp, c_nops = r
         if comp == 0:
             # A no-C build has no real RVC to score against; those corpora
             # exist for the cross-build parity table (util/cross_parity.py).
@@ -82,27 +91,39 @@ def main():
         if n_dis != N + pad:
             print(f"{name:16} ! -noalias has {n_dis} instructions, "
                   f"scheduled file has {N}+{pad} discarded — not the same build")
+        # Padding is ZERO-RATED ON BOTH SIDES. We discard the nops, so they
+        # cost us nothing; RVC is not charged for them either, rather than us
+        # banking the difference as a win. Neither scheme should be scored on
+        # bytes that exist only to move the next thing onto a boundary, and
+        # whether a packet ISA would really inherit the PLT's 16-byte stride
+        # is a psABI question we do not get to decide by arithmetic.
+        #
+        # The books balance exactly: RVC drops 4 bytes per 32-bit pad (2 per
+        # c.nop, of which there are none) and its instruction count drops by
+        # the same `pad` our own already excludes, so `n_rvc == N` and the
+        # break-even line returns to its plain form, P > C/2. The `pad` column
+        # is now a fact about the corpus, not a term in the score.
+        n_rvc = n_dis - pad
+        rvc = 2 * comp + 4 * (n_rvc - comp) - (2 * min(c_nops, pad))
+        comp_eff = comp - min(c_nops, pad)
         base, pk = 4 * N, 4 * packets
-        rvc = 2 * comp + 4 * (n_dis - comp)
-        rvc = rvc * N / n_dis          # scale if the two files differ
+        rvc = rvc * N / n_rvc          # scale if the two files differ
         # Break-even: packets cost 4*(N-P), RVC costs 4N-2C, so packets win
         # exactly when P > C/2. This column is how many more pairs that takes;
         # negative means already past parity, by that margin.
-        # A discarded padding nop removes a whole packet, so it moves the
-        # break-even line exactly as far as one more pair would -- but it is
-        # NOT a pair and is never reported as one. RVC keeps the nop (measured:
-        # every one is the 32-bit `addi zero,zero,0`, not `c.nop`), so this is
-        # a real differential, and `pad` is carried in its own column so it can
-        # be read back out of the total at any time.
-        need = round(comp / 2 * N / n_dis) - pairs - pad
+        need = round(comp_eff / 2 * N / n_rvc) - pairs
         to_parity_total += need
         print(f"{name:16}{N:>8}{pairs:>8}{pad:>6}{packets:>9}"
               f"{100*pk/base:>9.1f}%{100*rvc/base:>9.1f}%"
-              f"{100*pk/rvc:>8.1f}%{100*pairs/(comp/2*N/n_dis):>8.1f}%"
+              f"{100*pk/rvc:>8.1f}%{100*pairs/(comp_eff/2*N/n_rvc):>8.1f}%"
               f"{need:>+11}")
     print("-" * 96)
     print(f"{'TOTAL to parity':16}{to_parity_total:>+74}")
-    print("\npacket % and real RVC are size against a 4-byte-per-instruction "
+    print("\n`pad` is nops discarded as purposeless. They are ZERO-RATED ON "
+          "BOTH SIDES: we do\nnot encode them and RVC is not charged for them "
+          "either, so the column describes the\ncorpus and does not move the "
+          "score.\n")
+    print("packet % and real RVC are size against a 4-byte-per-instruction "
           "baseline;\nvs RVC under 100% means packets are smaller. P/(C/2) is "
           "progress toward the\nbreak-even point where pairs exceed half the "
           "compressed-instruction count.\n\n'to parity' is that same gap "
