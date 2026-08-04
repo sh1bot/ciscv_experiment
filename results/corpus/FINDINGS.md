@@ -1411,6 +1411,14 @@ encoded (the packet has nowhere to put the target). Fixing them costs ~3000
 pairs across the suite, which `arg-call-pair` then earns back honestly. Suite
 total moved +111593 → +108780.
 
+`load-call-chain`'s `accepts_pcrel_lo` declaration then moved it +108780 →
++103065. That step is a convention change, not a scheduling improvement: the
+frame now pairs auipc-fed loads whose offset is a `%pcrel_lo` relocation, on
+the argument that the corpus value belongs to the layout the binary was linked
+for and the frame's field spans the whole pcrel-lo range regardless. Nearly all
+5715 pairs are PLT stubs — `load-call-chain` on cpp-rv32 goes 46 → 2564, and
+2518 of those are inside `.plt`.
+
 ### Extrapolating Zcmt
 
 `arg-call-pair` can only fire where the compiler ALREADY emitted a

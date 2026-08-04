@@ -12,29 +12,36 @@ RVC figures are REAL, taken from the `-noalias` disassemblies, not the
 counted is encodable as drawn: widths declared and enforced, codepoints paid
 (`encoding_assign` reports zero accounting complaints at 838/1024 reserved,
 186 spare), and `encoding_verify` puts every checkable frame at or near 100%
-encodable.  The one remaining optimism is branch/jump displacements, which
-are unresolved labels in the corpus and are not range-checked (plus the
-declared `measures_also` folds).
+encodable.  Two declared optimisms remain (ACCOUNTING.md §8), plus the
+declared `measures_also` folds.  Branch/jump displacements are unresolved
+labels in the corpus and are not range-checked.  And `load-call-chain`
+declares `accepts_pcrel_lo`: it pairs auipc-fed loads, whose offset is a
+`%pcrel_lo` relocation belonging to the layout the binary was linked for
+rather than to the packed one, and does not range-check it — the frame's
+field spans the whole 4096-byte pcrel-lo range, so any value the link step
+computes fits.  That assumes an unbiased split, and on rv64 it hides a
+width-scaling residue of 0–7%.  It is worth 5715 pairs across the suite and
+essentially all of it is PLT stubs.
 
 ```
 corpus             insns   pairs  nops  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------------
 testcase0          21875    4159     1    17716     81.0%     81.6%    99.2%   103.5%       -141
-musl-os-rv32      109844   25424    36    84420     76.9%     74.7%   102.9%    91.4%      +2382
-musl-rv32         118990   27433    36    91557     76.9%     74.9%   102.7%    91.8%      +2438
+musl-os-rv32      109844   25460    36    84384     76.8%     74.7%   102.9%    91.6%      +2346
+musl-rv32         118990   27469    36    91521     76.9%     74.9%   102.7%    92.0%      +2402
 godot              90171   15959     1    74212     82.3%     76.3%   107.9%    74.7%      +5409
-musl-os-rv64       93259   19921    30    73338     78.6%     72.5%   108.5%    77.6%      +5745
-musl-rv64         102010   21838    30    80172     78.6%     72.7%   108.1%    78.5%      +5978
-musl-gcc-rv64     103412   20401    30    83011     80.3%     72.9%   110.1%    72.9%      +7589
-musl-gcc-rv32     119919   25801    37    94118     78.5%     71.9%   109.1%    76.6%      +7875
-sqlite-rv32       192688   44585    80   148103     76.9%     72.1%   106.6%    82.9%      +9185
-sqlite-rv64       189602   41589    75   148013     78.1%     72.1%   108.3%    78.5%     +11366
-sqlitem-rv64      201823   43998    82   157825     78.2%     71.8%   108.9%    77.3%     +12944
-sqlite-gcc-rv64   167354   33124   156   134230     80.2%     71.2%   112.7%    68.7%     +15124
-cpp-rv32          418345   89480  2521   328865     78.6%     71.0%   110.8%    73.7%     +31973
-cpp-rv64          409200   84184  2487   325016     79.4%     71.2%   111.6%    71.4%     +33754
+musl-os-rv64       93259   19951    30    73308     78.6%     72.5%   108.5%    77.7%      +5715
+musl-rv64         102010   21868    30    80142     78.6%     72.7%   108.0%    78.6%      +5948
+musl-gcc-rv64     103412   20437    30    82975     80.2%     72.9%   110.0%    73.0%      +7553
+musl-gcc-rv32     119919   25844    37    94075     78.4%     71.9%   109.1%    76.7%      +7832
+sqlite-rv32       192688   44665    80   148023     76.8%     72.1%   106.6%    83.1%      +9105
+sqlite-rv64       189602   41664    75   147938     78.0%     72.1%   108.3%    78.7%     +11291
+sqlitem-rv64      201823   44080    82   157743     78.2%     71.8%   108.9%    77.4%     +12862
+sqlite-gcc-rv64   167354   33304   156   134050     80.1%     71.2%   112.5%    69.0%     +14944
+cpp-rv32          418345   91998  2521   326347     78.0%     71.0%   109.9%    75.7%     +29455
+cpp-rv64          409200   86671  2487   322529     78.8%     71.2%   110.7%    73.5%     +31267
 ------------------------------------------------------------------------------------------------
-TOTAL to parity                                                                    +108780
+TOTAL to parity                                                                    +103065
 ```
 
 ## Where each corpus stands
@@ -50,7 +57,7 @@ now pair.  As an index target it is pathological — 746 transfers to 746
 distinct targets, every function called exactly once — so its table would be as
 large as its call set and `cm.jt` is worth only 229 more words.
 
-**musl-rv32 / musl-os-rv32 — +2438 / +2382.**  Closest of the real corpora,
+**musl-rv32 / musl-os-rv32 — +2402 / +2346.**  Closest of the real corpora,
 both around 103% of RVC.  No far calls at all, so `arg-call-pair` fires zero
 times; the call frame is entirely a `cm.jalt` story and is worth ~1800 words
 each, which would close roughly three quarters of the remaining gap.  Their
@@ -63,22 +70,25 @@ this form: 6818 far transfers, of which **3025 now pair**, taking godot from
 `auipc; jalr`.  `cm.jt` would add 1894 words on top, mostly by deleting the
 `auipc` rather than by pairing.
 
-**musl-rv64 / musl-os-rv64 — +5978 / +5745.**  RV64 costs about 3500 pairs
+**musl-rv64 / musl-os-rv64 — +5948 / +5715.**  RV64 costs about 3500 pairs
 against the rv32 build of the same source: wider spills, `addiw` where `addi`
 would do, and a table that costs twice as much per entry.
 
-**musl-gcc-rv32 / rv64 — +7875 / +7589.**  GCC's register allocation is
+**musl-gcc-rv32 / rv64 — +7832 / +7553.**  GCC's register allocation is
 friendlier to pairing than clang's in general, but it spills arguments to the
 stack before calls (`store rs, k*imm(sp)` reaches 12.6% of its calls, against
 2% elsewhere), which is why the store rows earn their place in the A set.
 
-**sqlite family — +9185 to +15124.**  Consistent, unremarkable, no far calls.
+**sqlite family — +9105 to +14944.**  Consistent, unremarkable, no far calls.
 `cm.jalt` is worth 3429 words on rv32 and 2540 on rv64.  `sqlite-gcc-rv64` is
-the worst of them at 112.7%, and `sqlitem-noc-rv64` is excluded from the total
-(a no-C build has no real RVC to score against).
+the worst of them at 112.5%.  `sqlitem-noc-rv64` is omitted from the rows above
+(a no-C build has no real RVC to score against) but `corpus_scores.py` still
+folds its meaningless -42923 into the printed TOTAL — so that figure is 42923
+lower than the sum of the rows shown.  Carried forward as printed, for
+continuity with the previous table; the tool should stop counting it.
 
-**cpp-rv32 / cpp-rv64 — +31973 / +33754.**  Still the wall, and still 59% of
-everything owed.  `arg-call-pair` fires only 531 times here despite 2563 far
+**cpp-rv32 / cpp-rv64 — +29455 / +31267.**  Still the wall, and still 59% of
+everything owed.  `arg-call-pair` fires only 471 times here despite 2563 far
 transfers, because 1407 of them stay glued to their own `auipc` — the
 scheduler cannot find anything independent to slide between the two.  That is
 precisely the limitation a table jump removes, and cpp is where it pays: a
@@ -90,7 +100,7 @@ remaining gap.
 | corpus | far transfers | paired by `arg-call-pair` | `cm.jt` adds |
 |--------|---------------|---------------------------|--------------|
 | godot         | 6818 | **3025** (44%) | 1894 words |
-| cpp-rv32      | 2563 | 531 (21%)      | **20956 words** |
+| cpp-rv32      | 2563 | 471 (18%)      | **20956 words** |
 | cpp-rv64      | 2220 | 428 (19%)      | 19574 words |
 | testcase0     |  743 | 106 (14%)      | 229 words |
 | musl-gcc-rv32 |    0 | 0              | 2389 words |
@@ -103,9 +113,13 @@ even there only when the scheduler can prise the `auipc` away from the `jalr`.
 A table jump has no `auipc` to prise, so every call becomes eligible — near
 ones included — and the A slot is adjacent by construction.
 
-Note the frame is not the only thing pairing calls: of cpp-rv32's 35312 calls,
-1625 are paired, 531 of them by `arg-call-pair` and the rest by
-`load-call-chain` and the jump frames, which take the register-indirect forms.
+Note the frame is not the only thing pairing calls.  On cpp-rv32 `arg-call-pair`
+takes 471, `setup-jump-pair` 4230, `arith-jump-pair` 2973 and `load-call-chain`
+**2564** — the register-indirect forms.  `load-call-chain`'s figure is 46 real
+virtual-dispatch sites plus 2518 PLT stubs, which it pairs only under the
+`accepts_pcrel_lo` declaration; every one of those 2518 is inside `.plt`, one
+per dynamic symbol rather than per call site, and a `-Bsymbolic-functions`
+build would delete most of the population.
 
 `nops` are excluded from the counts on both sides: what they are for —
 alignment, PLT stride, patch sleds — is out of scope for this experiment.
