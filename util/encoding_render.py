@@ -153,7 +153,11 @@ def render(spec) -> str:
                     out.append(render_row(row, widths))
             if f.get("notes"):
                 out.append("")
-                out.append(f["notes"].rstrip("\n"))
+                import textwrap as _tw
+                for note in f["notes"]:
+                    w = _tw.wrap(" ".join(str(note).split()), width=73,
+                                 initial_indent=" * ", subsequent_indent="   ")
+                    out.extend(w)
             out.append("")
     # collapse any run of >2 blank lines to a single blank, tidy trailing ws
     text = "\n".join(out)
@@ -268,7 +272,6 @@ def lint(spec):
         rows = [r["c"] if isinstance(r, dict) else r for r in f["rows"]]
         row_ops = set().union(*(row_operands(r) for r in rows)) if rows else set()
 
-        notes = f.get("notes", "") or ""
         bad_pair = [p for p in pairs if len(p) != 2]
         unencodable = unencodable_clusters(f)
         missing = asm_ops - row_ops           # operand in asm, never encoded

@@ -22,6 +22,20 @@ The planning documents name `encoding.yaml` as the source of truth (see
    default, but RVE (16 registers) has no x31 and needs another — x7 is the
    candidate.  Settle before any ABI claim; `yaml_migration.md`'s
    "compiler's own register, required dead" wording is now superseded.
+11. **Row layout should name fields, not columns** (design agreed, not yet
+   applied).  `grid` should enumerate the essential fields with their official
+   bit positions — `rd`, `funct3`, `rs1`, `rs2`, `funct5`, `opcode5`, `g`, `h`
+   — and a row should then be a mapping, `{rd: foo, rs1: bar, ...}`, with any
+   field left unset being free for opcode assignment.  A field split into
+   sub-parts states them explicitly:
+
+       rd: [{bits: 2, value: "imma[6:5]"}, {bits: 3, value: "rda"}]
+
+   This replaces the positional cell list, the `*2` span notation and the
+   `imma[6:5]+rda[2:0]` packing hack; `"0 0 0 1 0"` becomes `rd: unused` with
+   the enumerator allocating the pattern from its reserved pool.  `g` and `h`
+   are no longer writable by a row at all — they are opcode bits.
+
 10. **Decoder alignment is an OBJECTIVE, not a coincidence.**
    `encoding_assign.py` orders frames by A-slot RISC-V format so leading
    identifier bits track real `opcode[6:2]`.  Hold it while it can be held; if

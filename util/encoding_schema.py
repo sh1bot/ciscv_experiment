@@ -149,6 +149,11 @@ def validate(spec):
         frame = node.get("frame") if isinstance(node, dict) else None
         if not frame:
             continue
+        notes = frame.get("notes")
+        if notes is not None and (not isinstance(notes, list) or
+                                  not all(isinstance(x, str) for x in notes)):
+            errs.append(f"{frame.get('name')}: notes must be a list of "
+                        f"strings, one note per entry — not a prose block")
         name = frame.get("name")
         if not name or not str(name).strip():
             errs.append("frame with no name")
