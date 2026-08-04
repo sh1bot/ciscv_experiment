@@ -15,6 +15,7 @@ from isa.instruction import Instruction
 from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
 from scheduler.imm_contracts import width_of as _yaml_width
 from scheduler.imm_contracts import rd_column_slots as _rd_slots
+from scheduler.imm_contracts import link_regs_for as _yaml_link_regs
 
 
 def _w(rule: str, slot: str, op: str) -> int:
@@ -26,6 +27,20 @@ def _w(rule: str, slot: str, op: str) -> int:
         raise RuntimeError(
             f"encoding.yaml declares no immediate width for {rule}/{slot}/{op}")
     return v
+
+
+def _lr(rule: str, slot: str) -> frozenset:
+    """The destination registers a slot's ops hard-code, from encoding.yaml.
+
+    Same discipline as `_w`: a frame that means to constrain rd says so in its
+    op list, and the rule reads it rather than repeating it.  Required to be
+    non-empty, so a mistyped op name fails at import instead of silently
+    widening the rule to accept every register."""
+    regs = _yaml_link_regs(rule, slot)
+    if not regs:
+        raise RuntimeError(
+            f"encoding.yaml declares no hard-coded rd for {rule}/{slot}")
+    return frozenset(regs)
 
 # Which base this run is scheduling for.  Set once per input by __main__ from
 # the corpus's own ELF-class header (see isa/xlen.detect_xlen); frames that
@@ -1523,31 +1538,45 @@ def _load_store_chain(a: Instruction, b: Instruction) -> None:
 # ---------------------------------------------------------------------------
 # load-call-chain
 # ---------------------------------------------------------------------------
-# C++ virtual dispatch: A loads a function pointer, B calls through it, and the
-# pointer dies there.  No target is encoded -- it is read from a register -- so
-# the direct call's unencodable-displacement problem does not arise, and the
-# link value needs no field either (ra = packet + 4).
+# C++ virtual dispatch: A loads a function pointer, B transfers through it, and
+# the pointer dies there.  No target is encoded -- it is read from a register --
+# so the direct call's unencodable-displacement problem does not arise, and the
+# link value needs no field either (link = packet + 4).
 #
 # The shape was long believed absent: a census matching the explicit
 # `jalr ra, rs, 0` spelling found none, but the corpus writes the one-operand
 # pseudo-op `jalr rs` (2246 in cpp-rv32, 458 in this adjacency).
+#
+# WHICH LINK REGISTER.  The frame draws no rd field, so the link register is an
+# op-select choice and the permitted set is exactly what the yaml spells in the
+# B op list -- read through `_lr`, never repeated here.  It is currently ra and
+# t1, and the distinction is not cosmetic: only ra is a CALL.  RISC-V treats x1
+# and x5 as link registers (a `jalr` writing either pushes the return-address
+# stack); x6 is not one, which is precisely why a PLT stub transfers with
+# `jalr t1, rs` -- it must leave the caller's `ra` intact and must not unbalance
+# the RAS, since the callee's own `ret` pops the entry the original call pushed.
+# x5 was admitted here on the ISA's definition of a call, but never occurs: zero
+# t0-linked jal/jalr across all 21 corpora.
 
 _LOAD_CALL_A_MN = frozenset({"lw", "ld"})
 _LOAD_CALL_B_MN = frozenset({"jalr"})
 _LOAD_CALL_OFF_BITS = _w("load-call-chain", "a", "lw")   # 10: the whole word is free
+_LOAD_CALL_LINK_REGS = _lr("load-call-chain", "b")       # {x1, x6} from the yaml
 
 
 @must_chain_base
 @no_escape
 @a_base_not_from_auipc
 def _load_call_chain(a: Instruction, b: Instruction) -> None:
-    """Load a function pointer, then call through it; the pointer dies."""
+    """Load a function pointer, then transfer through it; the pointer dies."""
     if a.rd is None or a.rbase is None:
         raise NotPair("MALFORMED: missing base or destination")
     if b.imm not in (0, None):
         raise NotPair("B-nonzero-offset")
-    if b.rd not in (1, 5):
-        raise NotPair("B-not-a-call")          # jr, not an indirect call
+    if b.rd not in _LOAD_CALL_LINK_REGS:
+        # Discards `jr` (rd=x0, which saves no link and is a tail call) and any
+        # link register the frame has no codepoint for -- see _LOAD_CALL_LINK_REGS.
+        raise NotPair("B-link-register-not-encodable")
     if not a.uimm_fits(_LOAD_CALL_OFF_BITS, a.access_shift or 0):
         raise NotPair("A-big-imm")
     return None

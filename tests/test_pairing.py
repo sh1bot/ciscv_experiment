@@ -1375,3 +1375,65 @@ class TestLoadStoreChain:
         a = make_insn("lw", rd=31, rs1=12, imm=0)
         b = make_insn("sw", rs1=13, rs2=14, imm=0)       # stores something else
         assert _rule_reason("load-store-chain", a, b) is not None
+
+
+class TestLoadCallChain:
+    """A loads a function pointer, B transfers through it, the pointer dies.
+
+    The frame draws no rd field, so the link register is an op-select choice
+    and the permitted set is whatever encoding.yaml's B op list spells.  Only
+    `ra` is a call; `t1` is a linking jump (the PLT stub's spelling, chosen
+    precisely because x6 is not a link register and so neither clobbers the
+    caller's `ra` nor unbalances the return-address stack)."""
+
+    def test_ra_link_pairs(self):
+        """Virtual dispatch: the corpus writes the one-operand `jalr rs`."""
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("jalr", rd=1, rs1=31, imm=0)
+        assert _rule_reason("load-call-chain", a, b) is None
+
+    def test_t1_link_pairs(self):
+        """The PLT stub's `jalr t1, rs` — a jump that saves a link."""
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("jalr", rd=6, rs1=31, imm=0)
+        assert _rule_reason("load-call-chain", a, b) is None
+
+    def test_t0_link_no_pair(self):
+        """x5 is an ISA link register but the frame spells no codepoint for
+        it, and it occurs zero times in every corpus.  Pairing it would encode
+        a link into `ra` — a silent mis-encode, not a missed pair."""
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("jalr", rd=5, rs1=31, imm=0)
+        assert _rule_reason("load-call-chain", a, b) is not None
+
+    def test_jr_no_pair(self):
+        """rd=x0 saves no link at all — a tail call, not this frame."""
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("jalr", rd=0, rs1=31, imm=0)
+        assert _rule_reason("load-call-chain", a, b) is not None
+
+    def test_link_set_comes_from_yaml(self):
+        """The rule must not carry its own copy of the permitted registers."""
+        from scheduler.imm_contracts import link_regs_for
+        from scheduler.rules import _LOAD_CALL_LINK_REGS
+        assert set(_LOAD_CALL_LINK_REGS) == set(
+            link_regs_for("load-call-chain", "b"))
+
+    def test_nonzero_b_offset_no_pair(self):
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("jalr", rd=1, rs1=31, imm=8)
+        assert _rule_reason("load-call-chain", a, b) is not None
+
+    def test_pointer_must_die(self):
+        a = make_insn("lw", rd=31, rs1=12, imm=0)
+        b = make_insn("jalr", rd=1, rs1=31, imm=0)
+        b.live_out = frozenset({31})
+        assert _rule_reason("load-call-chain", a, b) is not None
+
+    def test_relocatable_offset_no_pair(self):
+        """An auipc-based load's offset is a %pcrel_lo relocation, not a
+        displacement — this is what still keeps the frame out of the PLT."""
+        a = make_insn("lw", rd=31, rs1=31, imm=8)
+        b = make_insn("jalr", rd=6, rs1=31, imm=0)
+        a.base_from_auipc = True
+        assert _rule_reason("load-call-chain", a, b) is not None

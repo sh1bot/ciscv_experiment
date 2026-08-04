@@ -441,7 +441,10 @@ Also chain rules with surviving first result, but also sometimes a second result
 *Load a function pointer and call through it (virtual dispatch).*
 
     load    tmp, k*imma(rs1a)
-    jalr    tmp
+    jalr_link_ra tmp
+
+    load    tmp, k*imma(rs1a)
+    jalr_link_t1 tmp
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
@@ -451,6 +454,11 @@ Also chain rules with surviving first result, but also sometimes a second result
 * The `rd` column carries the x0 sentinel, not the x2 one every other
   hosted frame uses.  Both are reserved, so x0 was standing empty --
   this frame rides there and competes with nothing.
+* The link register is NOT drawn -- both templates share one row and
+  are told apart by the op-select, which is why the budget is 4 for
+  two loads rather than 2.  `rules.py` reads the permitted set from
+  the `b` op list above (each op's `encode.rd`), so a register that
+  is not spelled here cannot be paired by the scheduler either.
 
 ## arg-call-pair
 

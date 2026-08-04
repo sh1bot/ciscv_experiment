@@ -132,6 +132,20 @@ pseudo_ops:
     base: jalr
     encode: {rd: x0, rs1: x6}            # jr imm(t1) -- a far TAIL call
     match:  [{op: jalr, rd: x0, rs1: x6}]
+  # The two LINK-register spellings of a register-indirect transfer.  These
+  # hard-code rd and leave rs1 free, where jalr_ra/jr_t1 above hard-code both:
+  # the base is the frame's chain temporary, so only the link is an op choice.
+  # Which registers may appear here is the yaml's to say, and rules.py reads
+  # it (imm_contracts.link_regs_for) rather than keeping its own copy.
+  jalr_link_ra:
+    base: jalr
+    encode: {rd: x1}                     # jalr ra, rs -- an indirect CALL
+    match:  [{op: jalr, rd: x1}]
+    after: jalr_ra                       # jalr ra, imm(ra) is arg-call-pair's
+  jalr_link_t1:
+    base: jalr
+    encode: {rd: x6}                     # jalr t1, rs -- a linking JUMP
+    match:  [{op: jalr, rd: x6}]
   ret:
     base: jalr
     encode: {rd: x0, rs1: x1, imm: 0}
@@ -1131,7 +1145,20 @@ doc:
       #
       # No target is encoded -- it is read from a register -- so the direct
       # call's unencodable-displacement problem does not arise, and the link
-      # value needs no field either: ra = packet + 4.
+      # value needs no field either: the link is `packet + 4` and WHICH
+      # register receives it is an op choice, not an operand.
+      #
+      # TWO LINK REGISTERS, and only one of them is a call.  RISC-V names x1
+      # and x5 as link registers -- a `jalr` writing either pushes the
+      # return-address stack -- so x5 was admitted here on that reading.  It
+      # never occurs: zero t0-linked jal/jalr across all 21 corpora, and no
+      # `__riscv_save_*` millicode to produce any.  x6 (t1) does occur, and is
+      # the more useful spelling: a PLT stub transfers with `jalr t1, rs`
+      # precisely BECAUSE t1 is not a link register, so the stub neither
+      # clobbers the caller's `ra` nor unbalances the return-address stack.
+      # This frame therefore offers ra (a call) and t1 (a linking jump), and
+      # not t0.  The two are distinguished by the op-select, which is what the
+      # budget doubles to pay for -- there is no rd field to put them in.
       #
       # Contrast setup-jump-pair, which is the INDEPENDENT case (A's result is
       # not B's target -- argument marshalling).  It must field rda, rs1a and
@@ -1143,22 +1170,31 @@ doc:
       # imm_field_bits takes the WIDEST row and that frame's `li` row draws
       # ten -- but no load row could hold it.  TODO A8's row-versus-op
       # residue.)
-      budget: 2
+      budget: 4
       level: 2
       templates:
-        - ["load    tmp, k*imma(rs1a)", "jalr    tmp"]
+        - ["load    tmp, k*imma(rs1a)", "jalr_link_ra tmp"]
+        - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 tmp"]
       ops:
         - {a: [{op: lw, imm: {bits: 10, signed: false}},
-               {op: ld, imm: {bits: 10, signed: false}}], b: [jalr]}
+               {op: ld, imm: {bits: 10, signed: false}}],
+           b: [jalr_link_ra, jalr_link_t1]}
       probe:
         - {a: {op: lw, rd: 31, rs1: 12, imm: 0},
            b: {op: jalr, rd: 1, rs1: 31, imm: 0}}
+        - {a: {op: lw, rd: 31, rs1: 12, imm: 0},
+           b: {op: jalr, rd: 6, rs1: 31, imm: 0}}
       rows:
         - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 0 0"]
       notes: |
          * The `rd` column carries the x0 sentinel, not the x2 one every other
            hosted frame uses.  Both are reserved, so x0 was standing empty --
            this frame rides there and competes with nothing.
+         * The link register is NOT drawn -- both templates share one row and
+           are told apart by the op-select, which is why the budget is 4 for
+           two loads rather than 2.  `rules.py` reads the permitted set from
+           the `b` op list above (each op's `encode.rd`), so a register that
+           is not spelled here cannot be paired by the scheduler either.
 
   - frame:
       name: arg-call-pair

@@ -23,9 +23,14 @@ buys. An op with no declared contract falls back to the row's drawn field,
 which is the honest reading — a bare op cannot extend anything (see
 `lint_frame`, which rejects bare ops on a widened field).
 
+Widths are the bulk of it, but the principle is the module's real subject: a
+fact the yaml states is read from the yaml. `rd_column_slots` and
+`link_regs_for` follow the same rule for the two register facts a frame's rows
+and op-select declare.
+
 NOT derived here: which slot a rule reads, order sensitivity, scaling by access
 width, or the sentinel forms. Those are scheduler semantics and stay in
-`rules.py`; this module owns widths only.
+`rules.py`.
 """
 import os
 from functools import lru_cache
@@ -111,6 +116,73 @@ def _rd_column():
         for rn in names:
             out[rn] = tuple(sorted(slots))
     return out
+
+
+# An `encode` value that names another operand rather than a fixed register:
+# `addi_rsd` is `{rd: rs1}`, meaning "rd is whatever rs1 is", which constrains
+# the two to be equal and pins neither.  Those carry no register number.
+_OPERAND_ALIASES = frozenset({"rd", "rs1", "rs2"})
+
+
+def _reg_number(name):
+    """`x6` -> 6, or None for an operand alias.  encoding.yaml spells fixed
+    registers in xN form throughout; anything else is a typo, not a default."""
+    if isinstance(name, int):
+        return name
+    s = str(name)
+    if s in _OPERAND_ALIASES:
+        return None
+    if s.startswith("x") and s[1:].isdigit():
+        return int(s[1:])
+    raise ValueError(f"encoding.yaml: unrecognised register spelling {name!r}")
+
+
+@lru_cache(maxsize=1)
+def _encoded_rd():
+    """{rule: {slot: (rd, ...)}} — destination registers a slot's ops HARD-CODE.
+
+    A frame that draws no rd field can still choose between spellings by
+    op-select: `load-call-chain` picks its link register that way, offering
+    `jalr_link_ra` (a call) and `jalr_link_t1` (a linking jump, the PLT stub's
+    spelling) and no others.  The permitted set is stated once, as each
+    pseudo-op's `encode.rd`, and read here so a rule cannot admit a register
+    the encoding has no codepoint for.  Slots whose ops name no destination
+    appear with an empty tuple, which is the ordinary case."""
+    import sys
+    sys.path.insert(0, os.path.join(_ROOT, "util"))
+    from encoding_render import op_name
+
+    spec = yaml.safe_load(open(_YAML))
+    pseudo = spec.get("pseudo_ops") or {}
+    out = {}
+    for node in spec["doc"]:
+        frame = node.get("frame") if isinstance(node, dict) else None
+        if not frame or not frame.get("ops"):
+            continue
+        names = (frame.get("rules_py_names")
+                 or [x.strip() for x in frame["name"].split(",")])
+        per_slot = {}
+        for slot in ("a", "b"):
+            regs = set()
+            for cluster in frame["ops"]:
+                for entry in cluster.get(slot, []):
+                    enc = (pseudo.get(op_name(entry)) or {}).get("encode") or {}
+                    if enc.get("rd") is not None:
+                        n = _reg_number(enc["rd"])
+                        if n is not None:
+                            regs.add(n)
+            per_slot[slot] = tuple(sorted(regs))
+        for rn in names:
+            out[rn] = per_slot
+    return out
+
+
+def link_regs_for(rule, slot):
+    """The rd values this frame's `slot` ops hard-code, as register numbers.
+
+    Empty when the slot's ops name no destination.  `rules.py` uses it to
+    admit exactly the transfer spellings the frame has codepoints for."""
+    return _encoded_rd().get(rule, {}).get(slot, ())
 
 
 def rd_column_slots(rule):
