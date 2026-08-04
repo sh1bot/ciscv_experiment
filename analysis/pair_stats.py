@@ -19,7 +19,9 @@ from analysis.parser import parse_file
 from analysis.liveness import compute_global_liveness, compute_local_liveness
 from analysis.depgraph import build_dep_graph
 from scheduler.reorder import schedule, ScheduleMode
-from scheduler.pairing import greedy_pair, stamp_slot_eligibility, can_pair, RULES
+from scheduler.pairing import (greedy_pair, stamp_slot_eligibility,
+                               find_b_partners, RULES)
+from scheduler.rules import NotPair
 
 
 def schedule_file(path, mode=ScheduleMode.LIST):
@@ -49,18 +51,26 @@ def schedule_file(path, mode=ScheduleMode.LIST):
 
 
 def which_rule(a, b):
-    """Return the name of the first rule that accepts (a,b), else None."""
-    from scheduler.pairing import _rule_applies  # may not exist; fall back
-    for rule in RULES:
-        # Replicate can_pair's per-rule acceptance test.
-        res = _try_rule(rule, a, b)
-        if res is None:
-            return rule.name
-    return None
+    """Return the name of the first rule that accepts (a,b), else None.
+
+    Delegates to the pairer rather than re-deriving the gating sequence, so
+    this cannot answer a different question from the one greedy_pair asks.
+    Callers must have checked a.a_slot_ok / b.b_slot_ok, as find_b_partners
+    requires.
+    """
+    matches = find_b_partners(a, [b])
+    return matches[0][1].name if matches else None
 
 
 def _try_rule(rule, a, b):
-    # mnemonic gating
+    """None if `rule` accepts (a,b), else a string saying how far it got.
+
+    check() signals rejection by RAISING NotPair(reason) and returns None to
+    accept -- so the reason has to be caught, not returned.  Slot eligibility
+    is deliberately NOT tested here: it is intrinsic to the instruction and
+    rule-independent, so the callers hoist it out of the per-rule loop exactly
+    as greedy_pair does.
+    """
     if rule.a_mnemonic_set is not None and a.mnemonic not in rule.a_mnemonic_set:
         return "a-mnemonic"
     if rule.b_mnemonic_set is not None and b.mnemonic not in rule.b_mnemonic_set:
@@ -71,7 +81,11 @@ def _try_rule(rule, a, b):
     for prop in rule.b_prerequisites:
         if not getattr(b, prop):
             return "b-prereq"
-    return rule.check(a, b)
+    try:
+        rule.check(a, b)
+    except NotPair as exc:
+        return exc.reason
+    return None
 
 
 def main():
@@ -161,13 +175,26 @@ def main():
 def _closest_reason(a, b):
     """Find the rule that 'almost' applied to (a,b): mnemonic-sets matched
     (in some order) but the prereq/check failed. Returns (rule_name, category).
-    Prefers rules that got furthest (check ran rather than mnemonic mismatch)."""
+    Prefers rules that got furthest (check ran rather than mnemonic mismatch).
+
+    Slot eligibility gates the ORDER, not the rule: an A-slot-disqualified
+    instruction can never lead a packet whatever the rules say, so scoring
+    rules against that order would blame a frame for a structural exclusion.
+    Both orders are tried because the scheduler is free to swap the two.
+    """
     candidates = []
-    for rule in RULES:
-        for x, y in ((a, b), (b, a)):
+    for x, y in ((a, b), (b, a)):
+        if not (x.a_slot_ok and y.b_slot_ok):
+            continue
+        for rule in RULES:
             res = _try_rule(rule, x, y)
             if res is None:
-                return None  # actually pairs — shouldn't happen for solo/solo
+                # (a,b) accepting is impossible -- greedy_pair tried exactly
+                # that and emitted both solo.  (b,a) accepting is real and
+                # worth more than a near miss: the pair is one swap away.
+                if x is a:
+                    return None
+                return (rule.name, "pairs if reordered")
             # rank: how far did we get? mnemonic miss = 0, prereq = 1, check = 2
             if res in ("a-mnemonic", "b-mnemonic"):
                 rank = 0
