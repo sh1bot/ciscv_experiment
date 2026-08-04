@@ -8,7 +8,7 @@ guessed.
 """
 import collections, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from analysis.parser import parse_file
+from analysis.parser import parse_file, annotate_branch_distances
 from analysis.liveness import compute_global_liveness, compute_local_liveness
 from analysis.depgraph import build_dep_graph
 from scheduler.pairing import stamp_slot_eligibility, greedy_pair
@@ -50,13 +50,21 @@ def field_width(insn, rule=None, slot=None):
     starved when it is not -- `pre-inc-pair` read 3% at five bits that way, on
     a field the yaml declares as ten bits times four.
     """
+    if insn.is_branch or insn.is_jump or insn.mnemonic in ("j", "jal"):
+        # A displacement is an unresolved label in the corpus, so it has no
+        # exact width -- but skipping it made this census SILENT on the axis
+        # that binds the two load+branch frames, and reported the worse of the
+        # two as fully fed because its LOAD offset happens to be ten bits.
+        # `est_packet_distance` (instructions to the nearest same-named label,
+        # scaled to packets) is approximate; it is the only figure available
+        # and it is far better than nothing.
+        d = getattr(insn, "est_packet_distance", None)
+        return None if d is None else width(round(d))
     if insn.imm is None: return None
     if insn.has_mem_operand:
         w = insn.access_width
         if not w or insn.imm % w: return None
         return width(insn.imm // w, signed=False if insn.imm >= 0 else True)
-    if insn.is_branch or insn.is_jump or insn.mnemonic in ("j", "jal"):
-        return None                      # unresolved label
     k = scale_of(rule, slot, yaml_op(insn, rule, slot)) if rule else 1
     if k == 1 and insn.is_addi4spn:
         k = 4
@@ -68,6 +76,7 @@ def field_width(insn, rule=None, slot=None):
 need = collections.defaultdict(collections.Counter)
 for path in sys.argv[1:]:
     _b, fns = parse_file(open(path).read())
+    annotate_branch_distances(_b)
     for fn in fns:
         for b in fn.blocks: stamp_slot_eligibility(b.instructions)
         g = compute_global_liveness(fn.blocks)

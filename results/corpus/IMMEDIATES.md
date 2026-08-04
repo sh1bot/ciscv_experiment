@@ -23,6 +23,14 @@ against 25801 (+9.3%) and sqlite-rv64 46441 against 41492 (+11.9%).  That is
 the whole of what immediate range could ever be worth, tails included — and
 the tails are what cost exponentially.
 
+**Branch displacements are estimated, not skipped.**  A displacement is an
+unresolved label in the corpus, so it has no exact width.  Skipping it — which
+this census used to do — made the whole document SILENT on the axis that binds
+the two load+branch frames, and reported the worse of the two as fully fed
+because its load offset happens to be ten bits.  `needed.py` now scores them
+from `est_packet_distance` (instructions to the nearest same-named label,
+scaled to packets).  Approximate, and the only figure available.
+
 **What is judged.**  A 5- or 10-bit field is the natural size: it costs
 nothing beyond the register columns the frame drew anyway, so slack inside one
 is free and is not flagged.  Only two things carry a price and are judged
@@ -81,6 +89,66 @@ index-mem-chain             b    568     5   96.5%   98.9%   99.5%
 mem-base-pair               a  10299     6   97.1%   98.6%  100.0%
 mem-base-pair               b  10299     6   97.1%   98.6%  100.0%
 ```
+
+## The other axis: branch displacement
+
+`load-base-branch-pair` and `load-sp-branch-pair` both draw a 5-bit `immb`,
+and it is the tightest field in the encoding.  Measured over 978 and 172
+paired sites (musl-gcc-rv32 + sqlite-rv64, uncensored):
+
+```
+displacement field   load-base    load-sp
+   5 bits (today)       40.2%      21.5%
+   6 bits               61.0%      42.4%
+   7 bits               77.0%      67.4%
+   8 bits               87.9%      76.2%
+  10 bits               98.4%      96.5%
+```
+
+**`load-sp-branch-pair` is the worse of the two, not the better one.**  Its A
+slot reads 100% in the table above only because dropping the implicit `sp`
+base frees `imma` to span two columns for a ten-bit load offset.  On the axis
+that actually binds, it fits half as much of its population as the base form
+does.
+
+Neither frame can be fixed inside its row: both are FULL at 20 bits, so
+displacement bits must come out of the load offset, out of `rd`, or out of
+opcode duplication.  Joint fit (displacement AND load offset both encodable):
+
+```
+                                   load-base    load-sp
+imma 5b + immb 5b (today)             31.7%      17.4%
+imma 4b + immb 6b                     42.4%      26.7%
+imma 3b + immb 7b                     41.8%      32.0%
+rd -> 3b (a0-a7), imma 5b + immb 7b   44.5%      43.6%
+rd -> 3b (a0-a7), imma 5b + immb 9b   52.9%      57.6%
+```
+
+Even spending the destination register down to three bits AND four bits of
+opcode duplication reaches only 53-58%, against the 94-99% the 10-bit frames
+manage.  The row cannot hold ten displacement bits alongside a load, and no
+rebalance of what it can hold changes that.
+
+### Forced target alignment buys the same thing, in memory rather than budget
+
+If branch targets were aligned past the packet, the low bits of the
+displacement would be dead and the same field would reach further.  Measured,
+it is an exact one-for-one trade with field width:
+
+```
+5-bit field, targets aligned to   load-base    load-sp     equivalent to
+    4B (today, packet-aligned)      40.2%      21.5%        5 bits
+    8B                              60.5%      42.4%        6 bits
+   16B                              76.5%      66.3%        7 bits
+   32B                              87.6%      76.2%        8 bits
+```
+
+The correspondence is within half a point at every step, because the
+displacement distribution is smooth.  So alignment is a way to pay for reach
+in padding instead of codepoints — but the padding is dead bytes in the
+instruction stream, which costs the icache more than an inline cold block
+would, and the icache was the reason to prefer a distant handler in the first
+place.  Recorded as a real mechanism, not recommended.
 
 ## What a bit costs
 
