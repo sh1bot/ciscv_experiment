@@ -69,7 +69,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1a   │g│   imma[4:0|9:5]   │ fn3 │  rbase  │ opcode5 │1 0│
+│h│  rs1a   │g│imma[4:0]│imma[9:5]│ fn3 │  rbase  │ opcode5 │1 0│
 
  * The data width comes from the op list (sb/sh/sw/sd), as in the other
    memory frames, rather than a width field -- 4 codepoints is cheaper
@@ -152,7 +152,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│   imma[4:0|9:5]   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│   rda   │g│imma[4:0]│imma[9:5]│ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
 
@@ -199,7 +199,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│  rs2b   │g│imma[4:0]│imma[9:5]│ fn3 │   rdb   │ opcode5 │1 0│
 
 ## index-mem-chain
 
@@ -238,8 +238,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs2b   │g│  rs2a   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│   imma[4:0|9:5]   │ fn3 │  rsda   │ opcode5 │1 0│
-│h│   rdb   │g│   imma[4:0|9:5]   │ fn3 │  rsda   │ opcode5 │1 0│
+│h│  rs2b   │g│imma[4:0]│imma[9:5]│ fn3 │  rsda   │ opcode5 │1 0│
+│h│   rdb   │g│imma[4:0]│imma[9:5]│ fn3 │  rsda   │ opcode5 │1 0│
 
  * The addi rows access AT the bumped pointer: at genuine (non- prologue)
    surviving-sum sites the memory offset is zero 68-78% of the time, so
@@ -291,7 +291,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│   imm[4:0|9:5]    │ fn3 │   rdb   │ opcode5 │1 0│
+│h│   rda   │g│imm[4:0] │imm[9:5] │ fn3 │   rdb   │ opcode5 │1 0│
 │h│  rs2b   │g│  rs2a   │imm[9:5] │ fn3 │imm[4:0] │ opcode5 │1 0│
 
  * both opcodes in a pair must be identical operations
@@ -360,11 +360,12 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│imma[9:5]│g│imma[4:0]│  rs1a   │ fn3 │0 0 0 0 0│ opcode5 │1 0│
+│h│imma[9:5]│g│imma[4:0]│  rs1a   │ fn3 │ unused  │ opcode5 │1 0│
 
- * The `rd` column carries the x0 sentinel, not the x2 one every other
-   hosted frame uses. Both are reserved, so x0 was standing empty -- this
-   frame rides there and competes with nothing.
+ * `rd: unused` leaves the selecting sentinel to the enumerator, which
+   allocates it from the reserved x0/x2 pool per (host, sentinel) -- both
+   patterns are reserved either way, so whichever has room carries this
+   frame.
  * The link register is NOT drawn -- both templates share one row and are
    told apart by the op-select, which is why the budget is 4 for two
    loads rather than 2. `rules.py` reads the permitted set from the `b`
@@ -396,9 +397,9 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1a   │g│   immb[4:0|9:5]   │ fn3 │   rda   │ opcode5 │1 0│
-│h│imma[4:0]│g│   immb[4:0|9:5]   │ fn3 │imma[6:5]+rda[2:0]│ opcode5 │1 0│
-│h│imma[4:0]│g│   immb[4:0|9:5]   │ fn3 │  rs2a   │ opcode5 │1 0│
+│h│  rs1a   │g│immb[4:0]│immb[9:5]│ fn3 │   rda   │ opcode5 │1 0│
+│h│imma[4:0]│g│immb[4:0]│immb[9:5]│ fn3 │imma+rda │ opcode5 │1 0│
+│h│imma[4:0]│g│immb[4:0]│immb[9:5]│ fn3 │  rs2a   │ opcode5 │1 0│
 
  * Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the three
    ops that want a wide immediate and an ARGUMENT destination, splitting
@@ -518,7 +519,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 1 0│ opcode5 │1 0│
+│h│  rs1b   │g│imm[4:0] │imm[9:5] │ fn3 │ unused  │ opcode5 │1 0│
 
 ## epilogue-pair
 
@@ -530,7 +531,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│   imm[4:0|9:5]    │ fn3 │0 0 0 1 0│ opcode5 │1 0│
+│h│  rs1b   │g│imm[4:0] │imm[9:5] │ fn3 │ unused  │ opcode5 │1 0│
 
 ## arith-jump-pair
 
@@ -548,8 +549,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
-│h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │0 0 0 1 0│ opcode5 │1 0│
+│h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │ unused  │ opcode5 │1 0│
+│h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │ unused  │ opcode5 │1 0│
 
 ## setup-jump-pair
 
@@ -577,9 +578,9 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs1b   │g│imma[4:0]│  rs1a   │ fn3 │   rda   │ opcode5 │1 0│
-│h│  rs1b   │g│   imma[4:0|9:5]   │ fn3 │   rda   │ opcode5 │1 0│
-│h│  rs1a   │g│   immb[4:0|9:5]   │ fn3 │   rda   │ opcode5 │1 0│
-│h│imma[4:0]│g│   immb[4:0|9:5]   │ fn3 │   rda   │ opcode5 │1 0│
+│h│  rs1b   │g│imma[4:0]│imma[9:5]│ fn3 │   rda   │ opcode5 │1 0│
+│h│  rs1a   │g│immb[4:0]│immb[9:5]│ fn3 │   rda   │ opcode5 │1 0│
+│h│imma[4:0]│g│immb[4:0]│immb[9:5]│ fn3 │   rda   │ opcode5 │1 0│
 
  * `j` covers `jal x0`; a jal with a real destination is a call and is
    excluded from every jump frame.

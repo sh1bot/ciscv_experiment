@@ -70,29 +70,21 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from encoding_render import (_center, _cell, _spanned, header_lines,
+from encoding_render import (_center, _spanned, header_lines,
                              opcode_demand, opcode_codepoints, op_name,
                              op_bits, op_imm, _ext, imm_field_bits, shared_imm,
-                             cluster_pairs, row_operands, lint_frame,
-                             rd_column_cells, rd_column_role,
+                             cluster_pairs, row_operands, row_parts,
+                             lint_frame, rd_column_role, _display_value,
                              _OPERAND, _IMPLICIT)
 
 # Sentinel bit patterns reserved in the rd column (encoding.yaml `reserved`):
-# x0 = "0 0 0 0 0" and x2 = "0 0 0 1 0".  A guest row NAMES one of them, so a
-# lent codepoint carries one guest per DISTINCT sentinel value in use -- not
-# two automatically.  Charging every guest as if it had both was an error:
-# every frame drew x2 and left x0 empty, so each lent codepoint really held
-# one identity and the arithmetic was optimistic by 2x.
-SENTINEL_PATTERNS = {"0 0 0 0 0": "x0", "0 0 0 1 0": "x2"}
+# x0 = "0 0 0 0 0" and x2 = "0 0 0 1 0".  A guest row says `rd: unused` and
+# the ENUMERATOR allocates which pattern selects it, from this pool -- a lent
+# codepoint carries one guest per DISTINCT sentinel value in use, not two
+# automatically, so the lending is tracked per (host, sentinel).
+SENTINEL_PATTERNS = {"x0": "0 0 0 0 0", "x2": "0 0 0 1 0"}
+SENTINEL_ORDER = ("x2", "x0")           # allocation preference, deterministic
 SENTINEL_REGS = {0: "x0", 2: "x2"}      # rd's value -> the pattern it names
-
-
-def guest_sentinel(frame, grid):
-    """Which reserved pattern a guest frame's rows put in the rd column."""
-    for s in rd_column_cells(frame, grid):
-        if s in SENTINEL_PATTERNS:
-            return SENTINEL_PATTERNS[s]
-    return None
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
@@ -106,6 +98,8 @@ MARKER = "1 0"
 # h bit column 0.  They are opcode bits; the renderer substitutes the selector
 # word's actual bit character where a row names them.
 COL_H, COL_G = 0, 2
+GRID_COLUMNS = ["h", "funct5", "g", "rs2", "rs1", "funct3", "rd"]
+_GRID = None                     # set by load(); row helpers need field widths
 
 # --- RISC-V A-slot format classification (nice-to-have #1) -----------------
 # Real base-ISA opcode[6:2] values, so the ordering below climbs the way the
@@ -276,7 +270,7 @@ def frame_tables(frame, grid):
     allocated largest-first."""
     ba = imm_field_bits(frame, grid, "a")
     bb = imm_field_bits(frame, grid, "b")
-    shared = shared_imm(frame)
+    shared = shared_imm(frame, grid)
     out = []
     for c in frame.get("ops") or []:
         a, b = list(c.get("a", [])), list(c.get("b", []))
@@ -411,7 +405,7 @@ def decode(frames, word, rd=None):
     its host's codepoints and is told apart by rd holding the one reserved
     sentinel its rows name (x0 or x2); any other rd means the host owns the
     codepoint."""
-    name = SENTINEL_REGS.get(rd, rd if rd in SENTINEL_PATTERNS.values() else None)
+    name = SENTINEL_REGS.get(rd, rd if rd in SENTINEL_PATTERNS else None)
     if name is not None:
         for f in frames:
             if f.get("sentinel") == name and covers(f, word):
@@ -443,72 +437,54 @@ def word_chars(frame):
 
 
 def frame_rows(spec):
-    """(cells, tag) for every row, dict-form or bare-list."""
-    out = []
-    for r in spec["rows"]:
-        if isinstance(r, dict):
-            out.append((list(r["c"]), r.get("tag")))
-        else:
-            out.append((list(r), None))
-    return out
+    """(row_mapping, tag) for every row."""
+    return [(r, r.get("tag")) for r in spec["rows"]]
 
 
-def _tokens(cells, w):
-    """Per operand-column cell: (display_text, span, pos, body) with the
-    selector bits injected — fn3 as its 3 bits, a discrete g/h cell as its
-    bit, and everything else as its span-stripped label."""
+def _tokens(row, w, sentinel=None):
+    """Per grid-column token: (display_text, field, stems) with the selector
+    bits injected — funct3 as its 3 bits, g/h as their bit — and, for a guest
+    frame, the allocated sentinel pattern where the row says `unused`."""
     fn3 = " ".join(w[5:8])
     g_char, h_char = w[8], w[9]
-    out, pos = [], 0
-    for cell in cells:
-        body, span = _cell(cell)
-        if body == "fn3":
-            text = fn3
-        elif span == 1 and pos == COL_G and body == "g":
-            text = g_char
-        elif span == 1 and pos == COL_H and body == "h":
-            text = h_char
+    out = []
+    for field in GRID_COLUMNS:
+        v = row.get(field)
+        if field == "funct3":
+            out.append((fn3, field, ()))
+        elif field == "g":
+            out.append((g_char, field, ()))
+        elif field == "h":
+            out.append((h_char, field, ()))
+        elif v is None:
+            out.append(("free", field, ()))
+        elif v == "unused":
+            pat = SENTINEL_PATTERNS.get(sentinel) or ". . . . ."
+            out.append((pat, field, ()))
+        elif isinstance(v, list):
+            stems = tuple(str(p["value"]).split("[")[0] for p in v)
+            out.append((_display_value(v), field, stems))
         else:
-            text = body
-        out.append((text, span, pos, body))
-        pos += span
+            out.append((str(v), field, (str(v).split("[")[0],)))
     return out
-
-
-_FIXED = re.compile(r"[01 ]+$")
-
-
-def _shared_cell(body, pos):
-    """A cell that belongs to the joint packet, not to one slot: the opcode
-    bits (fn3), the g/h opcode bits, and any fixed bit pattern (incl. the
-    prologue/epilogue/jump sentinel)."""
-    if body == "fn3":
-        return True
-    if pos == COL_G and body == "g":
-        return True
-    if pos == COL_H and body == "h":
-        return True
-    return bool(_FIXED.match(body))
 
 
 def render_line(tokens, o5, colwidths, keep=None):
     """Render one encoding line. `keep(base)` decides whether a slot-owned
-    field is shown; when None every field shows (the plain form). Shared cells
-    and the opcode5/marker tail always show; erased cells render blank."""
-    rendered, pos = [], 0
-    for text, span, cpos, body in tokens:
-        width = _spanned(colwidths, pos, span)
-        if keep is None or _shared_cell(body, cpos):
-            show = True
+    field is shown; when None every field shows (the plain form). Opcode bits,
+    sentinel patterns and free fields always show; erased cells render blank."""
+    rendered = []
+    for pos, (text, field, stems) in enumerate(tokens):
+        width = _spanned(colwidths, pos, 1)
+        if keep is None or not stems:
+            show = True                            # opcode bits / sentinel / free
         else:
-            base = body.split("*")[0].split("[")[0]
-            show = keep(base)
+            show = any(keep(stem) for stem in stems)
         rendered.append(_center(text if show else "", width))
-        pos += span
+    pos = len(tokens)
     for token in [o5, MARKER]:                      # opcode5 + marker: shared
-        text, span = _cell(token)
-        rendered.append(_center(text, _spanned(colwidths, pos, span)))
-        pos += span
+        rendered.append(_center(token, _spanned(colwidths, pos, 1)))
+        pos += 1
     return "│" + "│".join(rendered) + "│"
 
 
@@ -533,11 +509,11 @@ def specialize(line, row_ops):
     return _ALT.sub(repl, line)
 
 
-def matches(row_cells, tag, a_ops, b_ops, sp_template, has_sp_rows):
+def matches(row, tag, a_ops, b_ops, sp_template, has_sp_rows):
     """A row realises a template when every field the row encodes is an operand
     of the template, and (for frames that distinguish them) its SP-relative
     variant agrees."""
-    if not row_operands(row_cells) <= (a_ops | b_ops):
+    if not row_operands(row, _GRID) <= (a_ops | b_ops | {"unused"}):
         return False
     if has_sp_rows and sp_template != (tag == "SP-relative"):
         return False
@@ -556,25 +532,26 @@ def frame_body_lines(frame, colwidths):
     has_sp = any(tag == "SP-relative" for _, tag in rows)
     out = []
 
-    for cells, tag in rows:                         # the form as it stands
-        line = render_line(_tokens(cells, w), o5, colwidths)
+    for row, tag in rows:                           # the form as it stands
+        line = render_line(_tokens(row, w, frame.get("sentinel")), o5, colwidths)
         out.append(line + (f" ({tag})" if tag else ""))
 
     for pair in spec["templates"]:
         a_line, b_line = pair[0].strip(), pair[1].strip()
         a_ops, b_ops = line_ops(pair[0]), line_ops(pair[1])
         sp_t = any("(sp)" in ln for ln in pair)
-        hits = [(c, t) for c, t in rows
-                if matches(c, t, a_ops, b_ops, sp_t, has_sp)]
+        hits = [(r, t) for r, t in rows
+                if matches(r, t, a_ops, b_ops, sp_t, has_sp)]
         approx = False
         if not hits:
             # Contorted frames (e.g. dual-mem) reuse one encoding row across
             # several asm forms, so no row's fields are a strict subset of this
             # template's operands. Fall back to the single best-overlap row.
-            cand = [(c, t) for c, t in rows
+            cand = [(r, t) for r, t in rows
                     if not (has_sp and sp_t != (t == "SP-relative"))]
-            cand.sort(key=lambda ct: -len(row_operands(ct[0]) & (a_ops | b_ops)))
-            if cand and row_operands(cand[0][0]) & (a_ops | b_ops):
+            cand.sort(key=lambda rt: -len(row_operands(rt[0], _GRID)
+                                          & (a_ops | b_ops)))
+            if cand and row_operands(cand[0][0], _GRID) & (a_ops | b_ops):
                 hits, approx = [cand[0]], True
         out.append("")
         if not hits:
@@ -582,9 +559,9 @@ def frame_body_lines(frame, colwidths):
             continue
         if approx:
             out.append("    (closest-fit encoding — this frame shares rows across forms)")
-        for cells, tag in hits:
-            rops = row_operands(cells)
-            toks = _tokens(cells, w)
+        for row, tag in hits:
+            rops = row_operands(row, _GRID)
+            toks = _tokens(row, w, frame.get("sentinel"))
             a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
             b = render_line(toks, o5, colwidths, keep=lambda base: base in b_ops)
             out.append(f"{a}   {specialize(a_line, rops)}")
@@ -600,6 +577,8 @@ def load(path=None):
     its op tables. Returns (frames, info) with frames in codepoint order."""
     spec = yaml.safe_load(open(path or os.path.join(ROOT, "encoding.yaml")))
     grid = spec["grid"]
+    global _GRID
+    _GRID = grid
     frames = []
     for node in spec["doc"]:
         if "frame" not in node:
@@ -636,16 +615,23 @@ def load(path=None):
     # lending per (host, sentinel).
     lend = {}
     unhosted = []
-    for g in guests:
-        g["sentinel"] = guest_sentinel(g["spec"], spec["grid"]) or "x2"
+    for g in sorted(guests, key=lambda f: -f["budget"]):
+        # `rd: unused` leaves the sentinel to the enumerator: try each pattern
+        # in the pool, in a fixed order for determinism, and take the first
+        # (host, sentinel) with room.  Largest guests place first so the
+        # choice cannot be starved by a small one.
         need = g["budget"]                       # rd is fixed: one op per codepoint
-        for h in hosts:
-            key = (h["name"], g["sentinel"])
-            free = (1 << h["opsel"]) - lend.get(key, 0)
-            if free >= need:
-                lend[key] = lend.get(key, 0) + need
-                g["host"] = h["name"]
-                g["host_cp"] = need
+        for sentinel in SENTINEL_ORDER:
+            for h in hosts:
+                key = (h["name"], sentinel)
+                free = (1 << h["opsel"]) - lend.get(key, 0)
+                if free >= need:
+                    lend[key] = lend.get(key, 0) + need
+                    g["sentinel"] = sentinel
+                    g["host"] = h["name"]
+                    g["host_cp"] = need
+                    break
+            if g.get("host"):
                 break
         else:
             unhosted.append(g["name"])
@@ -892,7 +878,7 @@ def emit_yaml(frames, info):
         if f.get("host"):
             out.append(f"  hosted_in: {_q(f['host'])}")
             out.append(f"  rd: {f['sentinel']}"
-                       f"                      # the sentinel its rows draw:"
+                       f"                      # the allocated sentinel:"
                        f" what tells it from its host")
         out.append(f"  block: {f['space']}"
                    f"          # op-select indices; {f['used']} used, "

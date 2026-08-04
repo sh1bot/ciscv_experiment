@@ -32,12 +32,11 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from encoding_render import (ALL_IMM_NAMES, _cell, _packed, asm_operands, asm_pairs,
+from encoding_render import (ALL_IMM_NAMES, WRITABLE_FIELDS, field_width,
+                             asm_operands, asm_pairs,
                              op_imm, op_name)
 
-_LITERAL = re.compile(r"^[01o.](?: [01o.])*$")
 _BRACKET = re.compile(r"^\[\d+:\d+(?:\|\d+:\d+)*\]$")
-_FIXED_CELLS = {"h", "g", "fn3"}
 
 
 def _frame_operands(frame):
@@ -46,43 +45,64 @@ def _frame_operands(frame):
     return set().union(*(asm_operands(p) for p in pairs)) if pairs else set()
 
 
-def _check_row(frame, cells, ncols, ops_in_templates, errs):
+def _check_row(frame, row, grid, ops_in_templates, errs):
+    """A row is a mapping over the writable fields; see the grid comment.
+
+    Checked here: keys are writable field names (`g`/`h`/`funct3` and the
+    opcode fields are NOT writable — they are opcode bits); a split field's
+    sub-parts each declare their bits and sum to the field's width; every
+    value names either a template operand, an immediate field the pricing
+    model knows, or `unused`.
+    """
     name = frame.get("name")
-    span = sum(_cell(c)[1] for c in cells)
-    if span != ncols:
-        errs.append(f"{name}: row {cells} spans {span} columns, grid has {ncols}")
-    for cell in cells:
-        body, _ = _cell(cell)
-        # a cell may SHARE its column between two fields ("imma[6:5]+rda[2:0]");
-        # each half is checked on its own, and each must name its bits, since a
-        # shared column is priced by the range rather than by the column
-        for part in _packed(body):
-            _check_cell(frame, cell, part, ops_in_templates, errs,
-                        shared=len(_packed(body)) > 1)
+    if not isinstance(row, dict):
+        errs.append(f"{name}: row {row!r} is not a field mapping")
+        return
+    for key, v in row.items():
+        if key == "tag":
+            continue
+        if key not in WRITABLE_FIELDS:
+            errs.append(f"{name}: row writes field {key!r}; writable fields "
+                        f"are {list(WRITABLE_FIELDS)} — everything else is "
+                        f"opcode bits")
+            continue
+        if isinstance(v, list):
+            total = 0
+            for part in v:
+                if (not isinstance(part, dict)
+                        or set(part) != {"bits", "value"}
+                        or not isinstance(part.get("bits"), int)):
+                    errs.append(f"{name}: split field {key} sub-part {part!r} "
+                                f"must be {{bits: N, value: ...}}")
+                    continue
+                total += part["bits"]
+                _check_value(frame, key, str(part["value"]),
+                             ops_in_templates, errs)
+            want = field_width(grid, key)
+            if total != want:
+                errs.append(f"{name}: split field {key} sub-parts sum to "
+                            f"{total} bits; the field is {want}")
+        else:
+            _check_value(frame, key, str(v), ops_in_templates, errs)
 
 
-def _check_cell(frame, cell, body, ops_in_templates, errs, shared=False):
+def _check_value(frame, key, body, ops_in_templates, errs):
     name = frame.get("name")
-    if True:
-        stem, _, spec = body.partition("[")
-        if stem in _FIXED_CELLS or _LITERAL.match(body):
-            return
-        if shared and not spec:
-            errs.append(f"{name}: shared cell '{cell}' must give '{stem}' an "
-                        f"explicit bit range")
-            return
-        if stem in ALL_IMM_NAMES:
-            if spec and not _BRACKET.match("[" + spec):
-                errs.append(f"{name}: malformed immediate spec '{cell}'")
-            return
-        if stem.startswith("imm"):
-            # imm_field_bits also hard-errors on this; repeated here so the
-            # schema gate reports every problem in one pass.
-            errs.append(f"{name}: unknown immediate field '{stem}'")
-            return
-        if stem not in ops_in_templates:
-            errs.append(f"{name}: row cell '{cell}' names no template operand "
-                        f"(templates use {sorted(ops_in_templates)})")
+    stem, _, spec = body.partition("[")
+    if stem == "unused":
+        return
+    if stem in ALL_IMM_NAMES:
+        if spec and not _BRACKET.match("[" + spec):
+            errs.append(f"{name}: malformed immediate spec '{body}' in {key}")
+        return
+    if stem.startswith("imm"):
+        # imm_field_bits also hard-errors on this; repeated here so the
+        # schema gate reports every problem in one pass.
+        errs.append(f"{name}: unknown immediate field '{stem}' in {key}")
+        return
+    if stem not in ops_in_templates:
+        errs.append(f"{name}: row field {key} = '{body}' names no template "
+                    f"operand (templates use {sorted(ops_in_templates)})")
 
 
 def _check_contract(name, entry, errs):
@@ -112,6 +132,22 @@ def validate(spec):
     grid = spec.get("grid")
     if not grid:
         return ["no grid section"]
+    fields = grid.get("fields") or {}
+    if not fields:
+        errs.append("grid: no `fields` section (named fields with machine-word "
+                    "bit positions)")
+    else:
+        covered = []
+        for fname, fd in fields.items():
+            b = (fd or {}).get("bits")
+            if (not isinstance(b, list) or len(b) != 2
+                    or not all(isinstance(x, int) for x in b) or b[0] < b[1]):
+                errs.append(f"grid: field {fname} bits {b!r} must be "
+                            f"[hi, lo] with hi >= lo")
+                continue
+            covered += list(range(b[1], b[0] + 1))
+        if fields and sorted(covered) != list(range(32)):
+            errs.append("grid: fields do not tile bits 0..31 exactly")
     cols = grid.get("columns") or []
     bits = grid.get("bits") or []
     disp = grid.get("display") or []
@@ -193,8 +229,7 @@ def validate(spec):
 
         ops_in_templates = _frame_operands(frame)
         for row in frame.get("rows") or []:
-            cells = row["c"] if isinstance(row, dict) else row
-            _check_row(frame, cells, len(cols), ops_in_templates, errs)
+            _check_row(frame, row, grid, ops_in_templates, errs)
         for cluster in frame.get("ops") or []:
             if "same_op" in cluster:
                 if not isinstance(cluster["same_op"], bool):

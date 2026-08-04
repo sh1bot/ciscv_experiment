@@ -22,8 +22,7 @@ The planning documents name `encoding.yaml` as the source of truth (see
    default, but RVE (16 registers) has no x31 and needs another — x7 is the
    candidate.  Settle before any ABI claim; `yaml_migration.md`'s
    "compiler's own register, required dead" wording is now superseded.
-11. **Row layout should name fields, not columns** (design agreed, not yet
-   applied).  `grid` should enumerate the essential fields with their official
+11. **Row layout should name fields, not columns** — DONE (2026-08-04).  `grid` should enumerate the essential fields with their official
    bit positions — `rd`, `funct3`, `rs1`, `rs2`, `funct5`, `opcode5`, `g`, `h`
    — and a row should then be a mapping, `{rd: foo, rs1: bar, ...}`, with any
    field left unset being free for opcode assignment.  A field split into

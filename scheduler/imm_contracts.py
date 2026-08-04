@@ -88,8 +88,6 @@ def _rd_column():
     whose rd column carries an immediate or the literal sentinel owe nothing:
     they appear here with no slots."""
     spec = yaml.safe_load(open(_YAML))
-    grid = spec["grid"]
-    rdcol = grid["columns"].index("rd")
     out = {}
     for node in spec["doc"]:
         frame = node.get("frame") if isinstance(node, dict) else None
@@ -99,22 +97,16 @@ def _rd_column():
                  or [x.strip() for x in frame["name"].split(",")])
         slots = set()
         for row in frame.get("rows") or []:
-            cells = row["c"] if isinstance(row, dict) else row
-            pos = 0
-            for cell in cells:
-                body, _, n = cell.rpartition("*")
-                span = int(n) if n.isdigit() else 1
-                if span == 1:
-                    body = cell
-                if pos <= rdcol < pos + span:
-                    stem = body.split("[")[0]
-                    # rda/rsda -> slot a, rdb/rsdb -> slot b.  Only DESTINATION
-                    # operands matter: a source in this column is read, not
-                    # written, and cannot collide with the sentinel's meaning.
-                    if stem.startswith(("rd", "rsd")) and stem[-1] in "ab":
-                        slots.add(stem[-1])
-                    break
-                pos += span
+            v = row.get("rd")
+            values = ([str(p["value"]) for p in v] if isinstance(v, list)
+                      else [str(v)] if v is not None else [])
+            for val in values:
+                stem = val.split("[")[0]
+                # rda/rsda -> slot a, rdb/rsdb -> slot b.  Only DESTINATION
+                # operands matter: a source in this column is read, not
+                # written, and cannot collide with the sentinel's meaning.
+                if stem.startswith(("rd", "rsd")) and stem[-1] in "ab":
+                    slots.add(stem[-1])
         for rn in names:
             out[rn] = tuple(sorted(slots))
     return out

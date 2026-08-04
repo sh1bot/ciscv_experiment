@@ -40,43 +40,39 @@ def _center(text, w):
     return " " * left + text + " " * (pad - left)
 
 
-def _cell(text):
-    """Split a cell token into (text, span). 'imma[5:0]*2' -> ('imma[5:0]', 2)."""
-    if "*" in text:
-        body, _, n = text.rpartition("*")
-        if n.isdigit():
-            return body, int(n)
-    return text, 1
+# A row is a MAPPING over the operand-bearing fields of the grid: any field it
+# leaves unset is free for opcode assignment, `unused` marks a column that
+# carries no operand (the enumerator allocates its selector pattern from the
+# reserved sentinel pool), and a field split between two operands states its
+# sub-parts as {bits, value} entries, most-significant first.
+WRITABLE_FIELDS = ("funct5", "rs2", "rs1", "rd")
 
 
-def _packed(body):
-    """Sub-fields of a cell that SHARES one column between two fields.
+def field_width(grid, field):
+    """Bits of a named grid field, from its declared machine-word positions."""
+    hi, lo = grid["fields"][field]["bits"]
+    return hi - lo + 1
 
-    'imma[6:5]+rda[2:0]' -> ['imma[6:5]', 'rda[2:0]'].  A plain cell returns a
-    single-element list, so callers can treat every cell the same way.
 
-    Sharing is how a row draws a 3-bit register beside a 7-bit immediate: the
-    column rule (five bits per register column) prices whole columns, but a
-    row is free to divide one between two fields as long as the total still
-    fits.  A packed field is charged the bits its range actually names, not
-    the whole column -- otherwise a shared column would be billed twice.
+def row_parts(row, grid):
+    """Every operand piece of a mapping-form row, in column order.
+
+    Yields (field, stem, bits, raw): `bits` is the field's full width for a
+    plain value and the declared {bits} for a sub-part of a split field --
+    which is what makes a split field priceable without billing the register
+    beside it for the immediate's column.
     """
-    return body.split("+") if "+" in body else [body]
-
-
-def _range_bits(body):
-    """Bits a field's explicit range names: 'imma[6:5]' -> 2, 'x[4:0|9:5]' -> 10."""
-    m = re.search(r"\[([^\]]*)\]", body)
-    if not m:
-        return None
-    total = 0
-    for part in m.group(1).split("|"):
-        if ":" in part:
-            hi, lo = (int(x) for x in part.split(":"))
-            total += abs(hi - lo) + 1
-        elif part.strip().isdigit():
-            total += 1
-    return total or None
+    for field in grid["columns"]:
+        v = row.get(field)
+        if v is None:
+            continue
+        if isinstance(v, list):
+            for part in v:
+                raw = str(part["value"])
+                yield field, raw.split("[")[0], int(part["bits"]), raw
+        else:
+            raw = str(v)
+            yield field, raw.split("[")[0], field_width(grid, field), raw
 
 
 def _spanned(widths, pos, span):
@@ -95,14 +91,32 @@ def header_lines(colwidths):
     return [top, mid, bot]
 
 
-def render_row(cells, colwidths, tag=None):
-    rendered, pos = [], 0
-    for token in list(cells) + TAIL_CELLS:
-        text, span = _cell(token)
-        rendered.append(_center(text, _spanned(colwidths, pos, span)))
-        pos += span
-    if pos != len(colwidths):
-        raise ValueError(f"row spans {pos} columns, expected {len(colwidths)}: {cells}")
+# What an unset field displays as: opcode bits show their column label, and an
+# unset operand field is explicitly free.
+_UNSET_LABEL = {"h": "h", "g": "g", "funct3": "fn3"}
+
+
+def _display_value(v):
+    # A split field displays its stems only ("imma+rda"): the exact sub-ranges
+    # are structured data in the yaml, and the full spelling overflows the box.
+    if isinstance(v, list):
+        return "+".join(str(p["value"]).split("[")[0] for p in v)
+    return str(v)
+
+
+def render_row(row, grid, colwidths, tag=None):
+    rendered = []
+    for pos, field in enumerate(grid["columns"]):
+        v = row.get(field)
+        if v is None:
+            text = _UNSET_LABEL.get(field, "free")
+        else:
+            text = _display_value(v)
+        rendered.append(_center(text, _spanned(colwidths, pos, 1)))
+    pos = len(grid["columns"])
+    for token in TAIL_CELLS:
+        rendered.append(_center(token, _spanned(colwidths, pos, 1)))
+        pos += 1
     line = "│" + "│".join(rendered) + "│"
     if tag:
         line += f" ({tag})"
@@ -147,10 +161,8 @@ def render(spec) -> str:
             out.append("")
             out.extend(header)
             for row in f["rows"]:
-                if isinstance(row, dict):
-                    out.append(render_row(row["c"], widths, row.get("tag")))
-                else:
-                    out.append(render_row(row, widths))
+                out.append(render_row(row, spec["grid"], widths,
+                                      row.get("tag")))
             if f.get("notes"):
                 out.append("")
                 import textwrap as _tw
@@ -172,7 +184,6 @@ def render(spec) -> str:
 _OPERAND = re.compile(
     r"\b(rs1a|rs2a|rs1b|rs2b|rsda|rsdb|rda|rdb|rbase|imma|immb|imm|tmp)\b")
 _IMPLICIT = {"tmp", "sp", "ra", "zero", "x0", "x31"}
-_NON_OPERAND_CELLS = {"h", "g", "i", "fn3", "opcode5", "10"}
 
 
 def asm_pairs(frame):
@@ -189,17 +200,10 @@ def asm_operands(pair):
     return ops - _IMPLICIT
 
 
-def row_operands(cells):
-    ops = set()
-    for cell in cells:
-        if re.fullmatch(r"[01 ]+", cell):       # fixed bit pattern e.g. "0 0 0 0 1"
-            continue
-        body, _span = _cell(cell)
-        for part in _packed(body):              # a shared column names two
-            name = part.split("[")[0].strip()
-            if name and name not in _NON_OPERAND_CELLS:
-                ops.add(name)
-    return ops
+def row_operands(row, grid):
+    """Operand stems a mapping-form row encodes (`unused` is not an operand)."""
+    return {stem for _f, stem, _b, _raw in row_parts(row, grid)
+            if stem != "unused"}
 
 
 def template_op_fields(frame):
@@ -231,7 +235,7 @@ def template_op_fields(frame):
     return out
 
 
-def unencodable_clusters(frame):
+def unencodable_clusters(frame, grid):
     """(opA, opB) combinations `ops` allows for which NO row supplies the fields
     both sides need. Only pairs whose ops are both named in the templates are
     judged; a placeholder-templated frame (`alu`, `load`, ...) is skipped.
@@ -240,8 +244,7 @@ def unencodable_clusters(frame):
     side may be individually encodable while no single row carries both.
     """
     tof = template_op_fields(frame)
-    rows = [set(row_operands(r["c"] if isinstance(r, dict) else r))
-            for r in frame.get("rows", [])]
+    rows = [set(row_operands(r, grid)) for r in frame.get("rows", [])]
     bad = []
     for cluster in frame.get("ops") or []:
         for ea in cluster.get("a", []):
@@ -269,11 +272,11 @@ def lint(spec):
         f = node["frame"]
         pairs = asm_pairs(f)
         asm_ops = set().union(*(asm_operands(p) for p in pairs)) if pairs else set()
-        rows = [r["c"] if isinstance(r, dict) else r for r in f["rows"]]
-        row_ops = set().union(*(row_operands(r) for r in rows)) if rows else set()
+        row_ops = (set().union(*(row_operands(r, grid) for r in f["rows"]))
+                   if f.get("rows") else set())
 
         bad_pair = [p for p in pairs if len(p) != 2]
-        unencodable = unencodable_clusters(f)
+        unencodable = unencodable_clusters(f, grid)
         missing = asm_ops - row_ops           # operand in asm, never encoded
         spurious = row_ops - asm_ops          # field in a row, not in any asm
         # A declared op width above the drawn field rides the opcode list at
@@ -433,22 +436,18 @@ def rd_column_cells(frame, grid):
     The rd column is where the x0/x2 sentinel lives (encoding.yaml `reserved`),
     so what a frame puts there decides its role: a destination register in
     every row means the frame OWES the reservation and can HOST a guest in the
-    slice its rd cannot reach; a literal bit pattern means the frame IS a
-    guest, selected by that pattern rather than by an opcode of its own; an
+    slice its rd cannot reach; `unused` means the frame IS a guest, selected
+    by a sentinel pattern the enumerator allocates from the reserved pool; an
     immediate means neither -- the column is not a register field at all."""
-    col = grid["columns"].index("rd")
     out = []
     for row in frame.get("rows") or []:
-        cells = row["c"] if isinstance(row, dict) else row
-        pos = 0
-        for cell in cells:
-            body, span = _cell(cell)
-            if pos <= col < pos + span:
-                out.append(body.split("[")[0])
-                break
-            pos += span
-        else:
+        v = row.get("rd")
+        if v is None:
             out.append(None)
+        elif isinstance(v, list):
+            out.append("+".join(str(p["value"]).split("[")[0] for p in v))
+        else:
+            out.append(str(v).split("[")[0])
     return out
 
 
@@ -459,7 +458,7 @@ def rd_column_role(frame, grid):
         return None
     if all(s.startswith(("rd", "rsd")) and s[-1] in "ab" for s in stems):
         return "host"
-    if all(re.fullmatch(r"[01](?: [01])*", s or "") for s in stems):
+    if all(s == "unused" for s in stems):
         return "guest"
     return None
 
@@ -474,51 +473,21 @@ def imm_field_bits(frame, grid, slot):
     is five bits per register column it consumes, and grows incrementally past
     that by taking multiple opcode-list entries — an op declaring `imm: {bits: N}` occupies
     2^(N - field) entries, which `_slot_weight` charges. There is no other
-    widening mechanism. A row that parks an immediate in `g`/`h`, or names a
-    field the model does not know, is an error, not a wider field."""
-    cols, bits = grid["columns"], grid["bits"]
-    gi, hi = cols.index("g"), cols.index("h")
+    widening mechanism. `g` and `h` are opcode bits and not writable by a row,
+    and a field name the model does not know is an error, not a wider field."""
     names = IMM_NAMES[slot]
     width = 0
     for row in frame.get("rows", []):
-        tag = row.get("tag") if isinstance(row, dict) else None
-        if tag == "SP-relative":
-            continue
-        cells = row["c"] if isinstance(row, dict) else row
-        pos = 0
-        row_width = 0     # a field may be SPLIT across cells (imma[9:5] in one
-        for cell in cells:  # column, imma[4:0] in another) — sum within a row
-            body, span = _cell(cell)
-            parts = _packed(body)
-            for part in parts:
-                stem = part.split("[")[0]
-                if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
-                    raise ValueError(
-                        f"{frame.get('name')}: row names immediate field "
-                        f"'{stem}', which the pricing model does not recognise "
-                        f"(expected one of {sorted(ALL_IMM_NAMES)}). An "
-                        f"unrecognised name is never charged for its width.")
-                if stem not in names:
-                    continue
-                cspan = range(pos, pos + span)
-                if any(c in (gi, hi) for c in cspan):
-                    raise ValueError(
-                        f"{frame.get('name')}: row parks '{part}' in g/h. "
-                        f"Immediate fields are register columns only; extra "
-                        f"range is bought by opcode duplication "
-                        f"(imm: {{bits}}), never by widening the row.")
-                if len(parts) > 1:
-                    # a shared column: charge only the bits this field names,
-                    # so the register beside it is not billed to the immediate
-                    named = _range_bits(part)
-                    if named is None:
-                        raise ValueError(
-                            f"{frame.get('name')}: packed cell '{body}' must "
-                            f"give every field an explicit bit range.")
-                    row_width += named
-                else:
-                    row_width += sum(bits[c] for c in cspan)
-            pos += span
+        row_width = 0     # a field may be SPLIT across columns (imma[9:5] in
+        for _f, stem, bits, raw in row_parts(row, grid):   # one, [4:0] in another)
+            if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
+                raise ValueError(
+                    f"{frame.get('name')}: row names immediate field "
+                    f"'{stem}', which the pricing model does not recognise "
+                    f"(expected one of {sorted(ALL_IMM_NAMES)}). An "
+                    f"unrecognised name is never charged for its width.")
+            if stem in names:
+                row_width += bits
         width = max(width, row_width)
     return width
 
@@ -552,15 +521,12 @@ def lint_frame(frame, grid):
     return out
 
 
-def shared_imm(frame):
+def shared_imm(frame, grid):
     """True if the frame's rows name one `imm` field serving BOTH slots, rather
     than separate `imma`/`immb`."""
-    for row in frame.get("rows", []):
-        cells = row["c"] if isinstance(row, dict) else row
-        for cell in cells:
-            if _cell(cell)[0].split("[")[0] == "imm":
-                return True
-    return False
+    return any(stem == "imm"
+               for row in frame.get("rows", [])
+               for _f, stem, _b, _raw in row_parts(row, grid))
 
 
 def _ext(entry, base):
@@ -583,7 +549,7 @@ def opcode_codepoints(frame, grid):
         return None
     base_a = imm_field_bits(frame, grid, "a")
     base_b = imm_field_bits(frame, grid, "b")
-    if shared_imm(frame):
+    if shared_imm(frame, grid):
         base = max(base_a, base_b)
         total = 0
         for c in ops:

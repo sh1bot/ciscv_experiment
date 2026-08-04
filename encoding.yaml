@@ -59,6 +59,24 @@ grid:
   columns:     [h, funct5, g, rs2, rs1, funct3, rd]
   display:     [1, 9,      1, 9,   9,   5,      9]
   bits:        [1, 5,      1, 5,   5,   3,      5]   # + opcode5(5) + marker(2) = 32
+  # The named fields and their machine-word bit positions.  A row is a mapping
+  # over the OPERAND-BEARING fields only: any field a row leaves unset is free
+  # for opcode assignment, and `g`, `h`, `funct3`, `opcode5` and `marker` are
+  # not writable by a row at all -- they are opcode bits.  `rd: unused` means
+  # the column carries no operand and the enumerator allocates its selector
+  # pattern from the reserved pool (the x0/x2 sentinels, A1.11).  A field split
+  # between two operands states its sub-parts explicitly as {bits, value}
+  # entries, most-significant first, summing to the field's width.
+  fields:
+    h:       {bits: [31, 31]}
+    funct5:  {bits: [30, 26]}
+    g:       {bits: [25, 25]}
+    rs2:     {bits: [24, 20]}
+    rs1:     {bits: [19, 15]}
+    funct3:  {bits: [14, 12]}
+    rd:      {bits: [11, 7]}
+    opcode5: {bits: [6, 2]}
+    marker:  {bits: [1, 0], value: 0b10}
 
 # Named opcode sets, referenced from frame `ops` via YAML aliases (*name).
 # Kept here so the large recurring lists are written once.
@@ -422,10 +440,10 @@ doc:
         - a: [{op: addi, imm: *ac6}, and, or, sltiu, srli, xor, xori]
           b: [{op: addi, imm: *ac6}, add, andi, or, slli, sltiu, xor]
       rows:
-        - ["h", "rs2b",      "g", "rs2a",      "rs1a", "fn3", "rdb"]
-        - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
-        - ["h", "immb[4:0]", "g", "rs2a",      "rs1a", "fn3", "rdb"]
-        - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
+        - {funct5: rs2b, rs2: rs2a, rs1: rs1a, rd: rdb}
+        - {funct5: rs2b, rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rs1a, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
 
   - frame:
       name: load-alu-chain
@@ -455,8 +473,8 @@ doc:
         - {a: [{op: lw, imm: {bits: 6, signed: false, scale: 4}},
                {op: ld, imm: {bits: 6, signed: false, scale: 8}}], b: *alu_chain}
       rows:
-        - ["h", "rs2b",      "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
-        - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
+        - {funct5: rs2b, rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
 
   - frame:
       name: alu-store-chain
@@ -468,8 +486,8 @@ doc:
       ops:
         - {a: *alu_chain, b: [sw, sd]}
       rows:
-        - ["h", "rs1b",      "g", "rs2a",      "rs1a", "fn3", "immb[4:0]"]
-        - ["h", "rs1b",      "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
+        - {funct5: rs1b, rs2: rs2a, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
 
   - frame:
       name: czero-or-chain
@@ -503,7 +521,7 @@ doc:
       ops:
         - {a: [czero.eqz, czero.nez], b: [or]}
       rows:
-        - ["h", "rs2b", "g", "rs2a", "rs1a", "fn3", "rdb"]
+        - {funct5: rs2b, rs2: rs2a, rs1: rs1a, rd: rdb}
 
   - frame:
       name: addi-store-chain
@@ -536,7 +554,7 @@ doc:
       ops:
         - {a: [{op: addi, imm: {bits: 10, signed: true}}], b: [sb, sh, sw, sd]}
       rows:
-        - ["h", "rs1a", "g", "imma[4:0|9:5]*2", "fn3", "rbase"]
+        - {funct5: rs1a, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rbase}
       notes:
         - >-
           The data width comes from the op list (sb/sh/sw/sd), as in the
@@ -557,8 +575,8 @@ doc:
       ops:
         - {a: *loads, b: *loads}
       rows:
-        - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "rdb"]
-        - ["h", "immb[9:5]", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: "immb[9:5]", rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
       notes:
         - >-
           TODO: decide how to balance imma and immb sizes.
@@ -572,7 +590,7 @@ doc:
       ops:
         - {a: [*li_8s], b: *branches}
       rows:
-        - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1b", "fn3", "immb[4:0]"]
+        - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rs1b, rd: "immb[4:0]"}
       notes:
         - >-
           `imma` is a 5-bit register column; `li` declares 8 bits, bought by
@@ -592,7 +610,7 @@ doc:
       ops:
         - {a: [{op: andi, imm: {bits: 6, signed: false}}, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
       rows:
-        - ["h", "immb[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
+        - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
 
   - frame:
       name: load-base-branch-pair
@@ -604,7 +622,7 @@ doc:
       ops:
         - {a: *loads, b: [beqz, bnez]}
       rows:
-        - ["h", "rda", "g", "imma[4:0]", "rs1a", "fn3", "immb[4:0]"]
+        - {funct5: rda, rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
       notes:
         - >-
           `immb` is the branch displacement, a 5-bit field.  Displacements
@@ -627,7 +645,7 @@ doc:
       ops:
         - {a: [lw, ld, lbu], b: [beqz, bnez]}
       rows:
-        - ["h", "rda", "g", "imma[4:0|9:5]*2", "fn3", "immb[4:0]"]
+        - {funct5: rda, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: "immb[4:0]"}
       notes:
         - >-
           `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
@@ -645,7 +663,7 @@ doc:
       # (measurement optimism, declared rather than left to drift).
       measures_also: {a: [addiw]}
       rows:
-        - ["h", "immb[9:5]", "g", "rs2b", "rsda", "fn3", "immb[4:0]"]
+        - {funct5: "immb[9:5]", rs2: rs2b, rs1: rsda, rd: "immb[4:0]"}
       notes:
         - >-
           The step is +/-1, implied by the opcode (`inc`/`dec` = `addi rsda,
@@ -744,7 +762,7 @@ doc:
       ops:
         - {a: [{op: li, imm: {bits: 10, signed: true}}], b: [czero.eqz, czero.nez]}
       rows:
-        - ["h", "rs2b", "g", "imma[4:0|9:5]*2", "fn3", "rdb"]
+        - {funct5: rs2b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rdb}
 
   - frame:
       name: index-mem-chain
@@ -790,8 +808,8 @@ doc:
         - {a: [sh2add], b: [lw, sw]}
         - {a: [sh3add], b: [ld, sd]}
       rows:
-        - ["h", "rs2a", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
-        - ["h", "rs2a", "g", "rs2b",      "rs1a", "fn3", "immb[4:0]"]
+        - {funct5: rs2a, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: rs2a, rs2: rs2b, rs1: rs1a, rd: "immb[4:0]"}
 
   - frame:
       name: pre-inc-pair
@@ -809,10 +827,10 @@ doc:
         - {a: [sh3add], b: [ld, sd]}
         - {a: [sh2add], b: [lw, sw]}
       rows:
-        - ["h", "rs2b",      "g", "rs2a", "rsda", "fn3", "immb[4:0]"]
-        - ["h", "immb[4:0]", "g", "rs2a", "rsda", "fn3", "rdb"]
-        - ["h", "rs2b", "g", "imma[4:0|9:5]*2", "fn3", "rsda"]
-        - ["h", "rdb",  "g", "imma[4:0|9:5]*2", "fn3", "rsda"]
+        - {funct5: rs2b, rs2: rs2a, rs1: rsda, rd: "immb[4:0]"}
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rsda, rd: rdb}
+        - {funct5: rs2b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rsda}
+        - {funct5: rdb, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rsda}
       notes:
         - >-
           The addi rows access AT the bumped pointer: at genuine (non-
@@ -851,8 +869,8 @@ doc:
         - {a: {op: ld, rd: 10, rs1: 12, imm: 0},
            b: {op: addi, rd: 12, rs1: 12, imm: 8}}
       rows:
-        - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "imma[4:0]"]
-        - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rda"]
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rsda, rd: "imma[4:0]"}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rsda, rd: rda}
       notes:
         - >-
           Timing oddity here because reg in `rd` field is written in first
@@ -904,8 +922,8 @@ doc:
         - {a: {op: sx, rs1: 2, rs2: 10, imm: 0},
            b: {op: sx, rs1: 2, rs2: 11, imm: 4}, lockstep: true}
       rows:
-        - ["h", "rda",  "g", "imm[4:0|9:5]*2", "fn3", "rdb"]
-        - ["h", "rs2b", "g", "rs2a", "imm[9:5]", "fn3", "imm[4:0]"]
+        - {funct5: rda, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: rdb}
+        - {funct5: rs2b, rs2: rs2a, rs1: "imm[9:5]", rd: "imm[4:0]"}
       notes:
         - >-
           both opcodes in a pair must be identical operations
@@ -961,8 +979,8 @@ doc:
         - {a: {op: sd, rs1: 12, rs2: 10, imm: 0},
            b: {op: sd, rs1: 12, rs2: 11, imm: 8}, lockstep: true}
       rows:
-        - ["h", "rda",  "g", "imm[4:0]",   "rbase", "fn3", "rdb"]
-        - ["h", "rs2b", "g", "rs2a",        "rbase", "fn3", "imm[4:0]"]
+        - {funct5: rda, rs2: "imm[4:0]", rs1: rbase, rd: rdb}
+        - {funct5: rs2b, rs2: rs2a, rs1: rbase, rd: "imm[4:0]"}
       notes:
         - >-
           both opcodes in a pair must be identical operations
@@ -1009,7 +1027,7 @@ doc:
         - {a: {op: ld, rd: 31, rs1: 12, imm: 0},
            b: {op: sd, rs1: 13, rs2: 31, imm: 0}}
       rows:
-        - ["h", "immb[4:0]", "g", "imma[4:0]", "rs1a", "fn3", "rs1b"]
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rs1b}
       notes:
         - >-
           Both offsets are width-scaled and unsigned; the loaded value is
@@ -1047,7 +1065,7 @@ doc:
         - {a: {op: addi, rd: 31, rs1: 12, imm: 8},
            b: {op: sw, rs1: 13, rs2: 31, imm: 4}}
       rows:
-        - ["h", "rs1a", "g", "immb[4:0]", "rbase", "fn3", "imma[4:0]"]
+        - {funct5: rs1a, rs2: "immb[4:0]", rs1: rbase, rd: "imma[4:0]"}
       notes:
         - >-
           `immb` is width-scaled and unsigned; `imma` is signed.  The stored
@@ -1140,12 +1158,13 @@ doc:
         - {a: {op: lw, rd: 31, rs1: 12, imm: 0},
            b: {op: jalr, rd: 6, rs1: 31, imm: 0}}
       rows:
-        - ["h", "imma[9:5]", "g", "imma[4:0]", "rs1a", "fn3", "0 0 0 0 0"]
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: "unused"}
       notes:
         - >-
-          The `rd` column carries the x0 sentinel, not the x2 one every
-          other hosted frame uses.  Both are reserved, so x0 was standing
-          empty -- this frame rides there and competes with nothing.
+          `rd: unused` leaves the selecting sentinel to the enumerator, which
+          allocates it from the reserved x0/x2 pool per (host, sentinel) --
+          both patterns are reserved either way, so whichever has room
+          carries this frame.
         - >-
           The link register is NOT drawn -- both templates share one row and
           are told apart by the op-select, which is why the budget is 4 for
@@ -1230,9 +1249,14 @@ doc:
         - {a: {op: addi, rd: 10, rs1: 8, imm: 0},
            b: {op: jalr, rd: 0, rs1: 6, imm: 16}}
       rows:
-        - ["h", "rs1a",      "g", "immb[4:0|9:5]*2", "fn3", "rda"]
-        - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "imma[6:5]+rda[2:0]"]
-        - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "rs2a"]
+        - {funct5: rs1a, rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
+        - funct5: "imma[4:0]"
+          rs2: "immb[4:0]"
+          rs1: "immb[9:5]"
+          rd:
+            - {bits: 2, value: "imma[6:5]"}
+            - {bits: 3, value: rda}
+        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rs2a}
       notes:
         - >-
           Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the
@@ -1277,7 +1301,7 @@ doc:
         - {a: [divw],   b: [remw]}
         - {a: [divuw],  b: [remuw]}
       rows:
-        - ["h", "rda", "g", "rs2a", "rs1a", "fn3", "rdb"]
+        - {funct5: rda, rs2: rs2a, rs1: rs1a, rd: rdb}
       notes:
         - >-
           KEPT DELIBERATELY DESPITE A NEAR-ZERO SCORE. Do not cut this frame
@@ -1371,9 +1395,9 @@ doc:
         - {a: [*li_6s], b: [*li_6s, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
-        - ["h", "rda", "g", "rs2b", "rs1a", "fn3", "rdb"]
-        - ["h", "rda", "g", "immb[4:0]", "rs1a", "fn3", "rdb"]
-        - ["h", "rda", "g", "immb[4:0]", "imma[4:0]", "fn3", "rdb"]
+        - {funct5: rda, rs2: rs2b, rs1: rs1a, rd: rdb}
+        - {funct5: rda, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: rda, rs2: "immb[4:0]", rs1: "imma[4:0]", rd: rdb}
 
   - frame:
       name: rsd-alu-pair
@@ -1385,10 +1409,10 @@ doc:
       ops:
         - {a: *rsd_alu, b: *rsd_alu}
       rows:
-        - ["h", "rs2b",      "g", "rs2a",      "rsda", "fn3", "rsdb"]
-        - ["h", "rs2b",      "g", "imma[4:0]", "rsda", "fn3", "rsdb"]
-        - ["h", "immb[4:0]", "g", "rs2a",      "rsda", "fn3", "rsdb"]
-        - ["h", "immb[4:0]", "g", "imma[4:0]", "rsda", "fn3", "rsdb"]
+        - {funct5: rs2b, rs2: rs2a, rs1: rsda, rd: rsdb}
+        - {funct5: rs2b, rs2: "imma[4:0]", rs1: rsda, rd: rsdb}
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rsda, rd: rsdb}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rsda, rd: rsdb}
       notes:
         - >-
           The four register operands occupy the four 5-bit columns -- 20
@@ -1406,7 +1430,7 @@ doc:
       ops:
         - {a: [addi], b: [sw, sd]}
       rows:
-        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
+        - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
 
   - frame:
       name: epilogue-pair
@@ -1418,7 +1442,7 @@ doc:
       ops:
         - {a: [addi], b: [jalr, ret]}
       rows:
-        - ["h", "rs1b", "g", "imm[4:0|9:5]*2", "fn3", "0 0 0 1 0"]
+        - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
 
   - frame:
       name: arith-jump-pair
@@ -1432,8 +1456,8 @@ doc:
       ops:
         - {a: *rsd_alu_j, b: [ret, jalr, j, jal]}
       rows:
-        - ["h", "rs1b", "g", "rs2a",      "rsda", "fn3", "0 0 0 1 0"]
-        - ["h", "rs1b", "g", "imma[4:0]", "rsda", "fn3", "0 0 0 1 0"]
+        - {funct5: rs1b, rs2: rs2a, rs1: rsda, rd: "unused"}
+        - {funct5: rs1b, rs2: "imma[4:0]", rs1: rsda, rd: "unused"}
 
   - frame:
       name: setup-jump-pair
@@ -1473,10 +1497,10 @@ doc:
         - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
         - {a: [li], b: [j]}
       rows:
-        - ["h", "rs1b", "g", "imma[4:0]", "rs1a", "fn3", "rda"]
-        - ["h", "rs1b", "g", "imma[4:0|9:5]*2", "fn3", "rda"]
-        - ["h", "rs1a",      "g", "immb[4:0|9:5]*2", "fn3", "rda"]
-        - ["h", "imma[4:0]", "g", "immb[4:0|9:5]*2", "fn3", "rda"]
+        - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: rda}
+        - {funct5: rs1b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rda}
+        - {funct5: rs1a, rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
+        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
       notes:
         - >-
           `j` covers `jal x0`; a jal with a real destination is a call and
