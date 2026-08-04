@@ -230,5 +230,12 @@ not the frame.  Do not cut it on pairing-rate evidence.
   mem-base-pair sp/base split; regenerate with `util/achievable.py` /
   `util/needed.py` before relying on a number.
 - `FINDINGS.md` — subagent review findings; §5 refutes §1, read it that way.
-- `scores.txt`, `baseline.txt`, `rule-hits*.txt`, `scheduler-runs.txt` — raw
-  outputs behind the tables.
+- `rule-hits-table.txt` — accumulated frame hits and hits-per-codepoint over
+  the whole corpus, split RV32 / RV64.  Regenerate with `util/rule_hits.py`;
+  the per-corpus stats blocks it reads are kept under `rule-hits/`, so
+  `--from-raw results/corpus/rule-hits` re-tabulates without re-scheduling.
+- `scores.txt`, `baseline.txt`, `scheduler-runs.txt` — raw outputs behind the
+  tables.  HISTORICAL: all three predate the jalr decode fix and the frame
+  additions since; `scores.txt` is superseded by the table at the top of this
+  file.  `rule-hits.txt` (per-corpus, per-rule) is retired — its frame names
+  are the pre-`d31e4dc` ones and `rule-hits/` carries the same data.

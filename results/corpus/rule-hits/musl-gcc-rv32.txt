@@ -1,0 +1,35 @@
+# musl-gcc-rv32 (RV32)
+# --- file totals ---
+#   instructions: 119956  packets: 94155  pairs: 25801  solos: 68354
+#   pair rate:    27.4%  (51602/119956 instructions paired)
+#   RVC-eligible: 56.8%  (68193/119956 instructions)
+#   rule hits:
+#     rsd-alu-pair: 2205
+#     alu-alu-chain: 1187
+#     load-alu-chain: 585
+#     addi-store-chain: 177
+#     alu-store-chain: 286
+#     load-sp-branch-pair: 171
+#     load-base-branch-pair: 727
+#     deref-load-chain: 32
+#     base-load-chain: 14
+#     mem-sp-pair: 7574
+#     mem-base-pair: 1653
+#     load-store-chain: 521
+#     addi-store-off-chain: 3
+#     load-call-chain: 2
+#     macro-op-pair: 27
+#     post-inc-pair: 1021
+#     indep-pair: 4135
+#     li-branch-chain: 837
+#     inc-branch-pair: 110
+#     bit-test-branch-chain: 200
+#     prologue-pair: 298
+#     epilogue-pair: 567
+#     czero-or-chain: 0
+#     li-czero-chain: 0
+#     index-mem-chain: 122
+#     pre-inc-pair: 283
+#     arith-jump-pair: 1880
+#     setup-jump-pair: 1184
+#     arg-call-pair: 0

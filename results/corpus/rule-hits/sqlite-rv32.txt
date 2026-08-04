@@ -1,0 +1,35 @@
+# sqlite-rv32 (RV32)
+# --- file totals ---
+#   instructions: 192768  packets: 148183  pairs: 44585  solos: 103598
+#   pair rate:    30.1%  (89170/192768 instructions paired)
+#   RVC-eligible: 58.8%  (113274/192768 instructions)
+#   rule hits:
+#     rsd-alu-pair: 3397
+#     alu-alu-chain: 1694
+#     load-alu-chain: 2631
+#     addi-store-chain: 511
+#     alu-store-chain: 415
+#     load-sp-branch-pair: 441
+#     load-base-branch-pair: 3742
+#     deref-load-chain: 254
+#     base-load-chain: 612
+#     mem-sp-pair: 7183
+#     mem-base-pair: 2722
+#     load-store-chain: 535
+#     addi-store-off-chain: 213
+#     load-call-chain: 22
+#     macro-op-pair: 77
+#     post-inc-pair: 685
+#     indep-pair: 5938
+#     li-branch-chain: 1192
+#     inc-branch-pair: 257
+#     bit-test-branch-chain: 891
+#     prologue-pair: 901
+#     epilogue-pair: 460
+#     czero-or-chain: 934
+#     li-czero-chain: 99
+#     index-mem-chain: 476
+#     pre-inc-pair: 384
+#     arith-jump-pair: 3987
+#     setup-jump-pair: 3932
+#     arg-call-pair: 0

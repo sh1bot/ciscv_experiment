@@ -1,0 +1,35 @@
+# cpp-rv64 (RV64)
+# --- file totals ---
+#   instructions: 411687  packets: 327503  pairs: 84184  solos: 243319
+#   pair rate:    25.7%  (168368/411687 instructions paired)
+#   RVC-eligible: 59.8%  (246217/411687 instructions)
+#   rule hits:
+#     rsd-alu-pair: 3324
+#     alu-alu-chain: 2428
+#     load-alu-chain: 1917
+#     addi-store-chain: 665
+#     alu-store-chain: 1291
+#     load-sp-branch-pair: 640
+#     load-base-branch-pair: 4690
+#     deref-load-chain: 616
+#     base-load-chain: 1777
+#     mem-sp-pair: 19522
+#     mem-base-pair: 4952
+#     load-store-chain: 1082
+#     addi-store-off-chain: 31
+#     load-call-chain: 46
+#     macro-op-pair: 0
+#     post-inc-pair: 2736
+#     indep-pair: 12744
+#     li-branch-chain: 2665
+#     inc-branch-pair: 435
+#     bit-test-branch-chain: 4755
+#     prologue-pair: 4341
+#     epilogue-pair: 1781
+#     czero-or-chain: 3668
+#     li-czero-chain: 34
+#     index-mem-chain: 223
+#     pre-inc-pair: 375
+#     arith-jump-pair: 2758
+#     setup-jump-pair: 4309
+#     arg-call-pair: 379

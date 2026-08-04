@@ -1,0 +1,35 @@
+# sqlite-gcc-rv64 (RV64)
+# --- file totals ---
+#   instructions: 167510  packets: 134386  pairs: 33124  solos: 101262
+#   pair rate:    24.6%  (66248/167510 instructions paired)
+#   RVC-eligible: 61.6%  (103162/167510 instructions)
+#   rule hits:
+#     rsd-alu-pair: 2710
+#     alu-alu-chain: 1119
+#     load-alu-chain: 1221
+#     addi-store-chain: 101
+#     alu-store-chain: 215
+#     load-sp-branch-pair: 592
+#     load-base-branch-pair: 3229
+#     deref-load-chain: 215
+#     base-load-chain: 379
+#     mem-sp-pair: 6263
+#     mem-base-pair: 1223
+#     load-store-chain: 575
+#     addi-store-off-chain: 3
+#     load-call-chain: 16
+#     macro-op-pair: 9
+#     post-inc-pair: 1068
+#     indep-pair: 5725
+#     li-branch-chain: 935
+#     inc-branch-pair: 167
+#     bit-test-branch-chain: 467
+#     prologue-pair: 69
+#     epilogue-pair: 421
+#     czero-or-chain: 0
+#     li-czero-chain: 0
+#     index-mem-chain: 88
+#     pre-inc-pair: 185
+#     arith-jump-pair: 3278
+#     setup-jump-pair: 2851
+#     arg-call-pair: 0
