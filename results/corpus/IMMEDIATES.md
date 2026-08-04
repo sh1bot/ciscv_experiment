@@ -1,5 +1,8 @@
 # Immediate widths: budget against return, frame by frame
 
+> **Historical measurement, 2026-08-02.** These numbers predate the 2026-08-04 parser corrections (`jalr imm(rs)` decoded as a jump, objdump's `<target>` annotation left on the operand) and the `arg-call-pair` frame, so both the pair counts and the per-corpus
+> ratios have moved. They are kept for the ARGUMENT they make, not as current figures; `results/corpus/README.md` holds the live scores.
+
 Who is paying for immediate range their population does not use, and who is
 starved by a cap that a cheap bit would fix.  Three measurements:
 

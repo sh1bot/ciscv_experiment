@@ -1,3 +1,5 @@
+# HISTORICAL: measured 2026-08-02; predates the 2026-08-04 parser corrections
+# and arg-call-pair. Live scores: results/corpus/README.md.
 corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------
 testcase0          21876    4105    17771     81.2%     81.6%    99.5%   102.2%        -87

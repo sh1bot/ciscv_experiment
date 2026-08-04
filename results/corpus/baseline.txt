@@ -1,3 +1,5 @@
+# HISTORICAL: measured 2026-07-29; predates the 2026-08-04 parser corrections
+# and arg-call-pair. Live scores: results/corpus/README.md.
 # Scheduled pairs per corpus. Baseline before the manual yaml/rules.py audit.
 # Regenerate: for f in <corpora>; do python3 __main__.py tests/$f.s | grep -oP 'pairs: \K\d+' | tail -1; done
 testcase0      4315

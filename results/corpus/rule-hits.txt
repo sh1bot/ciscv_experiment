@@ -1,3 +1,5 @@
+# HISTORICAL: measured 2026-08-02; predates the 2026-08-04 parser corrections
+# and arg-call-pair. Live scores: results/corpus/README.md.
 testcase0	rsd-alu-pair: 529
 testcase0	alu-alu-chain: 389
 testcase0	load-alu-chain: 0
