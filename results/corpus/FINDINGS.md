@@ -1488,3 +1488,61 @@ in the table: 67.1% on cpp-rv64 down to 44.2% on musl-rv32. It is the ceiling
 on the pairing half of the win, and it is set by how much spare independent
 work sits beside a call — dense C++ argument marshalling has plenty, a thin
 libc wrapper has almost none.
+
+## arg-call-pair BUILT and scored (2026-08)
+
+The call frame, written so it can be measured on code that exists: instead of
+a table jump it encodes `jalr ra, 4*immb(ra)` and `jr 4*immb(t1)`, hard-coding
+both registers so the whole word is left for a 10-bit packet displacement. Those
+are the two spellings the linker already emits when it cannot relax a call.
+16 codepoints, 838/1024 reserved, 186 spare.
+
+Measured against the real scheduler:
+
+| corpus | far transfers | still glued to their auipc | PAIRED |
+|--------|---------------|----------------------------|--------|
+| godot         | 6818 | 1742 (26%) | **3025 (44%)** |
+| cpp-rv32      | 2563 | 1407 (55%) | 531 (21%)      |
+| testcase0     |  743 |  141 (19%) | 106 (14%)      |
+| musl, sqlite  |    0 | —          | 0              |
+
+godot moves from +8415 to +5409 pairs-to-parity in one step. cpp barely moves:
+55% of its far calls still sit immediately after their own `auipc`, and the
+scheduler cannot find anything independent to slide between the two. That is
+the frame's structural ceiling, and it is exactly what a table jump removes.
+
+### Two parser bugs found by building it, both inflating earlier scores
+
+* `jalr imm(rs)` and `jalr rd, imm(rs)` decoded with `rd = x0`. Both link;
+  only `jr` does not. Every far call read as a plain jump.
+* objdump glues the resolved target onto the operand list with no separator:
+  `jalr -0x722(ra) <write+0x24a680>`. `parse_file` had its own comment strip
+  and never used the tokenizer's, so the annotation survived, `_parse_mem_operand`
+  failed, and the instruction decoded with NO base register and a zero offset.
+  godot spells the same annotation `# sym`, which was stripped — the sole
+  reason far calls appeared to exist in one corpus and not the others.
+
+Together these had jump-accepting frames pairing far calls that could never be
+encoded (the packet has nowhere to put the target). Fixing them costs ~3000
+pairs across the suite, which `arg-call-pair` then earns back honestly. Suite
+total moved +111593 → +108780.
+
+### Extrapolating Zcmt
+
+`arg-call-pair` can only fire where the compiler ALREADY emitted a
+two-instruction call, and only when the scheduler can prise the `auipc` away.
+A table jump has no `auipc`: every call becomes eligible, near ones included,
+and the A slot is adjacent by construction.
+
+| corpus | realised by arg-call-pair | `cm.jt` adds |
+|--------|---------------------------|--------------|
+| cpp-rv32      | 531 pairs  | **20956 words = 81.9 KiB** |
+| sqlite-rv32   | 0          | 3429 words = 13.4 KiB |
+| musl-gcc-rv32 | 0          | 2389 words = 9.3 KiB |
+| godot         | 3025 pairs | 1894 words = 7.4 KiB |
+| musl-rv32     | 0          | 1824 words = 7.1 KiB |
+| testcase0     | 106 pairs  | 229 words = 0.9 KiB |
+
+On cpp-rv32 the table jump is worth **forty times** the buildable frame, and
+two thirds of that corpus's entire remaining gap to parity. The buildable frame
+is the floor; Zcmt is the case.

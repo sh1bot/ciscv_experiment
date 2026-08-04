@@ -10,41 +10,110 @@ already past).
 RVC figures are REAL, taken from the `-noalias` disassemblies, not the
 `rvc_eligible` estimator (which is a ceiling — see CLAUDE.md).  Every pair
 counted is encodable as drawn: widths declared and enforced, codepoints paid
-(`encoding_assign` reports zero accounting complaints at 978/1024 reserved,
-46 spare), and `encoding_verify` puts every checkable frame at or near 100%
+(`encoding_assign` reports zero accounting complaints at 838/1024 reserved,
+186 spare), and `encoding_verify` puts every checkable frame at or near 100%
 encodable.  The one remaining optimism is branch/jump displacements, which
 are unresolved labels in the corpus and are not range-checked (plus the
-declared `measures_also` fold of rv64 `addiw` counters into
-`inc-branch-pair`).
+declared `measures_also` folds).
 
 ```
 corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------
-testcase0          21876    4105    17771     81.2%     81.6%    99.5%   102.2%        -87
-godot              90172   13243    76929     85.3%     76.3%   111.8%    62.0%      +8125
-musl-rv32         119026   27193    91833     77.2%     74.9%   103.0%    91.0%      +2678
-musl-rv64         102040   21641    80399     78.8%     72.7%   108.3%    77.8%      +6175
-sqlite-rv32       192768   44013   148755     77.2%     72.1%   107.0%    81.9%      +9757
-sqlite-rv64       189677   40852   148825     78.5%     72.1%   108.9%    77.1%     +12103
-cpp-rv32          420866   88706   332160     78.9%     71.1%   110.9%    73.0%     +32747
-cpp-rv64          411687   83454   328233     79.7%     71.4%   111.7%    70.8%     +34484
+testcase0          21876    4159    17717     81.0%     81.6%    99.2%   103.5%       -141
+musl-rv32         119026   27433    91593     77.0%     74.9%   102.7%    91.8%      +2438
+musl-os-rv32      109880   25424    84456     76.9%     74.7%   102.9%    91.4%      +2382
+godot              90172   15959    74213     82.3%     76.3%   107.9%    74.7%      +5409
+musl-rv64         102040   21838    80202     78.6%     72.7%   108.1%    78.5%      +5978
+musl-os-rv64       93289   19921    73368     78.6%     72.5%   108.5%    77.6%      +5745
+musl-gcc-rv32     119956   25801    94155     78.5%     71.9%   109.1%    76.6%      +7875
+musl-gcc-rv64     103442   20401    83041     80.3%     72.9%   110.1%    72.9%      +7589
+sqlite-rv32       192768   44585   148183     76.9%     72.1%   106.6%    82.9%      +9185
+sqlite-rv64       189677   41589   148088     78.1%     72.1%   108.3%    78.5%     +11366
+sqlitem-rv64      201905   43998   157907     78.2%     71.8%   108.9%    77.3%     +12944
+sqlite-gcc-rv64   167510   33124   134386     80.2%     71.2%   112.7%    68.7%     +15124
+cpp-rv32          420866   89480   331386     78.7%     71.1%   110.7%    73.7%     +31973
+cpp-rv64          411687   84184   327503     79.6%     71.4%   111.5%    71.4%     +33754
 ------------------------------------------------------------------------------------------
-TOTAL to parity                                                                    +105982
+TOTAL to parity                                                                   +108780
 ```
 
-This table matches the pre-audit one to within 0.1 points per corpus and
-+346 total pairs — but 40 fewer codepoints are spent (978 against 1018),
-and everything dishonest inside the old numbers has been replaced with
-verified range: the unfunded g/h widenings are gone, `arith-mem-pair` and
-the phantom `addi-branch-pair` are gone (the latter's rule scheduled only
-register-compares its row could not encode), and the reclaimed codepoints
-funded `inc-branch-pair`, the mem-base-pair/arith-jump sixth bits, and
-`li-branch-chain` at eight.  Same size, honest books, 46 codepoints in
-hand.
+## Where each corpus stands
 
-testcase0 (Rust/C rv32) is past parity; everything else is behind it, C++ the
-furthest.  GCC-built twins score 1.3–6 points worse than clang's — see
-`GCC.md` for the cross-compiler gap.
+Ordered by distance from beating real RVC.  "call frame" is the additional
+saving `util/call_frame_value.py` projects for a TABLE jump (Zcmt
+`cm.jalt`/`cm.jt`), measured on top of what `arg-call-pair` already realises.
+
+**testcase0 — PAST parity by 141 pairs.**  The only corpus packets currently
+beat.  It is also the one place where `arg-call-pair` fires on a corpus that is
+almost entirely far calls: 743 of its 855 calls are `auipc; jalr`, of which 106
+now pair.  As an index target it is pathological — 746 transfers to 746
+distinct targets, every function called exactly once — so its table would be as
+large as its call set and `cm.jt` is worth only 229 more words.
+
+**musl-rv32 / musl-os-rv32 — +2438 / +2382.**  Closest of the real corpora,
+both around 103% of RVC.  No far calls at all, so `arg-call-pair` fires zero
+times; the call frame is entirely a `cm.jalt` story and is worth ~1800 words
+each, which would close roughly three quarters of the remaining gap.  Their
+A-partner rate is the worst measured (44%) — thin libc wrappers have little
+spare work beside a call.
+
+**godot — +5409.**  The frame's best case by far and the reason it exists in
+this form: 6818 far transfers, of which **3025 now pair**, taking godot from
++8415 to +5409 in one step.  A PIC-heavy shared-library build is nothing but
+`auipc; jalr`.  `cm.jt` would add 1894 words on top, mostly by deleting the
+`auipc` rather than by pairing.
+
+**musl-rv64 / musl-os-rv64 — +5978 / +5745.**  RV64 costs about 3500 pairs
+against the rv32 build of the same source: wider spills, `addiw` where `addi`
+would do, and a table that costs twice as much per entry.
+
+**musl-gcc-rv32 / rv64 — +7875 / +7589.**  GCC's register allocation is
+friendlier to pairing than clang's in general, but it spills arguments to the
+stack before calls (`store rs, k*imm(sp)` reaches 12.6% of its calls, against
+2% elsewhere), which is why the store rows earn their place in the A set.
+
+**sqlite family — +9185 to +15124.**  Consistent, unremarkable, no far calls.
+`cm.jalt` is worth 3429 words on rv32 and 2540 on rv64.  `sqlite-gcc-rv64` is
+the worst of them at 112.7%, and `sqlitem-noc-rv64` is excluded from the total
+(a no-C build has no real RVC to score against).
+
+**cpp-rv32 / cpp-rv64 — +31973 / +33754.**  Still the wall, and still 59% of
+everything owed.  `arg-call-pair` fires only 531 times here despite 2563 far
+transfers, because 1407 of them stay glued to their own `auipc` — the
+scheduler cannot find anything independent to slide between the two.  That is
+precisely the limitation a table jump removes, and cpp is where it pays: a
+projected **20956 words, 81.9 KiB**, which is two thirds of the corpus's whole
+remaining gap.
+
+## The call frame, realised and projected
+
+| corpus | far transfers | paired by `arg-call-pair` | `cm.jt` adds |
+|--------|---------------|---------------------------|--------------|
+| godot         | 6818 | **3025** (44%) | 1894 words |
+| cpp-rv32      | 2563 | 531 (21%)      | **20956 words** |
+| testcase0     |  743 | 106 (14%)      | 229 words |
+| musl-gcc-rv32 |    0 | 0              | 2389 words |
+| musl-rv32     |    0 | 0              | 1824 words |
+| sqlite-rv32   |    0 | 0              | 3429 words |
+
+The gap between the two columns is the whole argument for Zcmt.  `arg-call-pair`
+can only fire where the compiler already emitted a two-instruction call, and
+even there only when the scheduler can prise the `auipc` away from the `jalr`.
+A table jump has no `auipc` to prise, so every call becomes eligible — near
+ones included — and the A slot is adjacent by construction.
+
+## A correction inside these numbers
+
+The totals fell by ~3000 pairs against the previous table for a reason that is
+not a regression.  `jalr imm(rs)` was decoded with `rd = x0` and objdump's
+glued `<target>` annotation was left on the operand, so every FAR call read as
+a plain register-indirect jump with no base and a zero offset.  Frames that
+accept a jump were pairing them, and those pairs were never encodable — the
+packet had nowhere to put the target.  Both bugs are fixed; the pairs they
+invented are gone, and `arg-call-pair` earns most of them back honestly.
+
+GCC-built twins score 1.3–6 points worse than clang's — see `GCC.md` for the
+cross-compiler gap.
 
 ## Flag variants (musl), and why absolute bytes matter
 
