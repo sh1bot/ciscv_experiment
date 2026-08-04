@@ -1466,3 +1466,63 @@ godot shows the alternative: `-fno-plt`, 6818 `auipc ra; jalr` at the call
 sites and zero stubs — one shared 4-instruction stub traded for 2 inline
 instructions per call site, which wins for rarely-called symbols and loses for
 hot ones.
+
+## rsd-alu-pair: the joint distribution is a diagonal, not two blocks (2026-08-04)
+
+Asked whether `rsd-alu-pair` would benefit from the two-8x8-block treatment
+that worked for `alu-alu-chain`, on the theory that its two halves have no
+link. They have a strong one; it is just not dataflow.
+
+Joint op distribution of scheduled `rsd-alu-pair` packets:
+
+| cell | musl-gcc-rv32 + sqlite-rv32 (5602) | cpp-rv32 (3524) |
+|------|------------------------------------|-----------------|
+| `li + li`       | 38.0% | 25.0% |
+| `addi + addi`   | 13.5% | 18.8% |
+| `addi + li`     |  8.6% |  6.8% |
+| `slli + slli`   |  3.0% |  6.0% |
+| `add + add`     |  4.0% |  3.8% |
+| chi-square vs independent marginals | 7769 / 64 df (**ratio 121**) | 6792 / 64 df (ratio 106) |
+
+Two orders of magnitude more concentrated than the product of the marginals,
+and the concentration is on the DIAGONAL: same-op pairs are ~58-61% of all
+packets. Sequential setup code emits runs of one operation. So the right
+structure is the `same_op` cluster flag the yaml already has plus a small
+cross block, not a pair of blocks.
+
+Scale: only NINE distinct mnemonics ever appear — the sixteen that price the
+256 are immediate-width duplicates. A top-6 symmetric block covers 90.9-93.9%
+and a top-8 covers 98.6-98.9%.
+
+**Order-canonicalisation is available and should NOT be taken yet.** 91.1%
+(musl-gcc-rv32) / 93.2% (sqlite-rv32) of packets are order-free — neither half
+reads the other's destination — so a canonical order would collapse 16x16=256
+to a 136-cell triangle, freeing 120 codepoints. But it costs the 7-9% that are
+order-sensitive (196 and 230 packets), and with 186 codepoints already spare
+and no queued buyer that is paying pairs for surplus currency. Worth keeping
+in the back pocket: it is a large block for a small loss, the moment something
+needs the space.
+
+## Null-check placement: the experiment is demoted, not queued (2026-08-04)
+
+The standing hypothesis was that `load-base-branch-pair`'s displacement
+distribution measures LLVM's block placement rather than the code — sink a
+cold null-check handler and the branch is long; keep it local and it is short.
+
+That reasoning assumes pointers are usually non-null. A null-checked HOOK
+pointer is usually null, so the "handler" is the common path and sinking it is
+wrong. The population is a mixture of two idioms with opposite optimal
+placements, and the compiler has already made a per-site judgement from
+profile or heuristic information the disassembly does not carry. A
+placement-forced build would measure what that build does, not what the
+distribution is.
+
+Inline handlers also cost icache, which is the reason to sink them in the
+first place — and forced target alignment, the other way to buy displacement
+reach, spends dead bytes in the instruction stream, which is worse for icache
+than a cold block that at least sometimes executes.
+
+So 40.2% / 21.5% at five bits stands as the real figure, no in-row rebalance
+passes ~58% (see IMMEDIATES.md), and `load-base-branch-pair`'s 42-codepoint
+widening ranks BELOW the four cheap immediate buys rather than beside them —
+it fixes the load offset, which was not what was binding.

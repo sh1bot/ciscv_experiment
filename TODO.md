@@ -244,3 +244,25 @@ Two open questions that block frame sizing:
 - **Chain and dual slot populations differ** — unary ops are 40.9% of
   independent-pair slot occupancy against 12.6% of chain — and now have
   separate op-set anchors sized separately.
+
+
+## Immediate widths — priced, not yet applied (2026-08-04)
+
+From `results/corpus/IMMEDIATES.md`, against 186 spare codepoints:
+
+- **Buy (44 cp total):** `post-inc-pair` B +1 (+4 cp, 83.6->93.1%),
+  `pre-inc-pair` B +1 (+8, 84.8->99.3%), `addi-store-off-chain` B +1
+  (+16, 72.1->97.9%), `load-store-chain` A +1 (+16, 87.8->96.1%).
+- **Ranked below those:** `load-base-branch-pair` A +2 (+42 cp) — it widens
+  the LOAD OFFSET, and the 5-bit displacement is what binds that frame.
+- **Refuse:** the ALU family. `rsd-alu-pair` A +2 costs 768 codepoints for
+  9.7 points; `alu-alu-chain` +384 for 18.4; `arith-jump-pair` +192 for 12.6.
+
+## In the back pocket
+
+- **`rsd-alu-pair` order-canonicalisation** frees 120 codepoints (16x16 -> a
+  136-cell triangle) for 7-9% of that frame's packets. Do it when something
+  needs the space, not before — see FINDINGS.
+- **`same_op` restructure of `rsd-alu-pair`**: its joint distribution is
+  diagonal-dominated (same-op pairs ~60%), and only 9 distinct mnemonics
+  appear. A top-8 symmetric block covers 98.6-98.9%.
