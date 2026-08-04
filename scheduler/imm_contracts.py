@@ -177,6 +177,31 @@ def _encoded_rd():
     return out
 
 
+@lru_cache(maxsize=1)
+def _pcrel_lo_frames():
+    """Rules whose frame declares `accepts_pcrel_lo` (ACCOUNTING.md sec 8).
+
+    An auipc-fed load's offset is a relocation, not a displacement the program
+    chose, so rules refuse it by default.  A frame whose field spans the whole
+    pcrel-lo range can admit it instead: the value is whatever the link step
+    computes for the packed layout, and any such value fits.  The frame says
+    so once, with its reasoning; this reads it."""
+    spec = yaml.safe_load(open(_YAML))
+    out = set()
+    for node in spec["doc"]:
+        frame = node.get("frame") if isinstance(node, dict) else None
+        if not frame or not frame.get("accepts_pcrel_lo"):
+            continue
+        out.update(frame.get("rules_py_names")
+                   or [x.strip() for x in frame["name"].split(",")])
+    return frozenset(out)
+
+
+def accepts_pcrel_lo(rule):
+    """True when this frame admits a load whose base came from an `auipc`."""
+    return rule in _pcrel_lo_frames()
+
+
 def link_regs_for(rule, slot):
     """The rd values this frame's `slot` ops hard-code, as register numbers.
 

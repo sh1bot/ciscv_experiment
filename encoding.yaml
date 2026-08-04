@@ -1172,6 +1172,36 @@ doc:
       # residue.)
       budget: 4
       level: 2
+      # DECLARED OPTIMISM (ACCOUNTING.md sec 8).  This frame accepts an A whose
+      # base came from an `auipc` -- the load half of a pc-relative address
+      # materialisation, whose offset is a `%pcrel_lo` relocation.  Everywhere
+      # else such a load is refused, because the corpus number is not a
+      # displacement the program chose: it is `(target - pc_of_auipc) & 0xfff`,
+      # an artifact of the layout that binary was linked for.  Repack the
+      # binary and every one of those numbers changes.
+      #
+      # That is the reason to ADMIT it here rather than to refuse it.  The
+      # value is not read from the corpus at all; it is whatever the link step
+      # computes for the packed layout, and the only question is whether the
+      # field can hold it.  A pcrel-lo spans 4096 bytes, and this frame's field
+      # is ten bits scaled by the access width -- 4096 on rv32, 8192 on rv64 --
+      # so it holds any value the split can produce.  Encodable by construction,
+      # which is why nothing is range-checked on this path.
+      #
+      # Two things this does NOT wave away, both stated rather than assumed:
+      #   * It presumes the packet ISA's own `auipc` uses an UNBIASED split
+      #     (`lo = (target-pc) & 0xfff`, zero-extended).  Base RISC-V's +0x800
+      #     bias exists only because its I-type immediate is sign-extended;
+      #     this field is declared unsigned, so the bias would be wrong here.
+      #     Measured on the corpus stubs, an unbiased split puts 100% of
+      #     cpp-rv32 and cpp-rv64 in range against 50.1% / 48.5% as linked.
+      #   * On rv64 the field scales by eight, so a pcrel-lo that is not
+      #     8-aligned cannot be drawn.  cpp-rv64's 2487 are all 8-aligned
+      #     (16-byte stubs against 8-byte GOT slots); sqlite-rv64 has 6 of 82
+      #     at lo mod 8 in {2,4,6}.  So this is ~0-7% optimistic on rv64 and
+      #     exact on rv32.  Scaling the `ld` row by four instead would close it
+      #     at the cost of halving the reach for the vtable population.
+      accepts_pcrel_lo: true
       templates:
         - ["load    tmp, k*imma(rs1a)", "jalr_link_ra tmp"]
         - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 tmp"]

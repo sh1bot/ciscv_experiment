@@ -16,6 +16,7 @@ from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
 from scheduler.imm_contracts import width_of as _yaml_width
 from scheduler.imm_contracts import rd_column_slots as _rd_slots
 from scheduler.imm_contracts import link_regs_for as _yaml_link_regs
+from scheduler.imm_contracts import accepts_pcrel_lo as _yaml_pcrel_lo
 
 
 def _w(rule: str, slot: str, op: str) -> int:
@@ -1562,11 +1563,11 @@ _LOAD_CALL_A_MN = frozenset({"lw", "ld"})
 _LOAD_CALL_B_MN = frozenset({"jalr"})
 _LOAD_CALL_OFF_BITS = _w("load-call-chain", "a", "lw")   # 10: the whole word is free
 _LOAD_CALL_LINK_REGS = _lr("load-call-chain", "b")       # {x1, x6} from the yaml
+_LOAD_CALL_PCREL_LO = _yaml_pcrel_lo("load-call-chain")  # declared optimism
 
 
 @must_chain_base
 @no_escape
-@a_base_not_from_auipc
 def _load_call_chain(a: Instruction, b: Instruction) -> None:
     """Load a function pointer, then transfer through it; the pointer dies."""
     if a.rd is None or a.rbase is None:
@@ -1577,6 +1578,17 @@ def _load_call_chain(a: Instruction, b: Instruction) -> None:
         # Discards `jr` (rd=x0, which saves no link and is a tail call) and any
         # link register the frame has no codepoint for -- see _LOAD_CALL_LINK_REGS.
         raise NotPair("B-link-register-not-encodable")
+    if a.base_from_auipc:
+        # No `@a_base_not_from_auipc` here, by declaration: this frame's field
+        # spans the whole pcrel-lo range, so the offset the link step computes
+        # for the PACKED layout fits whatever it turns out to be.  The corpus
+        # number is not that offset -- it belongs to the layout the binary was
+        # linked for -- so it is not checked rather than checked wrongly.  The
+        # frame states the reasoning and the residue; see `accepts_pcrel_lo` in
+        # encoding.yaml and ACCOUNTING.md sec 8.
+        if not _LOAD_CALL_PCREL_LO:
+            raise NotPair("A-relocatable-offset")
+        return None
     if not a.uimm_fits(_LOAD_CALL_OFF_BITS, a.access_shift or 0):
         raise NotPair("A-big-imm")
     return None

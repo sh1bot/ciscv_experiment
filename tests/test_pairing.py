@@ -1430,10 +1430,32 @@ class TestLoadCallChain:
         b.live_out = frozenset({31})
         assert _rule_reason("load-call-chain", a, b) is not None
 
-    def test_relocatable_offset_no_pair(self):
-        """An auipc-based load's offset is a %pcrel_lo relocation, not a
-        displacement — this is what still keeps the frame out of the PLT."""
-        a = make_insn("lw", rd=31, rs1=31, imm=8)
+    def test_relocatable_offset_pairs_by_declaration(self):
+        """An auipc-fed load pairs here, unlike everywhere else: the frame
+        declares `accepts_pcrel_lo`, because its field spans the whole
+        pcrel-lo range and the offset belongs to the packed layout, not to
+        the one the corpus was linked for.  This is the PLT stub shape."""
+        a = make_insn("lw", rd=31, rs1=31, imm=-0x528)
         b = make_insn("jalr", rd=6, rs1=31, imm=0)
         a.base_from_auipc = True
+        assert _rule_reason("load-call-chain", a, b) is None
+
+    def test_relocatable_offset_is_not_range_checked(self):
+        """The corpus value is an artifact, so it is not checked at all —
+        an offset far outside the field still pairs on this path."""
+        a = make_insn("lw", rd=31, rs1=31, imm=0x7ffff)
+        b = make_insn("jalr", rd=1, rs1=31, imm=0)
+        a.base_from_auipc = True
+        assert _rule_reason("load-call-chain", a, b) is None
+
+    def test_ordinary_load_still_range_checked(self):
+        """The declaration is scoped to auipc-fed loads: a real displacement
+        is still measured against the 10-bit width-scaled field."""
+        a = make_insn("lw", rd=31, rs1=12, imm=0x7ffff)
+        b = make_insn("jalr", rd=1, rs1=31, imm=0)
         assert _rule_reason("load-call-chain", a, b) is not None
+
+    def test_declaration_comes_from_yaml(self):
+        from scheduler.imm_contracts import accepts_pcrel_lo
+        assert accepts_pcrel_lo("load-call-chain")
+        assert not accepts_pcrel_lo("load-base-branch-pair")

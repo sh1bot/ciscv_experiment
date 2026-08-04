@@ -344,7 +344,18 @@ when quoting the numbers.
 - **RVC-eligibility is a ceiling**, not achieved compression: no offset-range
   check, no RV32/RV64 gating, float RVC out of scope. See `CLAUDE.md`.
 - **`%pcrel_lo`/auipc-fed loads never pair**, so relocation-bearing code is
-  excluded from the denominator rather than counted as a miss.
+  excluded from the denominator rather than counted as a miss — *except* in a
+  frame that declares `accepts_pcrel_lo`, where they pair and their offset is
+  not range-checked at all. Only `load-call-chain` declares it today. The
+  argument is that the corpus offset is `(target - pc_of_auipc) & 0xfff`, an
+  artifact of the layout that binary was linked for, so the number says nothing
+  about the packed layout; the frame's field spans the whole 4096-byte pcrel-lo
+  range, so whatever the link step computes will fit. This is the same class of
+  claim as the branch displacements above — an unmeasured immediate assumed to
+  fit — and it is optimistic in the same way. It also assumes an UNBIASED split
+  (RISC-V's +0x800 exists only because its I-type immediate is sign-extended;
+  these fields are unsigned), and on rv64 it hides a width-scaling residue of
+  0–7% (offsets not 8-aligned). Quantified at the frame's yaml note.
 - **Packets claim the RVC encoding quadrant** (2-bit `10` marker), so packets and
   literal RVC compete for the same space rather than composing. The RVC rate is a
   comparison baseline, not additive headroom.
