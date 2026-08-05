@@ -1,13 +1,6 @@
 # Structured source of truth for the pairing packet encoding.
-# Render back to markdown with:  python3 util/encoding_render.py
-#
-# Every data row describes the seven variable columns h..rd; the renderer
-# appends the invariant "opcode5 │1 0" tail (5-bit opcode + 2-bit marker "10",
-# shown as bits). A cell may span N columns with a "*N" suffix (e.g.
-# "g", "imma[4:0]" spans g+rs2). Each field's ASCII box is width = 2*bits - 1, so
-# individual bits align uniformly; bit widths below are the real encoding sizes
-# and sum to 32 including opcode5(5)+marker(2). (funct3's box, 5 cols, can't
-# hold the label, so it renders as "fn3".)
+# Render to markdown with `python3 util/encoding_render.py`; assign the opcode
+# bit-patterns with `python3 util/encoding_assign.py`.
 #
 # A frame's `ops` is a list of {a: [...], b: [...]} clusters (bicliques). The
 # allowed (opA, opB) pairs are the union of each cluster's a×b cross-product,
@@ -17,43 +10,20 @@
 # {a: [x], b: [x]} clusters.
 #
 # ORDER-INSENSITIVE frames: when the two slots hold independent operations,
-# (x, y) and (y, x) compute the same thing, so only one of them needs a
-# codepoint. Such a frame must be written LONGHAND as a triangle over a stated
-# canonical order — {a:[x], b:[x,y,z]}, {a:[y], b:[y,z]}, {a:[z], b:[z]} — and
-# the scheduler normalises each pair into that order before encoding. Writing
-# the full cross product instead costs n² codepoints to express n(n+1)/2
-# distinct packets, very nearly double. There is deliberately no `unordered:`
-# shorthand: the triangle states the canonical order explicitly, which the
-# encoder needs anyway, and it keeps the codepoint count a plain sum of cluster
-# products with no special case in the tooling.
+# (x, y) and (y, x) compute the same thing, so only one needs a codepoint.
+# Such a frame is written LONGHAND as a triangle over a stated canonical order
+# -- {a:[x], b:[x,y,z]}, {a:[y], b:[y,z]}, {a:[z], b:[z]} -- and the scheduler
+# normalises each pair into that order before encoding. The full cross product
+# would cost n² codepoints for n(n+1)/2 distinct packets. There is no
+# `unordered:` shorthand on purpose: the triangle states the canonical order,
+# which the encoder needs anyway. (It cannot order two immediates of the SAME
+# opcode; that residue is a don't-care while a frame sits inside its block --
+# see FINDINGS, "the same-op diagonal".)
 #
-# KNOWN GAP — the same-op diagonal. The triangle orders the OPCODES, but has no
-# syntax to order two immediates of the SAME opcode. When an op has ext > 0 it
-# occupies several codepoints (one per range band), and its diagonal cell pays
-# w×w where w(w+1)/2 would do: the (narrow, wide) and (wide, narrow) spellings
-# of one op-pair are both encoded when a tie-breaker on the range band would
-# need only one. The waste is w(w-1)/2 per such op — 1 codepoint at ext=1, 6 at
-# ext=2 — and it is zero for every op at the base range.
-#
-# This is a DON'T-CARE while the frame's count sits inside its block: blocks are
-# powers of two, so a frame at 11 and a frame at 10 reserve the same 16 and the
-# waste costs nothing real. It only becomes a decision if the waste is what
-# pushes a count across a power-of-two boundary and doubles the reservation.
-# dual-setup-pair pays 1 codepoint of it today, at 11 of 16 — five to spare
-# before it would matter.
-#
-# Ordering the two immediates by VALUE (not just by range band) would be more
-# efficient still — a strict ordering makes one of each equal-size pair
-# redundant — but the decoder would have to compare the two immediates and
-# conditionally swap them before use. Deliberately not pursued: the coding gain
-# is small and the decode cost is not.
-#
-# A frame's optional `budget` is a sanity check on its codepoint count (see
-# `python3 util/encoding_render.py --opcodes`): the count must land in
-# (budget/2, budget]. Over the budget means too many ops for the allotted
-# block; under half means the table is not yet filled in (or the budget is too
-# large). Usually a power of two — the size of the prefix-code block the frame
-# is allocated.
+# A frame's optional `budget` is a sanity check on its codepoint count: the
+# count must land in (budget/2, budget]. Over means too many ops for the
+# allotted block; under half means the table is not yet filled in. Usually a
+# power of two -- the size of the prefix-code block the frame is allocated.
 
 grid:
   # The named fields and their machine-word bit positions.  A row is a mapping
@@ -389,33 +359,11 @@ doc:
   - frame:
       name: alu-alu-chain
       does: "Two ALU operations, the second consuming the first's result."
-      # Sized by measurement, and DELIBERATELY asymmetric -- the two slots want
-      # different vocabularies, which the shared `alu_chain` anchor cannot say.
-      # A is where values are produced (shifts, adds, comparisons); B is where
-      # they are consumed (masking and merging).  `sltu`/`sltiu` appear only in
-      # A -- a predicate is made, then spent -- and `and`/`or` only in B.
-      #
-      # At 15 ops per axis the block is 16x16 = 256 codepoints for 2502 pairs
-      # (musl-rv32 + sqlite-rv64), 9.8 per codepoint.  Measured alternatives,
-      # blocks exact (8^2 = 64, 11^2 = 121 <= 128, 16^2 = 256):
-      #
-      #   ops/axis  block  census pairs (3 corpora)  pairs/cp
-      #      8        64            3755 (74%)          58.7
-      #     11       128            4500 (88%)          35.2
-      #     16       256            5090 (100%)         19.9
-      #
-      # Read as the marginal cost of KEEPING space: 64 -> 128 codepoints buys
-      # 745 census pairs (11.6/cp) and 128 -> 256 buys 590 (4.6/cp).  Deflating
-      # by the ~0.7 census-to-measured factor seen throughout this project puts
-      # those at roughly 8 and 3 against a portfolio floor near 6, so the block
-      # is 128.
-      #
-      # The op set MUST be fitted on all three corpora.  A set tuned on
-      # musl-rv32 + sqlite-rv64 alone drops `srliw`, which cannot appear on
-      # RV32 at all and is rare in sqlite -- but is C++'s second heaviest A op
-      # (456 of 2588), so that set covers only 66% of the three-corpus
-      # population against 88% here.  `andi` and `xori` are smaller versions of
-      # the same trap.
+      # Two 8x8 op blocks, not one 16x16: A and B have different populations
+      # (A feeds B through the temporary), and two fitted blocks cost 128
+      # codepoints where the cross product would cost 256.  The sets are fitted
+      # on THREE corpora -- a two-corpus fit put srliw, C++'s second-heaviest A
+      # op, outside the set.
       budget: 128
       level: 2
       templates:
@@ -445,20 +393,8 @@ doc:
   - frame:
       name: load-alu-chain
       does: "Load a value and immediately compute with it."
-      # lwu dropped from the A slot: 2 loads x weight 2 x 16 = 64 codepoints,
-      # down from 96, so the block halves 128 -> 64. That is what clears the
-      # namespace over-reservation (1036 -> 972 of 1024) without touching the
-      # 16x16 ALU lists, which earn their keep.
-      #
-      # lwu rather than lw because lwu does not exist in RV32 -- a frame whose
-      # only 32-bit load is lwu is dead to 32-bit targets, and those are the
-      # ones that most need the compression. Cost is 27 corpus pairs (lwu) vs
-      # 10 (lw); both are noise against ~20k.
-      #
-      # This is not a verdict on lwu. Of 694 lwu-bearing adjacencies in godot
-      # only 56 are claimed by ANY frame -- it is broadly unserved rather than
-      # concentrated here, and deserves a design pass across all frames rather
-      # than a decision anchored on this one's 27 hits. Revisit then.
+      # The load's result is the chain temporary, so only the base, the offset
+      # and B's second operand are encoded.
       budget: 64
       level: 2
       templates:
@@ -489,28 +425,9 @@ doc:
   - frame:
       name: czero-or-chain
       does: "Finish a conditional select: merge the surviving arm into the result."
-      # The second half of a zicond select:
-      #     czero.eqz t1, x, c
-      #     czero.nez t2, y, c     <- A
-      #     or        r,  t1, t2   <- B
-      # A's result is the chain temporary, so only four registers are encoded:
-      # rs1a (the value), rs2a (the condition), rs2b (the other arm) and rdb.
-      # That is exactly alu-alu-chain's row, which is why this needs no new
-      # layout -- only its own frame, since adding czero to *alu_chain would
-      # take that cross product from 16x16 to 18x18 and overflow its 256.
-      #
-      # The forward chain is overwhelmingly concentrated: of czero -> successor
-      # adjacencies, 97-99% go to `or` on the four new corpora (963/975 on
-      # sqlite-rv32, 639/640 on sqlite-rv64, 566/569 musl-rv32, 447/448
-      # musl-rv64) against godot's 93%. Chained AND dead totals ~2492.
-      #
-      # The [czero, czero] shape is deliberately absent: both temporaries stay
-      # live into the `or`, so it needs five register fields against 20 bits.
-      # The backward directions were measured too and are not worth frames --
-      # the condition is shared by the second arm so it is live 100% of the
-      # time at the first, and the value-feed slice splits into small-immediate
-      # `li` and wide-immediate `addi rd,rd,imm` populations that no single
-      # field width serves.
+      # The zicond select's merge half: two conditionally-zeroed arms OR'd
+      # together.  A's result is the temporary; the surviving arm is B's other
+      # operand, so three registers and no immediate.
       budget: 2
       level: 2
       templates:
@@ -523,27 +440,9 @@ doc:
   - frame:
       name: addi-store-chain
       does: "Form a value -- constant, copy or sp-relative address -- and store it."
-      # Carved out of alu-store-chain: compute an addi, then store it.
-      #
-      #     A: addi tmp, rs1a, imma      B: store tmp, k*immb(sp)  or  0(rbase)
-      #
-      # tmp is dead at the store so it is never encoded, which frees the space
-      # for a 10-bit immediate alongside a full 5-bit rs1a. That is the whole
-      # point of the carve-out: alu_chain cannot afford a wide immediate,
-      # because widening its addi costs alu-alu-chain codepoints quadratically,
-      # whereas here there is no second register field competing for room.
-      #
-      # Measured: an all-5-bit version of this frame is worth only +81 pairs,
-      # against +525 for this one. So ~85% of the frame's value is the wide
-      # immediate, not the pairing shape -- which is also why store-chain,
-      # capped at addi@6b, claims only 23 of the 1178 candidate sites.
-      #
-      # Address split: sp takes a 5-bit width-scaled offset, a base register
-      # takes zero offset. Measured against the alternative (imm8 + a 2-bit
-      # base offset, which scores marginally higher raw): on the base side the
-      # two differ by 5 pairs, and after discounting what a base-capable
-      # store-chain would reach anyway it is 1 versus 1. The wider immediate is
-      # free, so it wins on the tie.
+      # Compute an address, then store through it.  The address is the
+      # temporary, which is what frees the whole word for the two immediates:
+      # A's addend spans two columns for ten bits, B's offset is implied zero.
       budget: 4
       level: 2
       templates:
@@ -690,68 +589,11 @@ doc:
       name: li-czero-chain
       does: "Materialise a constant and conditionally zero it -- one arm of a select."
       # The other half of a zicond select: materialise one arm's constant, then
-      # conditionally zero it. `li` is the chain temporary, so only two
-      # registers are encoded (the condition and the destination), which leaves
-      # ten bits for the immediate -- and because the row DRAWS ten, the op
-      # declaring ten costs no extra codepoints.
-      #
-      # Sizing, from addi -> czero.rs1 (the VALUE operand) adjacencies:
-      # `li` is 50-64% of them and its constants are small (60-81% fit 6 bits,
-      # 87-93% fit 8), while the `addi rd,rd,imm` form is 33-42% and its
-      # addends are almost all wide (only 3-16% fit 6 bits). They are two
-      # populations and no single width serves both, so this frame takes only
-      # the li form and gives it room.
-      #
-      # The constant is nearly always gone immediately: of the li -> czero
-      # adjacencies, the czero OVERWRITES its register 59%/47% of the time
-      # (`li a1,K; czero.nez a1,a1,c`) and it dies unreused a further 25%/28%
-      # -- 84%/75% dead in total on sqlite-rv64/musl-rv64. Nothing is being
-      # kept: of the 16%/25% that do survive, 39 of 48 and 39 of 40 have no use
-      # within seven instructions, so they are crossing a branch rather than
-      # feeding a second arm. A variant that encodes the surviving constant and
-      # drops to a 5-bit immediate would be aimed at that minority; not built.
-      #
-      # (An earlier note here claimed only 26% were dead. That tested
-      # `rd in live_out`, which counts the register as live when the czero is
-      # itself what redefines it -- the same a.rd != b.rd subtlety that halved
-      # index-mem-chain. @no_escape gets it right, which is why this frame
-      # scored 107/116/53 against a population estimated at 78/87/45.)
-      #
-      # Immediate width, over the frame's actual scheduled hits:
-      #                  <=5b   <=6b   <=7b   <=8b   <=10b
-      #   sqlite-rv64     64%    70%    78%    92%    100%
-      #   musl-rv64       58%    75%    81%    85%    100%
-      #   sqlite-rv32     57%    63%    71%    91%    100%
-      # Ten bits is free -- the row draws the field and the op declaring ten has
-      # ext 0, so the frame is 2 codepoints at any width. Narrowing to five
-      # would forfeit ~40% of the hits for nothing.
-      #
-      # The `addi rsd,rsd,imm` form was costed at the widths this shape could
-      # afford (3 registers leaves a 5-bit field): ~7 adjacencies at 6 bits
-      # and ~15 at 7, of 155 on sqlite-rv64. Its addends are wide because they
-      # are offsets into a running value, not constants. Not viable.
-      #
-      # NOTE this frame and czero-or-chain overlap on any czero that has BOTH
-      # a feeding li and a consuming or. Measured both RULES orders: the split
-      # is identical either way (107 / 603 on sqlite-rv64), because the greedy
-      # left-to-right pairer reaches the contested czero from the same side
-      # regardless of rule priority. czero-or-chain is ordered first anyway,
-      # so that if the population ever shifts the larger frame keeps the tie.
-      #
-      # THE THREE-WAY FUSION IS OUT OF SCOPE. A full select is
-      #     czero.eqz t1, x, c ; czero.nez t2, y, c ; or r, t1, t2
-      # and both czeros could in principle be fused with the merge: two
-      # temporaries, four encoded operands (x, y, c, r), which fits the 20-bit
-      # budget comfortably. That is a perfectly sound INSTRUCTION -- a
-      # three-operand conditional select, `r = c ? x : y`, of the kind most
-      # ISAs with predication provide outright, and the thing zicond's two
-      # czeros plus an or are emulating in the first place.
-      #
-      # It is excluded solely by the pairwise contract -- a packet holds exactly
-      # two instructions -- not by any field shortage. If that contract is ever
-      # revisited this is the first candidate: it would take a 4-instruction
-      # select to ONE packet, where this frame and czero-or-chain together
-      # still need two.
+      # conditionally zero it.  `li` is the chain temporary, so only two
+      # registers are encoded and the row draws a free ten-bit immediate --
+      # which the op takes in full, since ten bits costs the same 2 codepoints
+      # as five.  Only the `li` form is admitted: the `addi rsd` form's addends
+      # are wide and would need a width this shape cannot afford.
       budget: 2
       level: 2
       templates:
@@ -769,31 +611,9 @@ doc:
       # temporary -- it exists only because the ISA has that hole.
       #
       # A scales an index and adds it to a base; B accesses through the result,
-      # which is then dead. The computed address is the CHAIN TEMPORARY and is
-      # not encoded, which is what makes three register operands fit: rs1a (the
-      # index), rs2a (the base), and B's destination or stored value.
-      #
-      # Survival decides the shape. Of the width-matched shXadd->memory pairs,
-      # the computed address dies after the access 84% of the time (sqlite-rv64
-      # 1488/1779, musl-rv64 563/716) while the unscaled base survives 77% --
-      # indexing keeps the array. Writing the sum back over the base, as
-      # pre-inc-pair does, is therefore the minority case; and it is not a
-      # register-allocation accident, because only 30-34% of these have any
-      # dead input to clobber. pre-inc-pair keeps the surviving-sum cases (the
-      # pointer walk) and is ordered after this frame.
-      #
-      # `add` is the scale-1 member of the family -- byte indexing needs no
-      # shift -- and is the bulk of it: 1190 of 1779 on sqlite-rv64, where 94%
-      # of accesses are byte-width and the index often comes straight from an
-      # lbu (a table lookup). It is NOT reducible: there is no `lbu d, (b+i)`.
-      #
-      # `addi` is deliberately absent. With the sum as a temporary its addend
-      # is just the access's own offset field, so `addi t,b,k; ld d,0(t)`
-      # collapses to `ld d,k(b)` -- measured at 95-100% foldable.
-      #
-      # B's offset is scaled and 5 bits: zero in 86% of cases and in range for
-      # 93%, and the field is free since the four columns hold exactly the
-      # three registers plus it.
+      # which is then dead.  That the address dies (84% of width-matched pairs)
+      # while the base survives (77%) is what decides the shape: the sum is the
+      # temporary and is not encoded, which is how three register operands fit.
       budget: 8
       level: 2
       templates:
@@ -885,21 +705,9 @@ doc:
   - frame:
       name: mem-sp-pair
       does: "Two adjacent stack accesses one word apart -- a spill or reload pair."
-      # Separate from mem-base-pair because the layouts differ: with the base
-      # implicit, the freed `rbase` column pays for a 10-bit shared offset,
-      # and nothing in a shared opcode could tell the two row families apart
-      # -- a combined frame would owe a discriminator bit.
-      #
-      # Two ops, not eight.  Measured over musl-rv32 and sqlite-rv64, paired
-      # sp traffic is 100% lw/sw on RV32 and 98% ld/sd on RV64 -- always the
-      # natural word -- so one switchable opcode each covers it, exactly as
-      # c.lwsp/c.ldsp do.  `lx`/`sx` are declared in opsets.xlen_switchable and
-      # resolved against the base the scheduler detects from the input.
-      #
-      # This is where mem-base-pair's traffic actually is: 85% of its pairs on
-      # rv32 and 81% on rv64.  It is also the half that NEEDS the width --
-      # sp offsets fit five bits only 41% of the time on rv32 against 97% for
-      # base-register offsets, which is why the two want different layouts.
+      # Two sp-relative accesses in one packet -- spill/reload traffic.  sp is
+      # implicit in both slots, so the four freed register columns become two
+      # ten-bit scaled offsets, and the frame costs 2 codepoints.
       budget: 2
       level: 1
       templates:
@@ -987,22 +795,9 @@ doc:
   - frame:
       name: load-store-chain
       does: "Copy a value from one memory location to another."
-      # A memory copy: the loaded value is stored straight back out and the
-      # temporary dies.  Four operands -- two bases and two offsets -- fill the
-      # 20-bit budget exactly, with the temp unencoded.
-      #
-      # Sizing, measured (results/corpus/FINDINGS.md).  The OFFSET WIDTH is the
-      # binding constraint, not the op set: uncensored the population is 859
-      # (musl-rv32) / 968 (sqlite-rv64) sites, of which only 39%/62% have both
-      # scaled offsets inside five bits, 47%/95% inside six, 63%/98% inside
-      # seven.  Six bits is the knee -- +12 codepoints over the 5-bit form for
-      # +383 pairs (32/cp against a portfolio floor near 6), taking sqlite, the
-      # corpus furthest from parity, from 62% to 95% capture.  Seven would cost
-      # 64 codepoints for perhaps 150 more pairs.
-      #
-      # `same_width` is the diagonal: copies preserve width 96%/79% of the
-      # time, and the truncating tail (`ld` -> `sw`, 122 pairs on sqlite) would
-      # cost four times the block for ~12 pairs/cp, so it is left out.
+      # A memory-to-memory move: load, then store the loaded value.  The value
+      # is the temporary, so both base registers and both offsets are encoded
+      # -- 5 bits each, which is what the four columns allow.
       budget: 16
       level: 2
       templates:
@@ -1032,24 +827,9 @@ doc:
   - frame:
       name: addi-store-off-chain
       does: "Compute a value from one base and store it at an offset from another."
-      # The offset-bearing sibling of addi-store-chain, which pins the store at
-      # offset zero to buy its addi a 10-bit immediate.  Both cannot be one
-      # frame: that row is full at 20 bits (rs1a + imma[9:0] + rbase), so
-      # carrying an offset means giving the addi immediate back.
-      #
-      # Sized on the FULL adjacency population, not the solo residue -- the
-      # residue is selected for NOT fitting and reports a "7-bit cliff" that
-      # does not exist (see FINDINGS.md).  Chained addi->store sites, coverage
-      # by width, over cpp-rv32 / musl-rv32 / sqlite-rv64 (4379/1112/2436):
-      #
-      #   imma 5b + immb 5b   58.6% / 34.2% / 43.0%    4 codepoints
-      #   imma 6b + immb 5b   69.3% / 36.2% / 45.4%    8
-      #   imma 6b + immb 6b   70.0% / 36.9% / 70.2%   16   <- chosen
-      #   imma 8b + immb 5b   86.5% / 40.8% / 50.9%   32
-      #
-      # The sixth OFFSET bit is what sqlite-rv64 needs (45% -> 70%): its
-      # stores scale by eight, so the same byte offsets need one bit more.
-      # Both sixth bits ride the opcode list, as the row draws five each.
+      # addi-store-chain's offset-bearing sibling: B keeps a real offset field,
+      # so A's addend narrows to five bits.  Both rows exist because the
+      # populations split -- see FINDINGS.
       budget: 16
       level: 2
       templates:
@@ -1070,77 +850,21 @@ doc:
   - frame:
       name: load-call-chain
       does: "Load a function pointer and call through it (virtual dispatch)."
-      # C++ virtual dispatch: load the vtable slot, then call it.  The loaded
-      # pointer is the chain temporary -- it feeds the call and dies there --
-      # so the frame encodes only the base register and the offset, leaving
-      # most of the operand budget unused.
+      # C++ virtual dispatch: load the vtable slot, then call through it.  The
+      # loaded pointer is the chain temporary, so only the base and offset are
+      # encoded and the offset gets ten bits for free.
       #
-      # This shape was previously believed absent.  FINDINGS.md recorded
-      # "jalr writing ra occurs 0 times ... even C++ virtual dispatch produced
-      # none", which was a census matching the explicit `jalr ra, rs, 0`
-      # spelling the disassembler never emits; the corpus writes the
-      # one-operand pseudo-op `jalr rs`.  cpp-rv32 has 2246 of them, 458 in
-      # this exact adjacency, and 100% of those offsets fit the 6-bit scaled
-      # field.
-      #
-      # No target is encoded -- it is read from a register -- so the direct
-      # call's unencodable-displacement problem does not arise, and the link
-      # value needs no field either: the link is `packet + 4` and WHICH
-      # register receives it is an op choice, not an operand.
-      #
-      # TWO LINK REGISTERS, and only one of them is a call.  RISC-V names x1
-      # and x5 as link registers -- a `jalr` writing either pushes the
-      # return-address stack -- so x5 was admitted here on that reading.  It
-      # never occurs: zero t0-linked jal/jalr across all 21 corpora, and no
-      # `__riscv_save_*` millicode to produce any.  x6 (t1) does occur, and is
-      # the more useful spelling: a PLT stub transfers with `jalr t1, rs`
-      # precisely BECAUSE t1 is not a link register, so the stub neither
-      # clobbers the caller's `ra` nor unbalances the return-address stack.
-      # This frame therefore offers ra (a call) and t1 (a linking jump), and
-      # not t0.  The two are distinguished by the op-select, which is what the
-      # budget doubles to pay for -- there is no rd field to put them in.
-      #
-      # Contrast setup-jump-pair, which is the INDEPENDENT case (A's result is
-      # not B's target -- argument marshalling).  It must field rda, rs1a and
-      # rs1b, so its load row is full at 20 bits and its offset can never
-      # exceed five.  Here A's result IS B's target, so neither is encoded and
-      # the whole word is free for the base and offset: ten bits, costing
-      # nothing, since idle operand bits are not codepoints.  (Beware: pricing
-      # would report a 6-bit offset as free for setup-jump-pair too, because
-      # imm_field_bits takes the WIDEST row and that frame's `li` row draws
-      # ten -- but no load row could hold it.  TODO A8's row-versus-op
-      # residue.)
+      # The link register is an OP choice, not an operand: `jalr_link_ra` is a
+      # call, `jalr_link_t1` is the PLT stub's linking jump (t1 is not a link
+      # register, so the stub neither clobbers `ra` nor unbalances the
+      # return-address stack).  x5 is not offered -- it never occurs.
       budget: 4
       level: 2
-      # DECLARED OPTIMISM (ACCOUNTING.md sec 8).  This frame accepts an A whose
-      # base came from an `auipc` -- the load half of a pc-relative address
-      # materialisation, whose offset is a `%pcrel_lo` relocation.  Everywhere
-      # else such a load is refused, because the corpus number is not a
-      # displacement the program chose: it is `(target - pc_of_auipc) & 0xfff`,
-      # an artifact of the layout that binary was linked for.  Repack the
-      # binary and every one of those numbers changes.
-      #
-      # That is the reason to ADMIT it here rather than to refuse it.  The
-      # value is not read from the corpus at all; it is whatever the link step
-      # computes for the packed layout, and the only question is whether the
-      # field can hold it.  A pcrel-lo spans 4096 bytes, and this frame's field
-      # is ten bits scaled by the access width -- 4096 on rv32, 8192 on rv64 --
-      # so it holds any value the split can produce.  Encodable by construction,
-      # which is why nothing is range-checked on this path.
-      #
-      # Two things this does NOT wave away, both stated rather than assumed:
-      #   * It presumes the packet ISA's own `auipc` uses an UNBIASED split
-      #     (`lo = (target-pc) & 0xfff`, zero-extended).  Base RISC-V's +0x800
-      #     bias exists only because its I-type immediate is sign-extended;
-      #     this field is declared unsigned, so the bias would be wrong here.
-      #     Measured on the corpus stubs, an unbiased split puts 100% of
-      #     cpp-rv32 and cpp-rv64 in range against 50.1% / 48.5% as linked.
-      #   * On rv64 the field scales by eight, so a pcrel-lo that is not
-      #     8-aligned cannot be drawn.  cpp-rv64's 2487 are all 8-aligned
-      #     (16-byte stubs against 8-byte GOT slots); sqlite-rv64 has 6 of 82
-      #     at lo mod 8 in {2,4,6}.  So this is ~0-7% optimistic on rv64 and
-      #     exact on rv32.  Scaling the `ld` row by four instead would close it
-      #     at the cost of halving the reach for the vtable population.
+      # DECLARED OPTIMISM (ACCOUNTING.md sec 8, and FINDINGS).  Admits a load
+      # whose base came from an `auipc`, which every other frame refuses: the
+      # corpus offset is a link-time artifact, but this field is ten bits
+      # scaled by the access width and holds anything the split can produce,
+      # so it is encodable by construction rather than by measurement.
       accepts_pcrel_lo: true
       templates:
         - ["load    tmp, k*imma(rs1a)", "jalr_link_ra tmp"]
@@ -1172,41 +896,17 @@ doc:
       name: arg-call-pair
       does: "Set up an argument, then call through a hard-coded base register."
       # The call frame, written so it can be MEASURED on code that exists.
+      # Hard-coding both registers -- `jalr ra, 4*immb(ra)` and `jr 4*immb(t1)`
+      # -- makes the transfer ten bits, which is what leaves room for an A
+      # slot.  Targets are packet-aligned, so the displacement scales by four.
       #
-      # A direct call's displacement does not fit a packet, so today every call
-      # in the corpus is a solo and the instruction beside it is a second solo.
-      # This frame makes the transfer ten bits by hard-coding both registers:
-      # `jalr ra, 4*immb(ra)` names neither its base nor its link, and
-      # `jr 4*immb(t1)` names neither its base nor x0.  Targets are packet
-      # aligned in this ISA, so the displacement is scaled by four and the low
-      # two bits are dead -- 10 bits reaches +-2 KiB, which is what the high
-      # half (`auipc`/`adduipc`) leaves unresolved.
+      # A tail call may NOT use ra: the auipc would destroy the return address
+      # the callee still needs, which is why the corpus spells it t1.
       #
-      # The register choice is not free.  A far CALL may use ra as its address
-      # temporary because the jalr overwrites it with the link anyway, and the
-      # corpus already does: 2462 of 2463 on cpp-rv32.  A far TAIL call may
-      # NOT -- the auipc would destroy the return address the callee still
-      # needs -- so it uses t1, and the corpus already does that too (101 on
-      # cpp-rv32, 125 on godot).  Both spellings are hard-coded here rather
-      # than fielded, which is where the ten bits come from.
-      #
-      # WHAT THIS FRAME LEAVES ON THE TABLE.  The high half is a 20-bit
-      # instruction that can never pair -- it fills the operand space by
-      # itself, so it stands as a solo word beside every packet this frame
-      # makes.  A table jump (`cm.jalt`/`cm.jt`, Zcmt) removes it outright: the
-      # index IS the target, so there is no high half to set up.  That is worth
-      # one more word per call, on top of the word this frame saves, and it
-      # needs no pairing opportunity at all -- an unpaired table jump still
-      # fits a packet beside a derived nop.  Converting this frame is a
-      # one-line change to its B ops; the A rows, the ten-bit field and the
-      # budget are all unchanged, because a 10-bit index and a 10-bit scaled
-      # displacement are the same shape.  See results/corpus/FINDINGS.md,
-      # "The indexed-call frame, priced end to end".
-      #
-      # A ops are fitted in FINDINGS, "The indexed-call A slot, chosen from
-      # what is REACHABLE": eight shapes reaching 66.9 / 57.1 / 60.9% of calls
-      # on cpp / musl-gcc / sqlite rv32, against a hard ceiling of ~68 / 58 /
-      # 62% (the share of calls with ANY movable candidate beside them).
+      # A table jump (Zcmt cm.jalt/cm.jt) would delete the 20-bit high half
+      # this frame leaves standing, for one more word per call and no pairing
+      # needed.  Converting is a change of B mnemonic and nothing else: a
+      # 10-bit index and a 10-bit scaled displacement are the same field.
       budget: 16
       level: 2
       templates:
@@ -1349,44 +1049,16 @@ doc:
   - frame:
       name: dual-setup-pair
       does: "Two independent small moves or constants -- argument marshalling."
-      # `li` is 6 bits: a 5-bit field plus one opcode repeat (the *li_6s
-      # anchor), charged in both slots -- demand 11 -> 17, a 32-block, +169
-      # pairs at ~10.6/codepoint.  Worth it only while the space is idle.
-      # 7 bits would double the charge again (demand 23); not taken.
-      #
-      # Only ONE of the pair may be wide: row 2 draws immb for B but imma[4:0]
-      # for A. Not a real loss -- pairs with two wide immediates are rare, and
-      # since this frame already requires mutual independence the encoder may
-      # put whichever one is wide into the immb field, so rules.py accepts it
-      # in either slot.
-      #
-      # 11 codepoints: the triangle over li, mv, addi4spn_u6, where the last
-      # weighs 2 (a 6-bit range over a 5-bit base field). That is 11 rather than
-      # the ideal 10 because the triangle orders the OPCODES but has no syntax
-      # to order two immediates of the SAME op, so the addi4spn/addi4spn
-      # diagonal pays 2x2 where 2x3/2 would do. Deliberately left alone: 10 and
-      # 11 both reserve the same 16-codepoint block, so the difference is a
-      # don't-care until the frame grows past 16. See the `ops` header note.
+      # Two independent operand setups -- argument marshalling.  Order-free, so
+      # the op list is a TRIANGLE in the canonical order mv < li < addi4spn and
+      # (x, y) costs one codepoint rather than two.  The canonical order must
+      # put register-form ops first: the only row giving A an immediate gives
+      # B one too, so if A takes an immediate, B must.
       budget: 32
       level: 1
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
         - ["li      rda, imma", "li      rdb, immb"]
-      # Order-insensitive: the two ops are independent, so (x, y) and (y, x)
-      # compute the same thing and only ONE needs a codepoint. Written longhand
-      # as a triangle in the canonical order mv < li < addi4spn -- the scheduler
-      # normalises a pair into that order before encoding. A full cross product
-      # here would be the bug it replaced: 3x3 = 9 codepoints to express 6
-      # distinct packets. See the `ops` note in the header.
-      #
-      # The canonical order is NOT arbitrary: it must put register-form ops
-      # first. The only row that gives A an immediate (imma[4:0]) also gives B
-      # one, and there is no row pairing imma for A with rs2b for B -- so if A
-      # takes an immediate, B must too. Ordering mv (register) ahead of li and
-      # addi4spn (immediate) makes every cluster below land on a real row:
-      # (mv,mv) row 0, (mv,li) and (mv,addi4spn) row 1, the rest row 2. The
-      # earlier li-first order had it exactly backwards, admitting (li, mv),
-      # which no row can encode, and excluding (mv, li), which row 1 encodes.
       ops:
         - {a: [mv],  b: [mv, *li_6s, *addi4spn_u6]}
         - {a: [*li_6s], b: [*li_6s, *addi4spn_u6]}
@@ -1459,26 +1131,10 @@ doc:
   - frame:
       name: setup-jump-pair
       does: "Set up an argument or return value, then transfer control."
-      # Set up a value, then transfer control. The counterpart to
-      # arith-jump-pair: that frame's A slot is RSD (rd == rs1), so its rd field
-      # is free for the sentinel. Here A's destination and source are DISTINCT
-      # registers -- `mv a0, a5` before a tail call -- which needs two register
-      # fields and so cannot fit there.
-      #
-      # 936 pairs across 742 functions, top contributor 3.2%: the argument-setup
-      # idiom before a tail call or return. By A form: mv 599, li 191, load 146.
-      # The mv destination is an ABI argument register 92% of the time (a0 60%)
-      # and the jump NEVER reads it -- this is argument setup, not a chain.
-      #
-      # mv and the loads share one row: `mv rda, rs1a` is the load row with the
-      # offset field ignored, which the opcode already distinguishes. li takes
-      # its own row because its 10-bit immediate spans rs2+rs1.
-      #
-      # Load offsets are effectively always zero here (98.2% of the chained
-      # cases, measured without the current rule's 2-bit filter), so imma[4:0]
-      # is generous. That figure is one corpus idiom though -- 54 of 55 are the
-      # same frame-pointer spill in RV32 -- so it is sized for a real vtable
-      # dispatch that this corpus happens not to contain.
+      # The INDEPENDENT counterpart to load-call-chain: A sets up an argument
+      # that B's jump does not read.  That independence is what costs the room
+      # -- rda, rs1a and rs1b must all be fielded, so the load row is full at
+      # 20 bits and its offset can never exceed five.
       budget: 16
       level: 2
       templates:
