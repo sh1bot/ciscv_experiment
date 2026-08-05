@@ -1022,6 +1022,12 @@ def _dual_arith2(a: Instruction, b: Instruction) -> None:
             raise NotPair("not-the-carry-of-this-sum")
         if b.rs2 not in (a.rs1, a.rs2):
             raise NotPair("comparand-is-not-an-addend")
+        # A dead sum is NOT excluded.  It would be the chain shape -- compute a
+        # value, test it, discard it -- but `alu-alu-chain` cannot encode
+        # (add, sltu): `sltu` appears only in its A sets, never a B set.  So
+        # there is no cheaper frame to leave them to, and refusing them just
+        # makes solos.  The idle rda field costs nothing; idle operand bits
+        # are not codepoints.
         return
     first, second, reversed_order = _canonical_dual(a, b, _role_tuples("arith2"))
     if None in (a.rs1, a.rs2, b.rs1, b.rs2):
