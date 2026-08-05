@@ -146,92 +146,98 @@ the same joint (immA, immB) grid treatment `chain_imm_grid` gave the pointer
 chases, so op-set choice and immediate width can be traded against each other
 instead of one being assumed while the other is swept.
 
-## Shaving the immediate limit, and choosing A and B separately
-The residue above was measured with UNLIMITED immediates, which counts pairs
-no 32-bit packet could hold.  Re-measured with a uniform N-bit immediate on
-both slots instead — signedness per `analysis/imm_traits`, so shifts stay
-unsigned and arithmetic signed — the population is honest:
+## WITHDRAWN: the uniform-immediate sweep costed range wrongly
+
+An earlier version of this section swept a uniform 5/6/7-bit immediate across
+the whole op set and costed an A x B frame at `|A| x |B|` codepoints, one entry
+per op. **That is not how immediate range is paid for.** A field is five bits
+per register column the ROW draws, and an op reaches past that only by
+occupying more opcode-list entries: an op declaring N bits takes `2^(N-field)`
+of them. `rsd-alu-pair`'s rows draw five bits, so
+
+    reg-reg op, or 5-bit immediate op        weight 1
+    6-bit                                    weight 2
+    7-bit  (`addi` and `li`, as declared)    weight 4
+    8-bit                                    weight 8
+
+and the block is `weight(A) x weight(B)`. That is exactly where today's 256
+comes from — ten ops per slot, but `addi` and `li` at seven bits cost four
+entries each, so the slot weighs `4 + 4 + 8x1 = 16` and `16 x 16 = 256`. **Two
+ops buy half the frame.**
+
+The withdrawn section claimed a 6-bit immediate at 64 codepoints covered 24231
+against today's 23306 — i.e. that a quarter of the block beat the whole of it.
+Correctly costed it does not beat it, it *matches* it (below). The direction
+survives; the margin was an artefact of pricing range as free.
+
+Raw output of the superseded sweep is kept in `rsd-imm-sweep.txt`; the
+population and order-free figures in it are sound, only the costing was wrong.
+
+## Choosing per-op widths against a weight budget
+
+`util/rsd_weighted.py` optimises the real thing: a width **per op** (or reg-reg
+only), against a weight cap per slot, exploiting the 87.1% order-freedom so a
+pair needs only one of its two orientations. Because cost is a weight product,
+"add another reg-reg op" and "give `li` one more bit" compete on one scale —
+which is the trade a uniform sweep cannot see.
+
+It also disposes of the unlimited-immediate problem without a hand-written
+cutoff: a pair needing a twenty-bit immediate is never selected because
+reaching it would cost 2^15 entries. The budget does the filtering.
+
+**Model check first.** Today's declared policy weighs 16 per slot for a 256
+block — reproducing the frame's actual cost exactly, so the cost model is
+right. It covers 20619 of this residue, against the 23306 the same rule takes
+when demoted in its own run (88.5%). That gap is population, not model: the two
+are separate scheduler runs, the broadened rule takes different pairs, and
+greedy pairing is not monotone. **So every figure below is against 20619 —
+today's op set scored on this same population — not against 23306.**
 
 ```
-population      RV32     RV64     total   order-free
-narrow-last     9689    13617     23306        (today's frame, demoted)
-imm5-last      13518    18209     31727         85.8%
-imm6-last      14572    21566     36138         86.0%
-imm7-last      16750    25119     41869         87.0%
-broad-last     24731    37359     62090         87.1%   <- unlimited, inflated
+  wA  wB  block   covered       %  vs today
+   4   4     16     12394   20.0%     -8225
+   8   4     32     15938   25.7%     -4681
+   4   8     32     15862   25.5%     -4757
+   8   8     64     20574   33.1%       -45
+  16   8    128     26702   43.0%     +6083
+   8  16    128     26889   43.3%     +6270
+  16  16    256     32585   52.5%    +11966
 ```
 
-**Order is free in ~86% of the residue.**  `rsd-alu-pair` packs two independent
-results, and nothing in it forces an order except when one op reads the other's
-destination.  Where order is free the frame does not need both orientations
-encodable — the scheduler can emit whichever one the A and B sets allow.  So A
-and B can be chosen separately, and a pair `{x, y}` counts as covered if
-`x∈A, y∈B` OR `y∈A, x∈B`.
+**A 64-codepoint frame matches today's 256-codepoint one** — 20574 against
+20619, a difference of 45 pairs out of 62090. At the same 256 block a re-chosen
+set covers **32585, 58% more** than the shipped one.
 
-`util/rsd_residue.py` optimises the two sets against exactly that objective by
-alternating maximisation.  `util/biclique_tiling.py` cannot: it works on the
-ordered matrix, so it must cover both orientations, but in exchange it can use
-`b>0` block structure that a single A×B tile cannot.  Both are reported.
+### The slots want opposite things
 
 ```
-                single tile A x B          biclique tiler (b=3)
-imm    pop      64cp    128cp   256cp      64cp    128cp   256cp
- 5   31727     63.4%   76.9%   83.8%     67.6%   77.5%   86.0%
- 6   36138     67.1%   78.0%   85.2%     67.9%   78.6%   86.4%
- 7   41869     71.3%   79.8%   86.3%     70.5%   80.5%   87.6%
- inf 62090     76.3%   83.0%   88.6%     75.3%   84.8%   90.1%
+8x8 = 64 cp
+  A (8): add, addi:5b, addiw:5b, czero.nez, li:5b, slli:5b, srli:5b, sub
+  B (8): addi:6b, add, andi:5b, czero.eqz, li:5b, or, slli:5b
+
+16x16 = 256 cp
+  A (16): slli:6b, add, addi:5b, addiw:5b, andi:5b, czero.nez, li:5b, mul,
+          or, sh1add, sh2add, sh3add, slliw:5b, srli:5b, sub
+  B (16): li:8b, addi:7b, add, czero.eqz, or, slli:5b
 ```
 
-At 64 codepoints the order-free single tile **beats** the block tiler on the
-wider immediates (71.3% vs 70.5% at 7 bits, 76.3% vs 75.3% unlimited):
-exploiting order-freedom is worth about as much as block structure, and the two
-are not combined here.  At 256 the tiler's extra shape wins by 1–2 points.
+At 64 codepoints the optimiser buys almost no range at all — everything is
+weight 1 bar one 6-bit `addi` — and spends the budget on op VARIETY.
 
-### The number that matters
+At 256 the two slots diverge sharply. **A takes breadth**: fifteen ops, nearly
+all weight 1, reaching for `mul`, `sh1add`/`sh2add`/`sh3add`, `sub`, `or`,
+`czero.nez` — none of which the declared nine contains. **B takes depth**:
+just six ops, but `li` at eight bits costs weight 8 and `addi` at seven costs
+4, so twelve of B's sixteen weight goes on two ops.
 
-Today's frame covers **23306 pairs for 256 codepoints**.  Against the same
-demoted, exclusion-corrected population:
+That asymmetry is only available because order is free 87% of the time — the
+scheduler can put the wide-immediate operand in B and the exotic ALU op in A.
+A symmetric frame cannot do it, and neither can a uniform width.
 
-| | covered | codepoints |
-|---|---|---|
-| today (`narrow-last`, 9 ops, per-subform immediates) | 23306 | **256** |
-| 6-bit immediate, A×B = 8×8 | **24231** | **64** |
-| 7-bit immediate, A×B = 8×8 | **29865** | **64** |
-| 7-bit immediate, A×B = 16×8 | 33422 | 128 |
+### What is still not settled
 
-**A 64-codepoint frame with a 6-bit immediate covers more than the current
-256-codepoint frame does.**  At 7 bits it covers 28% more for a quarter of the
-namespace.  Both fit the word: two RSD ops need `rd`(4) + imm(N) twice, so 7
-bits leaves 32 − 22 − 2 = 8 bits of op-select, which is exactly the 256 an
-8×8×(b=3) block wants.
-
-### The sets themselves
-
-**5-bit immediate**
-- `8x8` (64 cp) — 20127 pairs, 63.4%
-  - A: add, addi_rsd, addiw, czero.eqz, li, or, slli, srli
-  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, sub
-- `16x8` (128 cp) — 24411 pairs, 76.9%
-  - A: add, addi_rsd, addiw, andi, czero.eqz, czero.nez, li, mul, or, sh1add, sh2add, sh3add, slli, slliw, srli, sub
-  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, srli
-
-**6-bit immediate**
-- `8x8` (64 cp) — 24231 pairs, 67.1%
-  - A: add, addi_rsd, czero.nez, li, or, slli, srli, sub
-  - B: add, addi_rsd, addiw, andi, czero.eqz, li, or, slli
-- `16x8` (128 cp) — 28174 pairs, 78.0%
-  - A: add, addi_rsd, addiw, andi, czero.eqz, czero.nez, li, mul, or, sh1add, sh2add, sh3add, slli, srai, srli, sub
-  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, srli
-
-**7-bit immediate**
-- `8x8` (64 cp) — 29865 pairs, 71.3%
-  - A: add, addi_rsd, addiw, andi, czero.nez, li, slli, srli
-  - B: add, addi_rsd, czero.eqz, li, or, sh2add, slli, sub
-- `16x8` (128 cp) — 33422 pairs, 79.8%
-  - A: add, addi_rsd, addiw, andi, czero.eqz, czero.nez, li, mul, or, sh1add, sh2add, sh3add, slli, srai, srli, sub
-  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, srli
-
-`add`, `addi_rsd`, `li`, `or`, `slli`, `srli` and `czero.eqz`/`czero.nez` are in
-every set at every width.  `czero.*`, `mul`, `sh1add`/`sh2add`/`sh3add` and
-`sub` are NOT in the frame's declared nine — and `xor` and `and`, which are,
-appear only once the sets grow past 8.
+The greedy is alternating-maximisation, not optimal, so these are lower bounds
+on what each budget can reach. The comparison is on the demoted residue, which
+is what the frame is worth if it goes LAST in `RULES` — still an open design
+question. And the row would need redrawing to carry the chosen widths before
+any of this is encodable as measured.
