@@ -474,13 +474,23 @@ No general register block is reserved at present. Earlier drafts held out a cont
     alu     rda, rs1a, rs2a
     alu     rdb, rs1a, rs2a
 
+    add     rda, rs1a, rs2a
+    sltu    rdb, rda, rs1a
+
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│   rda   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
- * KEPT DELIBERATELY DESPITE A NEAR-ZERO SCORE. Do not cut this frame on
-   pairing-rate evidence; it is not here to earn pairs.
+ * CARRY-OUT, measured (2026-08-04). cpp-rv32 holds 156 carry-shaped
+   adjacencies, godot 36, everything else under five. The cluster takes
+   the frame from 59 hits to 167 on cpp-rv32, but the corpus total rises
+   by only 29: the other 79 were pairs some other frame was already
+   making, and `add` is the most contested opcode in the encoding. Report
+   it as 29, not 108.
+ * THE REST OF THE FRAME IS KEPT DESPITE A NEAR-ZERO SCORE. Do not cut
+   the mul/div clusters on pairing-rate evidence; they are not there to
+   earn pairs.
  * Every cluster is two halves of ONE computation over the same operands:
    the low and high words of a multiply, the quotient and remainder of a
    divide, the sum and difference, the min and the max. Encoding them as

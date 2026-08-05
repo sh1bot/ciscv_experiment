@@ -894,6 +894,11 @@ _DUAL_TUPLES: dict = {
     ("divu", "remu"):     "arith2",
     ("divw", "remw"):     "arith2",
     ("divuw", "remuw"):   "arith2",
+    # Carry-out.  NOT the same-source shape: B reads A's SUM, so this half of
+    # the family is strictly ordered and is a dependence rather than a
+    # independence.  `_dual_arith2` branches on it.
+    ("add", "sltu"):      "arith2",
+    ("addw", "sltu"):     "arith2",
     # (post-increment mem+addi / mem+shNadd tuples live in _POST_INC_TUPLES)
     # (adjacent load/store pairs are handled by the dedicated mem-base-pair rule)
     # independent single-output pairs — no shared operands required
@@ -993,17 +998,37 @@ def dual_family(role: str):
     return deco
 
 
-@dual_family("arith2")
-def _dual_arith2(a: Instruction, b: Instruction) -> None:
-    """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...).
+_CARRY_TUPLES = frozenset({("add", "sltu"), ("addw", "sltu")})
 
-    The pair is a fusion hint: both results of one computation are wanted, so an
-    implementation can produce them in a single pass.  Low corpus yield is a
-    fact about today's compilers, not about the frame."""
+
+@exclusive_rd
+def _dual_arith2(a: Instruction, b: Instruction) -> None:
+    """One computation, both its results -- so an implementation can produce
+    them in a single pass.  Two shapes, and they are structurally opposite:
+
+    SAME-SOURCE (mulh/mul, div/rem): the two ops read the same operands and
+    neither feeds the other.  Order-insensitive, independence required.
+
+    CARRY-OUT (`add rda, rs1, rs2 ; sltu rdb, rda, rs1-or-rs2`): B reads A's
+    SUM.  Strictly ordered, and a dependence is required rather than refused.
+    Either addend may be the comparand -- for unsigned addition the sum is
+    less than one addend exactly when it is less than the other -- so which
+    one B names is a DON'T CARE and needs no field.  That is what lets this
+    ride the existing row: rda, rs1a, rs2a, rdb are already drawn."""
+    if (a.mnemonic, b.mnemonic) in _CARRY_TUPLES:
+        if None in (a.rd, a.rs1, a.rs2, b.rs1, b.rs2):
+            raise NotPair("MALFORMED: missing register operand")
+        if b.rs1 != a.rd:
+            raise NotPair("not-the-carry-of-this-sum")
+        if b.rs2 not in (a.rs1, a.rs2):
+            raise NotPair("comparand-is-not-an-addend")
+        return
+    first, second, reversed_order = _canonical_dual(a, b, _role_tuples("arith2"))
     if None in (a.rs1, a.rs2, b.rs1, b.rs2):
         raise NotPair("MALFORMED: missing register operand")
     if a.rs1 != b.rs1 or a.rs2 != b.rs2:
         raise NotPair("source-operand-mismatch")
+    _reject_dependence(a, b, reversed_order)
 
 
 def post_inc_family(role: str):
