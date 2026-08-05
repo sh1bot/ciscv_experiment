@@ -553,6 +553,21 @@ No general register block is reserved at present. Earlier drafts held out a cont
    x0..x31. An earlier note anticipated cutting them to 4 bits; that is
    not needed, and scheduler/rules.py enforcing x0..x15 was costing 377
    pairs across the corpus.
+ * The two slots declare DIFFERENT op sets, and deliberately. Range past
+   the row's five drawn bits is bought in opcode entries -- an op
+   declaring N bits occupies 2^(N-5) of them -- so weight, not op count,
+   is the budget, and one bit on `li` costs what four reg-reg opcodes
+   cost. A weighs 16 as fifteen ops that are nearly all weight 1
+   (breadth); B weighs 16 as six ops, of which `li` at eight bits is 8
+   and `addi` at seven is 4 (depth). The block is 16 x 16 = 256, the same
+   as the symmetric set it replaces.
+ * The asymmetry is only purchasable because the pair is ORDER-FREE in
+   87.1% of the corpus residue: rsd-alu-pair packs two independent
+   results, so unless one reads the other's destination the scheduler may
+   emit either orientation and only one need be encodable. The list
+   scheduler already tries both (its tier-1 and tier-2 partner picks).
+   See results/corpus/RSD-RESIDUE.md for the measurement and for the
+   weighted optimisation that chose these two sets.
 
 ## prologue-pair
 

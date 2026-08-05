@@ -30,6 +30,25 @@ def _w(rule: str, slot: str, op: str) -> int:
     return v
 
 
+def _slot_widths(rule: str, slot: str) -> dict:
+    """{yaml op name: declared bits} for one slot, from encoding.yaml."""
+    from scheduler.imm_contracts import widths_for
+    return dict(widths_for(rule, slot))
+
+
+def _slot_mnemonics(rule: str, slot: str) -> frozenset:
+    """The MNEMONICS one slot accepts, from its yaml op list.
+
+    `li` is not a mnemonic -- it is `addi` with rs1 = x0 -- so a slot declaring
+    li accepts `addi` and the width lookup separates them.
+    """
+    ops = set(_slot_widths(rule, slot))
+    if "li" in ops:
+        ops.discard("li")
+        ops.add("addi")
+    return frozenset(ops)
+
+
 def _lr(rule: str, slot: str) -> frozenset:
     """The destination registers a slot's ops hard-code, from encoding.yaml.
 
@@ -461,13 +480,56 @@ def uses_low_regs_here(*these_regs: str):
 # rsd-alu-pair
 # ---------------------------------------------------------------------------
 
+# The two slots declare DIFFERENT op sets and different per-op immediate widths.
+# Range past the row's five drawn bits is bought in opcode entries -- an op
+# declaring N bits occupies 2^(N-5) -- so WEIGHT is the budget, not op count,
+# and one more bit on `li` costs what four reg-reg opcodes cost.  A spends its
+# sixteen on breadth (fifteen ops, nearly all weight 1); B spends twelve of its
+# sixteen on two deep immediates (`li` at 8 bits, `addi` at 7).  Both from
+# encoding.yaml, never restated here -- see results/corpus/RSD-RESIDUE.md for
+# the weighted optimisation that chose them.
+#
+# Asymmetry is legitimate because the pair is ORDER-FREE in 87.1% of the
+# corpus residue: two independent results, so unless one reads the other's
+# destination either orientation may be emitted and only one need encode.  The
+# list scheduler already tries both, via its tier-1 and tier-2 partner picks.
+_RSD_A_W = _slot_widths("rsd-alu-pair", "a")
+_RSD_B_W = _slot_widths("rsd-alu-pair", "b")
+_RSD_A_MN = _slot_mnemonics("rsd-alu-pair", "a")
+_RSD_B_MN = _slot_mnemonics("rsd-alu-pair", "b")
+# Shift amounts are unsigned; every other immediate this frame carries is
+# signed.  Kept local so the check does not depend on analysis/ (rules.py
+# imports nothing from there).
+_RSD_UNSIGNED_MN = frozenset({"slli", "srli", "srai",
+                              "slliw", "srliw", "sraiw"})
+
+
+def _rsd_slot_imm_ok(insn: Instruction, widths: dict, slot: str) -> None:
+    """The immediate fits the width THIS SLOT declares for this op.
+
+    A register-register form has no field to check.  `li` is `addi` with
+    rs1 = x0 and is declared separately in the yaml (it breaks the RSD form the
+    rest of the frame relies on), so it is looked up under its own name.
+    """
+    if insn.imm is None:
+        return
+    key = "li" if insn.is_li else insn.mnemonic
+    bits = widths.get(key)
+    if bits is None:
+        raise NotPair(f"{slot}-op-not-in-slot-set")
+    if key in _RSD_UNSIGNED_MN:
+        lo, hi = 0, (1 << bits) - 1
+    else:
+        lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    if not (lo <= insn.imm <= hi):
+        raise NotPair("big-imm")
+
+
 @a_is_rsd_or_li
 @b_is_rsd_or_li
 @a_rsd_swappable
 @b_rsd_swappable
 @uses_low_regs
-@a_imm_ok
-@b_imm_ok
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     """Both instructions RSD or li form, x0..x15, immediates in range, and the
@@ -479,6 +541,8 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     not be in x0..x15) or B does not (making A's write dead).  Either way this
     rule should not claim the pair; require distinct destinations.
     """
+    _rsd_slot_imm_ok(a, _RSD_A_W, "A")
+    _rsd_slot_imm_ok(b, _RSD_B_W, "B")
 
 
 # ---------------------------------------------------------------------------
@@ -1765,8 +1829,8 @@ def _arg_call_pair(a: Instruction, b: Instruction) -> None:
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
-        a_mnemonic_set=_RSD_ALU_MN,
-        b_mnemonic_set=_RSD_ALU_MN,
+        a_mnemonic_set=_RSD_A_MN,
+        b_mnemonic_set=_RSD_B_MN,
         check=_rsd_alu_pair,
     ),
     PairingRule(

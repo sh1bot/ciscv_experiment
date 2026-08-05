@@ -10,8 +10,8 @@ already past).
 RVC figures are REAL, taken from the `-noalias` disassemblies, not the
 `rvc_eligible` estimator (which is a ceiling — see CLAUDE.md).  Every pair
 counted is encodable as drawn: widths declared and enforced, codepoints paid
-(`encoding_assign` reports zero accounting complaints at 790/1024 reserved,
-234 spare), and `encoding_verify` puts every checkable frame at or near 100%
+(`encoding_assign` reports zero accounting complaints at 782/1024 reserved,
+242 spare), and `encoding_verify` puts every checkable frame at or near 100%
 encodable.  Two declared optimisms remain (ACCOUNTING.md §8), plus the
 declared `measures_also` folds.  Branch/jump displacements are unresolved
 labels in the corpus and are not range-checked.  And `load-call-chain`
@@ -26,22 +26,22 @@ essentially all of it is PLT stubs.
 ```
 corpus             insns   pairs  nops  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------------
-testcase0          21875    4159     1    17716     81.0%     81.6%    99.2%   103.5%       -141
-musl-os-rv32      109844   25475    36    84369     76.8%     74.7%   102.8%    91.6%      +2331
-musl-rv32         118990   27480    36    91510     76.9%     74.9%   102.7%    92.0%      +2391
-godot              90171   15965     1    74206     82.3%     76.3%   107.9%    74.7%      +5403
-musl-os-rv64       93259   19963    30    73296     78.6%     72.5%   108.4%    77.8%      +5703
-musl-rv64         102010   21876    30    80134     78.6%     72.7%   108.0%    78.6%      +5940
-musl-gcc-rv64     103412   20456    30    82956     80.2%     72.9%   110.0%    73.1%      +7534
-musl-gcc-rv32     119919   25859    37    94060     78.4%     71.9%   109.1%    76.8%      +7817
-sqlite-rv32       192688   45001    80   147687     76.6%     72.1%   106.3%    83.7%      +8769
-sqlite-rv64       189602   41972    75   147630     77.9%     72.1%   108.0%    79.3%     +10983
-sqlitem-rv64      201823   44465    82   157358     78.0%     71.8%   108.6%    78.1%     +12477
-sqlite-gcc-rv64   167354   33430   156   133924     80.0%     71.2%   112.4%    69.3%     +14818
-cpp-rv32          418345   92224  2521   326121     78.0%     71.0%   109.8%    75.9%     +29229
-cpp-rv64          409200   86930  2487   322270     78.8%     71.2%   110.6%    73.7%     +31008
+testcase0          21875    4162     1    17713     81.0%     81.6%    99.2%   103.6%       -144
+musl-os-rv32      109844   25684    36    84160     76.6%     74.7%   102.6%    92.4%      +2122
+musl-rv32         118990   27699    36    91291     76.7%     74.9%   102.4%    92.7%      +2172
+godot              90171   15978     1    74193     82.3%     76.3%   107.8%    74.8%      +5390
+musl-os-rv64       93259   20258    30    73001     78.3%     72.5%   108.0%    78.9%      +5408
+musl-rv64         102010   22189    30    79821     78.2%     72.7%   107.6%    79.8%      +5627
+musl-gcc-rv64     103412   20671    30    82741     80.0%     72.9%   109.7%    73.9%      +7319
+musl-gcc-rv32     119919   25942    37    93977     78.4%     71.9%   109.0%    77.0%      +7734
+sqlite-rv32       192688   45682    80   147006     76.3%     72.1%   105.8%    85.0%      +8088
+sqlite-rv64       189602   42836    75   146766     77.4%     72.1%   107.4%    80.9%     +10119
+sqlitem-rv64      201823   45355    82   156468     77.5%     71.8%   108.0%    79.7%     +11587
+sqlite-gcc-rv64   167354   33837   156   133517     79.8%     71.2%   112.1%    70.1%     +14411
+cpp-rv32          418345   93998  2521   324347     77.5%     71.0%   109.2%    77.4%     +27455
+cpp-rv64          409200   88804  2487   320396     78.3%     71.2%   110.0%    75.3%     +29134
 ------------------------------------------------------------------------------------------------
-TOTAL to parity                                                                    +144262
+TOTAL to parity                                                                    +136422
 ```
 
 ## Where each corpus stands
@@ -50,38 +50,38 @@ Ordered by distance from beating real RVC.  "call frame" is the additional
 saving `util/call_frame_value.py` projects for a TABLE jump (Zcmt
 `cm.jalt`/`cm.jt`), measured on top of what `arg-call-pair` already realises.
 
-**testcase0 — PAST parity by 141 pairs.**  The only corpus packets currently
+**testcase0 — PAST parity by 144 pairs.**  The only corpus packets currently
 beat.  It is also the one place where `arg-call-pair` fires on a corpus that is
 almost entirely far calls: 743 of its 855 calls are `auipc; jalr`, of which 106
 now pair.  As an index target it is pathological — 746 transfers to 746
 distinct targets, every function called exactly once — so its table would be as
 large as its call set and `cm.jt` is worth only 229 more words.
 
-**musl-rv32 / musl-os-rv32 — +2391 / +2331.**  Closest of the real corpora,
+**musl-rv32 / musl-os-rv32 — +2172 / +2122.**  Closest of the real corpora,
 both around 103% of RVC.  No far calls at all, so `arg-call-pair` fires zero
 times; the call frame is entirely a `cm.jalt` story and is worth ~1800 words
 each, which would close roughly three quarters of the remaining gap.  Their
 A-partner rate is the worst measured (44%) — thin libc wrappers have little
 spare work beside a call.
 
-**godot — +5403.**  The frame's best case by far and the reason it exists in
+**godot — +5390.**  The frame's best case by far and the reason it exists in
 this form: 6818 far transfers, of which **3025 now pair**, taking godot from
-+8415 to +5403 in one step.  A PIC-heavy shared-library build is nothing but
++8415 to +5390 in one step.  A PIC-heavy shared-library build is nothing but
 `auipc; jalr`.  `cm.jt` would add 1894 words on top, mostly by deleting the
 `auipc` rather than by pairing.
 
-**musl-rv64 / musl-os-rv64 — +5940 / +5703.**  RV64 costs about 3500 pairs
+**musl-rv64 / musl-os-rv64 — +5627 / +5408.**  RV64 costs about 3500 pairs
 against the rv32 build of the same source: wider spills, `addiw` where `addi`
 would do, and a table that costs twice as much per entry.
 
-**musl-gcc-rv32 / rv64 — +7817 / +7534.**  GCC's register allocation is
+**musl-gcc-rv32 / rv64 — +7734 / +7319.**  GCC's register allocation is
 friendlier to pairing than clang's in general, but it spills arguments to the
 stack before calls (`store rs, k*imm(sp)` reaches 12.6% of its calls, against
 2% elsewhere), which is why the store rows earn their place in the A set.
 
-**sqlite family — +8769 to +14818.**  Consistent, unremarkable, no far calls.
+**sqlite family — +8088 to +14411.**  Consistent, unremarkable, no far calls.
 `cm.jalt` is worth 3429 words on rv32 and 2540 on rv64.  `sqlite-gcc-rv64` is
-the worst of them at 112.4%, and `sqlitem-noc-rv64` is excluded — a no-C build
+the worst of them at 112.1%, and `sqlitem-noc-rv64` is excluded — a no-C build
 has no real RVC to score against.  That exclusion is now real.  It was tested
 as `comp == 0`, which the corpus slipped past on 2077 stray `c.*` (1.03%) from
 prebuilt objects linked into it; it was then scored at 99.5% of a baseline it
@@ -91,7 +91,7 @@ sum of the rows it showed.  The test is a fraction now (`corpus_scores.py`,
 `NO_C_COMPRESSED_FRACTION`), the two populations being 0–1.03% compressed
 against 36.7–57.7%, and the TOTAL is again the sum of the rows shown.
 
-**cpp-rv32 / cpp-rv64 — +29229 / +31008.**  Still the wall, and 42% of
+**cpp-rv32 / cpp-rv64 — +27455 / +29134.**  Still the wall, and 42% of
 everything owed (it read 59% while the total was being understated by
 sqlitem-noc-rv64 — the share fell, the gap did not).  `arg-call-pair` fires only 471 times here despite 2563 far
 transfers, because 1407 of them stay glued to their own `auipc` — the
@@ -239,7 +239,7 @@ not the frame.  Do not cut it on pairing-rate evidence.
 - `rule-overlap.txt` — the same corpus measured for frame overlap
   (`util/rule_overlap.py`): per frame, `reach` (pairs it could encode, whoever
   won them) and `excl` (pairs only it can encode).  **`excl/cp`, not
-  `hits/cp`, is the number to spend codepoints on.**  27.8% of all pairs are
+  `hits/cp`, is the number to spend codepoints on.**  26.7% of all pairs are
   encodable by more than one frame.  `excl == 0` is a proof the frame is free
   to delete, since rule identity never changes the schedule; `excl > 0` is an
   estimate of the deletion cost, not a bound (greedy scheduling is not

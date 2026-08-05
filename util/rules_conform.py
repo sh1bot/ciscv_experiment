@@ -477,8 +477,11 @@ def main():
             if note:
                 notes.append(note)
 
-        contracts = op_contracts(frame)
-        for mn, c in contracts.items():
+        # Per slot: a frame may declare different widths for the same op in A
+        # and B (rsd-alu-pair does, deliberately), so a merged view would
+        # either collide or silently verify one slot against the other's.
+        for slot in ("a", "b"):
+          for mn, c in op_contracts(frame, slot).items():
             bits = c.get("bits")
             if not bits:
                 continue
@@ -489,7 +492,7 @@ def main():
                 # the optimism policy, see CLAUDE.md), so there is nothing to
                 # verify the declaration against.
                 continue
-            for slot in ("a", "b"):
+            if True:
                 if base not in frame_slot_ops(frame, slot):
                     continue
                 got = accepted_range(rule, frame, mn, slot)

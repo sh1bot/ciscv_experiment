@@ -372,13 +372,20 @@ def op_imm(entry):
     return {}
 
 
-def op_contracts(frame):
-    """{mnemonic: {bits, signed, scale}} for every op in a frame that declares
-    an immediate contract. Ops appear per slot but a mnemonic's contract is a
-    property of the opcode, so a disagreement across slots is an error."""
+def op_contracts(frame, slot=None):
+    """{mnemonic: {bits, signed, scale}} for the ops declaring an immediate.
+
+    With `slot` ("a"/"b") this is that slot's list alone.  Without, both are
+    merged and a disagreement is an error -- which held while every frame
+    declared its two slots identically.  It no longer does: rsd-alu-pair gives
+    `li` five bits in A and eight in B on purpose, because the op-select
+    carries independent A and B indices, so the two are different opcode
+    entries in different lists and may declare different widths.  Callers that
+    care about a particular slot must pass one."""
     out = {}
+    slots = ("a", "b") if slot is None else (slot,)
     for cluster in frame.get("ops") or []:
-        for slot in ("a", "b"):
+        for slot in slots:
             for entry in cluster.get(slot, []):
                 c = op_imm(entry)
                 if not c:

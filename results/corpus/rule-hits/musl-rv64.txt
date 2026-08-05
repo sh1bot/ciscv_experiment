@@ -1,36 +1,36 @@
 # musl-rv64 (RV64)
 # --- file totals ---
-#   instructions: 102010  packets: 80134  pairs: 21876  solos: 58258
-#   pair rate:    27.3%  (43752/102010 instructions paired)
+#   instructions: 102010  packets: 79821  pairs: 22189  solos: 57632
+#   pair rate:    27.8%  (44378/102010 instructions paired)
 #   RVC-eligible: 55.6%  (56719/102010 instructions)
 #   nops: 30 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 2218
-#     alu-alu-chain: 822
-#     load-alu-chain: 526
-#     addi-store-chain: 119
-#     alu-store-chain: 294
+#     rsd-alu-pair: 2551
+#     alu-alu-chain: 832
+#     load-alu-chain: 522
+#     addi-store-chain: 116
+#     alu-store-chain: 295
 #     load-sp-branch-pair: 142
 #     load-base-branch-pair: 743
 #     load0-load10-chain: 21
 #     load5-load5-chain: 34
-#     mem-sp-pair: 4139
-#     mem-base-pair: 762
+#     mem-sp-pair: 4137
+#     mem-base-pair: 761
 #     load-store-chain: 325
 #     addi-store-off-chain: 0
 #     load-call-chain: 32
 #     macro-op-pair: 0
-#     post-inc-pair: 843
-#     dual-setup-pair: 4297
-#     li-branch-chain: 916
-#     inc-branch-pair: 142
-#     bit-test-branch-chain: 256
-#     prologue-pair: 1032
-#     epilogue-pair: 459
-#     czero-or-chain: 387
-#     li-czero-chain: 52
+#     post-inc-pair: 849
+#     dual-setup-pair: 4354
+#     li-branch-chain: 951
+#     inc-branch-pair: 147
+#     bit-test-branch-chain: 254
+#     prologue-pair: 1019
+#     epilogue-pair: 462
+#     czero-or-chain: 310
+#     li-czero-chain: 49
 #     index-mem-chain: 172
-#     pre-inc-pair: 140
-#     arith-jump-pair: 1865
-#     setup-jump-pair: 1138
+#     pre-inc-pair: 134
+#     arith-jump-pair: 1827
+#     setup-jump-pair: 1150
 #     arg-call-pair: 0

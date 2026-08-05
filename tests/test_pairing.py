@@ -136,16 +136,45 @@ class TestRsdAluPair:
     def test_two_rsd_alu_ops_pair(self):
         """Two rsd-form ALU ops with supported mnemonics should pair."""
         a = make_insn("add", rd=10, rs1=10, rs2=11)   # is_rsd: rd==rs1
-        b = make_insn("and", rd=12, rs1=12, rs2=13)   # is_rsd: rd==rs1
+        b = make_insn("or", rd=12, rs1=12, rs2=13)    # is_rsd: rd==rs1
         assert can_pair(a, b) is None
 
-    def test_all_supported_mnemonics_pair(self):
-        """Every mnemonic in the supported set can appear in either slot."""
-        supported = ["add", "and", "or", "xor"]
-        for m in supported:
+    def test_ops_in_both_slots_pair(self):
+        """A mnemonic declared in BOTH slots pairs with itself."""
+        import scheduler.rules as _r
+        for m in sorted(_r._RSD_A_MN & _r._RSD_B_MN):
+            if m in ("addi", "slli"):        # immediate forms, covered below
+                continue
             a = make_insn(m, rd=10, rs1=10, rs2=11)
             b = make_insn(m, rd=12, rs1=12, rs2=13)
             assert can_pair(a, b) is None, f"{m}+{m} should pair"
+
+    def test_slots_are_asymmetric(self):
+        """The two slots declare DIFFERENT op sets, and the rule enforces it.
+
+        Range past the row's five drawn bits costs opcode entries, so weight
+        rather than op count is the budget; A spends its sixteen on breadth and
+        B on two deep immediates.  An op declared only in A must be refused in
+        B — if this ever passes symmetrically the frame has silently doubled
+        its cost.
+        """
+        import scheduler.rules as _r
+        a_only = _r._RSD_A_MN - _r._RSD_B_MN
+        assert a_only, "the slots are supposed to differ"
+        assert "mul" in a_only               # breadth bought for the A slot
+        a = make_insn("add", rd=10, rs1=10, rs2=11)
+        b = make_insn("mul", rd=12, rs1=12, rs2=13)
+        assert _rsd_accepts(a, b) is False, "mul must not be accepted in B"
+        assert _rsd_accepts(b, a) is True, "mul must be accepted in A"
+
+    def test_slot_immediate_widths_differ(self):
+        """`li` is five bits in A and eight in B, as the yaml declares."""
+        import scheduler.rules as _r
+        assert _r._RSD_A_W["li"] == 5 and _r._RSD_B_W["li"] == 8
+        wide = make_insn("addi", rd=11, rs1=0, imm=100)    # li, needs 8 bits
+        small = make_insn("add", rd=12, rs1=12, rs2=13)
+        assert _rsd_accepts(small, wide) is True, "8-bit li belongs in B"
+        assert _rsd_accepts(wide, small) is False, "A only declares li at 5 bits"
 
     def test_non_rsd_form_does_not_pair(self):
         """add with rd != rs1 and rd != rs2 is not rsd-form, should not pair."""
@@ -1174,6 +1203,17 @@ class TestBaseChainLoadOffPair:
                 assert len(accepting) <= 1, (a_imm, accepting)
         finally:
             _r.set_xlen(old)
+
+
+def _rsd_accepts(a, b):
+    """Does rsd-alu-pair accept (a, b), honouring its per-slot MNEMONIC sets?
+
+    `_rule_reason` calls check() directly and so bypasses the mnemonic sets,
+    which is exactly where the A/B asymmetry lives.  rsd-alu-pair is RULES[0],
+    so if it accepts, it is the rule find_b_partners returns.
+    """
+    from scheduler.pairing import find_b_partners
+    return any(r.name == "rsd-alu-pair" for _b, r in find_b_partners(a, [b]))
 
 
 def _rule_reason(name, a, b):

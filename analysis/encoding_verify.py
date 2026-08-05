@@ -184,7 +184,7 @@ def main():
         f = node["frame"]
         caps[f["name"]] = frame_capacities(f)
         scales[f["name"]] = slot_exprs(f)
-        contracts[f["name"]] = op_contracts(f)
+        contracts[f["name"]] = {s: op_contracts(f, s) for s in ("a", "b")}
         # A frame may list the scheduler rules it covers (when its display name
         # differs from the rule names); otherwise the name IS the rule list.
         for rn in f.get("rules_py_names") or [x.strip() for x in f["name"].split(",")]:
@@ -229,11 +229,12 @@ def main():
                         claimed[frame] += 1
                         cap = caps[frame]
                         exprs = scales[frame]
-                        con = contracts[frame]
+                        con_by_slot = contracts[frame]
                         mem_w = next((x.access_width for x in (a, b)
                                       if x.has_mem_operand and x.access_width), None)
                         ok, saw = True, False
                         for insn, side in ((a, "a"), (b, "b")):
+                            con = con_by_slot[side]
                             e = exprs.get(side)
                             # Scale comes from the template coefficient (single
                             # source of truth). A memory op is width-scaled (k);

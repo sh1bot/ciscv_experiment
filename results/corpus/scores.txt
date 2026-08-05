@@ -1,28 +1,28 @@
 corpus             insns   pairs  nops  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
 ------------------------------------------------------------------------------------------------
-cpp-rv32          418345   92224  2521   326121     78.0%     71.0%   109.8%    75.9%     +29229
-cpp-rv64          409200   86930  2487   322270     78.8%     71.2%   110.6%    73.7%     +31008
-godot              90171   15965     1    74206     82.3%     76.3%   107.9%    74.7%      +5403
-musl-gcc-rv32     119919   25859    37    94060     78.4%     71.9%   109.1%    76.8%      +7817
-musl-gcc-rv64     103412   20456    30    82956     80.2%     72.9%   110.0%    73.1%      +7534
+cpp-rv32          418345   93998  2521   324347     77.5%     71.0%   109.2%    77.4%     +27455
+cpp-rv64          409200   88804  2487   320396     78.3%     71.2%   110.0%    75.3%     +29134
+godot              90171   15978     1    74193     82.3%     76.3%   107.8%    74.8%      +5390
+musl-gcc-rv32     119919   25942    37    93977     78.4%     71.9%   109.0%    77.0%      +7734
+musl-gcc-rv64     103412   20671    30    82741     80.0%     72.9%   109.7%    73.9%      +7319
 musl-gccnoc-rv32 (no compressed instructions — skipped; see cross_parity)
 musl-gccnoc-rv64 (no compressed instructions — skipped; see cross_parity)
 musl-norvc-rv32  (no compressed instructions — skipped; see cross_parity)
 musl-norvc-rv64  (no compressed instructions — skipped; see cross_parity)
-musl-os-rv32      109844   25475    36    84369     76.8%     74.7%   102.8%    91.6%      +2331
-musl-os-rv64       93259   19963    30    73296     78.6%     72.5%   108.4%    77.8%      +5703
+musl-os-rv32      109844   25684    36    84160     76.6%     74.7%   102.6%    92.4%      +2122
+musl-os-rv64       93259   20258    30    73001     78.3%     72.5%   108.0%    78.9%      +5408
 musl-osnoc-rv32  (no compressed instructions — skipped; see cross_parity)
 musl-osnoc-rv64  (no compressed instructions — skipped; see cross_parity)
-musl-rv32         118990   27480    36    91510     76.9%     74.9%   102.7%    92.0%      +2391
-musl-rv64         102010   21876    30    80134     78.6%     72.7%   108.0%    78.6%      +5940
-sqlite-gcc-rv64   167354   33430   156   133924     80.0%     71.2%   112.4%    69.3%     +14818
-sqlite-rv32       192688   45001    80   147687     76.6%     72.1%   106.3%    83.7%      +8769
-sqlite-rv64       189602   41972    75   147630     77.9%     72.1%   108.0%    79.3%     +10983
+musl-rv32         118990   27699    36    91291     76.7%     74.9%   102.4%    92.7%      +2172
+musl-rv64         102010   22189    30    79821     78.2%     72.7%   107.6%    79.8%      +5627
+sqlite-gcc-rv64   167354   33837   156   133517     79.8%     71.2%   112.1%    70.1%     +14411
+sqlite-rv32       192688   45682    80   147006     76.3%     72.1%   105.8%    85.0%      +8088
+sqlite-rv64       189602   42836    75   146766     77.4%     72.1%   107.4%    80.9%     +10119
 sqlitem-noc-rv64 (no compressed instructions — skipped; see cross_parity)
-sqlitem-rv64      201823   44465    82   157358     78.0%     71.8%   108.6%    78.1%     +12477
-testcase0          21875    4159     1    17716     81.0%     81.6%    99.2%   103.5%       -141
+sqlitem-rv64      201823   45355    82   156468     77.5%     71.8%   108.0%    79.7%     +11587
+testcase0          21875    4162     1    17713     81.0%     81.6%    99.2%   103.6%       -144
 ------------------------------------------------------------------------------------------------
-TOTAL to parity                                                                    +144262
+TOTAL to parity                                                                    +136422
 
 `nops` are excluded from the counts on both sides: what they are for is out of
 scope for this experiment.

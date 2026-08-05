@@ -241,3 +241,46 @@ on what each budget can reach. The comparison is on the demoted residue, which
 is what the frame is worth if it goes LAST in `RULES` — still an open design
 question. And the row would need redrawing to carry the chosen widths before
 any of this is encodable as measured.
+
+## ADOPTED — and what it actually did
+
+The 16x16 policy is now the frame (`encoding.yaml`, `scheduler/rules.py`).
+
+```
+A (weight 16, 15 ops): add sub mul or sh1add sh2add sh3add czero.nez
+                       addi:5 li:5 addiw:5 andi:5 slli:6 slliw:5 srli:5
+B (weight 16,  6 ops): add or czero.eqz  li:8 addi:7 slli:5
+```
+
+`and` and `xor` are gone — the optimiser never picked either at any budget.
+The block is 256, exactly what the symmetric set cost, so this is cost-neutral
+by construction.
+
+| | before | after |
+|---|---|---|
+| `rsd-alu-pair` hits | 34927 | **46340** |
+| its exclusive pairs | 23306 | **36303** |
+| excl/cp | 91.0 | **141.8** |
+| corpus pairs | 505255 | **513095** |
+| TOTAL to parity | 144262 | **136422** |
+
+**+7840 corpus pairs, no corpus regressed, for the same 256 codepoints.**  The
+exclusive count — the like-for-like figure, since the op set was chosen on the
+demoted residue — went 23306 to 36303, +56%, against the +58% the weighted
+optimiser projected.  The projection held.
+
+Frames it takes from: `dual-setup-pair` still co-accepts 8350 of its pairs
+(down from 10221), and corpus-wide overlap fell 27.8% -> 26.7%.
+
+### Two things this did NOT settle
+
+The frame is still `RULES[0]`.  Its op set was chosen against the residue it
+would see if demoted, and it is not demoted — so it still harvests 8350 pairs
+`dual-setup-pair` could take for 17 codepoints.  Whether to reorder them is
+open, and unchanged by this.
+
+`uses_low_regs` still clamps registers to x0..x15 while the frame's own yaml
+note says the four register operands occupy four full 5-bit columns and that
+the clamp "was costing 377 pairs across the corpus".  rules.py and the note
+disagree; nothing gates it, and the residue measured here inherited the clamp,
+so every figure above is a floor.
