@@ -132,7 +132,15 @@ _RSD_ALU_MN = frozenset({
     "add",  "and",  "or",   "xor",
     "slli", "srli",                          # shift-immediate forms
     })
-_RSD_ALU_REGS = frozenset(range(32))         # x0..x31 — a FULL 5-bit field
+# x0..x31 — a FULL 5-bit field.  Because this is every register, the checks
+# built on it (`_confirm_low_regs`, and so `uses_low_regs`,
+# `chain_uses_low_regs`, `uses_low_regs_here`) can never reject anything: they
+# are dead code, kept only because deleting them touches four more rules.
+# That is correct only while every register operand lands in a 5-bit column,
+# which tests/test_conformance.py now gates
+# (test_every_register_operand_gets_a_full_five_bit_field).  Measured: removing
+# the clamp from rsd-alu-pair changed the corpus by exactly zero pairs.
+_RSD_ALU_REGS = frozenset(range(32))
 
 # Signed immediate widths, derived from the yaml op contracts at import.
 _RSD_IMM_BITS   = {mn: _w("rsd-alu-pair", "a", mn)
@@ -525,11 +533,15 @@ def _rsd_slot_imm_ok(insn: Instruction, widths: dict, slot: str) -> None:
         raise NotPair("big-imm")
 
 
+# NO uses_low_regs.  Every one of this frame's four rows puts `rsda` in the
+# 5-bit `rs1` column, `rsdb` in the 5-bit `rd` column and rs2a/rs2b in `rs2`
+# and `funct5` -- four full 5-bit register fields, 20 bits, the whole operand
+# budget.  The x0..x15 clamp the rest of the pairing rules carry has no
+# encoding behind it here, and it was refusing pairs the row can hold.
 @a_is_rsd_or_li
 @b_is_rsd_or_li
 @a_rsd_swappable
 @b_rsd_swappable
-@uses_low_regs
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
     """Both instructions RSD or li form, x0..x15, immediates in range, and the

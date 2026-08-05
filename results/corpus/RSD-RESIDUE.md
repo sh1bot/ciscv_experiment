@@ -279,8 +279,21 @@ would see if demoted, and it is not demoted — so it still harvests 8350 pairs
 `dual-setup-pair` could take for 17 codepoints.  Whether to reorder them is
 open, and unchanged by this.
 
-`uses_low_regs` still clamps registers to x0..x15 while the frame's own yaml
-note says the four register operands occupy four full 5-bit columns and that
-the clamp "was costing 377 pairs across the corpus".  rules.py and the note
-disagree; nothing gates it, and the residue measured here inherited the clamp,
-so every figure above is a floor.
+~~`uses_low_regs` still clamps registers to x0..x15~~ — CHECKED, and it does
+not.  `_RSD_ALU_REGS` is `frozenset(range(32))`, so `_confirm_low_regs` tests
+membership in a set containing every register and can never reject: the clamp
+was already vacuous, and the yaml note's 377 pairs had been reclaimed earlier
+by widening that set.  The note is accurate and past tense; I read it as a live
+discrepancy and it was not.
+
+Removing `@uses_low_regs` from the frame changed the corpus by **exactly zero
+pairs** (513095 before and after, no frame moved), which is the measurement
+that settles it.  It is gone anyway, because a decorator that looks like a
+constraint and is not is worse than no decorator.  The same vacuity covers
+`alu-alu-chain`, `load-alu-chain`, `alu-store-chain` and `arith-jump-pair`;
+every register operand in every frame row sits in a 5-bit column, which
+`tests/test_conformance.py` now gates so the clamp cannot silently become
+load-bearing again.
+
+So the figures above are NOT floors for this reason — an earlier version of
+this section said they were.

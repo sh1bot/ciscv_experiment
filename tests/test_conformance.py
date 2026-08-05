@@ -149,3 +149,38 @@ def test_width_naming_frames_match_their_declared_widths():
             f"{frame['name']} draws imma={got_a} immb={got_b}, but its name "
             f"claims {want_a} and {want_b}. Rename the frame or fix the rows.")
     assert checked >= 2, f"expected the two chain frames, found {checked}"
+
+
+def test_every_register_operand_gets_a_full_five_bit_field():
+    """No frame draws a register in a field narrower than five bits.
+
+    This is the invariant that makes `rules.py`'s register-class clamp
+    unnecessary.  `_RSD_ALU_REGS` is `range(32)`, so `_confirm_low_regs` — and
+    with it `uses_low_regs`, `chain_uses_low_regs` and `uses_low_regs_here` —
+    can never reject anything.  That is CORRECT only for as long as this holds:
+    every register operand lands in one of the 5-bit columns.  Draw a register
+    in a narrower field and the clamp becomes load-bearing again, silently,
+    with nothing else to catch it.  So the invariant is gated here instead.
+    """
+    import yaml as _yaml
+    spec = _yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
+    fields = spec["grid"]["fields"]
+    width = {name: abs(f["bits"][0] - f["bits"][1]) + 1
+             for name, f in fields.items()}
+    bad = []
+    for node in spec["doc"]:
+        frame = node.get("frame")
+        if not frame:
+            continue
+        for row in frame.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            for col, val in row.items():
+                v = str(val)
+                if v.startswith("imm") or v == "unused" or "[" in v:
+                    continue          # immediate, sentinel, or an explicit split
+                if width.get(col, 5) < 5:
+                    bad.append(f"{frame['name']}: {v} in {col} "
+                               f"({width[col]} bits)")
+    assert not bad, ("register operands in narrow fields — the register-class "
+                     "clamp is no longer dead code:\n  " + "\n  ".join(bad))
