@@ -675,7 +675,7 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# base-load-chain / base-load-off-chain
+# load0-load10-chain / load5-load5-chain
 # ---------------------------------------------------------------------------
 # Two load+load pointer chases.  In both, A loads a pointer and B dereferences
 # it: B's base register IS A's destination, which is dead after B.  They differ
@@ -695,14 +695,14 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 # 1x7 = 7 codepoints instead of 7x7 = 49.
 #
 # These two replace an earlier `deref-load-chain` (offset on the FIRST load,
-# second at zero) and a wide `base-load-chain`.  Before that they were a single
+# second at zero) and a wide `load0-load10-chain`.  Before that they were a single
 # frame drawing both rows over one op-select with nothing selecting between
 # them, so the offset in the word could not be attributed to a load at all.
-# base-load-off-chain subsumes the deref population as its immb == 0 column,
+# load5-load5-chain subsumes the deref population as its immb == 0 column,
 # losing only the 28 chases needing more than five bits of imma.
 #
-# The two are disjoint by construction: base-load-chain demands A's offset be
-# zero and base-load-off-chain demands it be nonzero, so no chase satisfies
+# The two are disjoint by construction: load0-load10-chain demands A's offset be
+# zero and load5-load5-chain demands it be nonzero, so no chase satisfies
 # both and neither shadows the other.
 
 # The union over both bases; the checks enforce which is the natural word for
@@ -712,9 +712,9 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 _CHAIN_A_MN = frozenset({"lw", "ld"})
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
 
-_BASE_OFF_BITS = _w("base-load-chain", "b", "lw")          # immb, wide form
-_BOFF_A_BITS = _w("base-load-off-chain", "a", "lx")        # imma, split form
-_BOFF_B_BITS = _w("base-load-off-chain", "b", "lw")        # immb, split form
+_L0L10_IMMB_BITS = _w("load0-load10-chain", "b", "lw")          # immb, wide form
+_L5L5_IMMA_BITS = _w("load5-load5-chain", "a", "lx")        # imma, split form
+_L5L5_IMMB_BITS = _w("load5-load5-chain", "b", "lw")        # immb, split form
 
 
 def _chain_a_ok(a: Instruction) -> None:
@@ -728,13 +728,13 @@ def _chain_a_ok(a: Instruction) -> None:
 @must_chain_base
 @no_escape
 @a_base_not_from_auipc
-def _base_load_chain(a: Instruction, b: Instruction) -> None:
+def _load0_load10_chain(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp dead."""
     _chain_a_ok(a)
     if a.imm != 0:
         raise NotPair("A offset must be zero")
     shift = b.access_shift or 0
-    if not b.uimm_fits(_BASE_OFF_BITS, shift):
+    if not b.uimm_fits(_L0L10_IMMB_BITS, shift):
         raise NotPair("big-imm")
     return None
 
@@ -742,20 +742,20 @@ def _base_load_chain(a: Instruction, b: Instruction) -> None:
 @must_chain_base
 @no_escape
 @a_base_not_from_auipc
-def _base_load_off_chain(a: Instruction, b: Instruction) -> None:
+def _load5_load5_chain(a: Instruction, b: Instruction) -> None:
     """A loads a pointer at imm5(rb); B dereferences it at imm5(rtmp).
 
-    A's offset must be NONZERO: the zero case is base-load-chain's, which draws
+    A's offset must be NONZERO: the zero case is load0-load10-chain's, which draws
     ten bits for B rather than five.  Keeping the two disjoint means a chase is
     never encodable both ways, so neither frame's count is an artefact of where
     it sits in RULES.
     """
     _chain_a_ok(a)
     if a.imm == 0:
-        raise NotPair("A offset zero — base-load-chain's")
-    if not a.uimm_fits(_BOFF_A_BITS, a.access_shift or 0):
+        raise NotPair("A offset zero — load0-load10-chain's")
+    if not a.uimm_fits(_L5L5_IMMA_BITS, a.access_shift or 0):
         raise NotPair("big-imm-A")
-    if not b.uimm_fits(_BOFF_B_BITS, b.access_shift or 0):
+    if not b.uimm_fits(_L5L5_IMMB_BITS, b.access_shift or 0):
         raise NotPair("big-imm-B")
     return None
 
@@ -811,7 +811,7 @@ def _base_load_off_chain(a: Instruction, b: Instruction) -> None:
 # No lb/lh/lwu: they accounted for 12 of 37816 scheduled slots.  arith-mem-pair
 # reuses this set for its B slot.
 _MEM_BASE_MN = frozenset({"lbu", "lhu", "lw", "ld", "sb", "sh", "sw", "sd"})
-_MEM_BASE_OFF_BITS = _w("mem-base-pair", "a", "lw")
+_MEM_L0L10_IMMB_BITS = _w("mem-base-pair", "a", "lw")
 _MEM_SP_OFF_BITS = _w("mem-sp-pair", "a", "lx")
 
 
@@ -832,7 +832,7 @@ def _mem_base_pair(a: Instruction, b: Instruction) -> None:
     # once per op on the opcode list (encoding.yaml mem-base-pair).  The wide sp
     # form is its own frame (mem-sp-pair) -- an sp access too wide for this
     # field belongs to that frame or to neither.
-    imm_bits = _MEM_BASE_OFF_BITS
+    imm_bits = _MEM_L0L10_IMMB_BITS
     for insn in (a, b):
         if not insn.uimm_fits(imm_bits, shift):
             max_off = ((1 << imm_bits) - 1) << shift
@@ -1809,16 +1809,16 @@ RULES: list[PairingRule] = [
         check=_load_base_branch,
     ),
     PairingRule(
-        name="base-load-chain",
+        name="load0-load10-chain",
         a_mnemonic_set=_CHAIN_A_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
-        check=_base_load_chain,
+        check=_load0_load10_chain,
     ),
     PairingRule(
-        name="base-load-off-chain",
+        name="load5-load5-chain",
         a_mnemonic_set=_CHAIN_A_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
-        check=_base_load_off_chain,
+        check=_load5_load5_chain,
     ),
     PairingRule(
         name="mem-sp-pair",

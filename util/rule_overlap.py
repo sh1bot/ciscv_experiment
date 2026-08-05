@@ -109,9 +109,10 @@ def measure(name):
 def fold(counts, rule2frame):
     """Re-key rule-level tallies to frames.
 
-    Two rules can share one frame (deref-load-chain / base-load-chain share a
-    49-codepoint block), and a frame does not overlap ITSELF: folding before
-    the matrix keeps that from reading as redundancy.
+    A frame may be reached by more than one rules.py rule, and a frame does not
+    overlap ITSELF: folding before the matrix keeps that from reading as
+    redundancy.  None is shared today, but the fold is what kept the old
+    deref/base pair from reporting their shared 49-codepoint block twice.
     """
     out = Counter()
     for (winner, acceptors), n in counts.items():

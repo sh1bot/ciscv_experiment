@@ -457,20 +457,20 @@ class TestDualOpPair:
 
     def test_mem_pair_offset_gap_wrong_no_pair(self):
         """Offsets differ by 24, not the 8-byte ld width.
-        A's offset is nonzero so base-load-chain (zero A offset) is out."""
+        A's offset is nonzero so load0-load10-chain (zero A offset) is out."""
         a = make_insn("ld", rd=10, rs1=2, imm=8)
         b = make_insn("ld", rd=11, rs1=2, imm=32)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_same_dest_no_pair(self):
-        """A's offset is nonzero so base-load-chain (zero A offset) is out."""
+        """A's offset is nonzero so load0-load10-chain (zero A offset) is out."""
         a = make_insn("ld", rd=10, rs1=2, imm=8)
         b = make_insn("ld", rd=10, rs1=2, imm=16)
         assert can_pair(a, b) is not None
 
     def test_mem_pair_mixed_widths_no_pair(self):
         """ld and lw are different mnemonics — not a recognised mem_base_pair tuple.
-        A's offset is nonzero so base-load-chain (zero A offset) is out."""
+        A's offset is nonzero so load0-load10-chain (zero A offset) is out."""
         a = make_insn("ld", rd=10, rs1=2, imm=8)
         b = make_insn("lw", rd=11, rs1=2, imm=16)
         assert can_pair(a, b) is not None
@@ -1147,8 +1147,8 @@ class TestBaseChainLoadOffPair:
             _r.set_xlen(old)
 
     def test_b_offset_over_5bit_with_a_offset_no_pair(self):
-        """With A offset nonzero this is base-load-off-chain's, and B gets only
-        five bits there -- base-load-chain's ten are unavailable."""
+        """With A offset nonzero this is load5-load5-chain's, and B gets only
+        five bits there -- load0-load10-chain's ten are unavailable."""
         import scheduler.rules as _r
         old = _r.XLEN
         _r.set_xlen(64)
@@ -1160,7 +1160,7 @@ class TestBaseChainLoadOffPair:
             _r.set_xlen(old)
 
     def test_frames_are_disjoint(self):
-        """A's offset zero is base-load-chain's and nonzero is the sibling's, so
+        """A's offset zero is load0-load10-chain's and nonzero is the sibling's, so
         no chase is ever encodable both ways."""
         import scheduler.rules as _r
         old = _r.XLEN
@@ -1169,7 +1169,7 @@ class TestBaseChainLoadOffPair:
             for a_imm in (0, 8, 248):
                 a = make_ld(10, 12, imm=a_imm)
                 b = make_ld(11, 10, imm=8)
-                accepting = [n for n in ("base-load-chain", "base-load-off-chain")
+                accepting = [n for n in ("load0-load10-chain", "load5-load5-chain")
                              if _rule_reason(n, a, b) is None]
                 assert len(accepting) <= 1, (a_imm, accepting)
         finally:

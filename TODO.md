@@ -90,10 +90,13 @@ Recorded here so they are not lost; each needs a home in the design documents.
 - `level:` is undocumented — present on all frames, defined nowhere, and it
   drives markdown heading depth, so level-1 frames render as H1 siblings of
   section headers and break `encoding.md`'s outline.  Define it or decouple it.
-- One frame still carries two rule names in one comma-joined string, which
-  consumers split on `,` (`deref-load-chain, base-load-chain`).
-  `post-inc-pair` shows the better pattern with an explicit `rules_py_names`
-  list.  (`load-sp-branch-pair, load-base-branch-pair` was resolved by the A9 split.)
+- ~~One frame still carries two rule names in one comma-joined string~~ DONE.
+  No frame does now: `deref-load-chain, base-load-chain` was split (it shared
+  one op-select with nothing selecting between its rows) and its halves have
+  since been redrawn as `load0-load10-chain` / `load5-load5-chain`.
+  `load-sp-branch-pair, load-base-branch-pair` went earlier, in the A9 split.
+  `post-inc-pair`'s explicit `rules_py_names` list remains the pattern to use
+  if a frame ever needs two rules again.
 - `encoding_budget.py` iterates `RULES` from `rules.py` rather than the yaml,
   so its output is generated from a different source of truth than
   `encoding.md`.  Re-point it.

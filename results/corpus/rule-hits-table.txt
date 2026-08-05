@@ -18,10 +18,10 @@ setup-jump-pair                       11522    15     768.1    5.2%
 load-base-branch-pair                 10709    14     764.9    4.9%
 load-call-chain                        2785     4     696.2    1.3%
 addi-store-chain                       1969     4     492.2    0.9%
-base-load-chain                        2731     7     390.1    1.2%
+load0-load10-chain                     2731     7     390.1    1.2%
 bit-test-branch-chain                  6795    24     283.1    3.1%
 load-sp-branch-pair                    1596     6     266.0    0.7%
-base-load-off-chain                    1392     7     198.9    0.6%
+load5-load5-chain                      1392     7     198.9    0.6%
 arith-jump-pair                       12526    64     195.7    5.7%
 pre-inc-pair                           1358     8     169.8    0.6%
 load-store-chain                       2713    16     169.6    1.2%
@@ -53,9 +53,9 @@ load-base-branch-pair                 18153    14    1296.6    6.4%
 mem-base-pair                         12157    16     759.8    4.3%
 load-call-chain                        3027     4     756.8    1.1%
 load-sp-branch-pair                    3694     6     615.7    1.3%
-base-load-chain                        4063     7     580.4    1.4%
+load0-load10-chain                     4063     7     580.4    1.4%
 addi-store-chain                       2297     4     574.2    0.8%
-base-load-off-chain                    2647     7     378.1    0.9%
+load5-load5-chain                      2647     7     378.1    0.9%
 bit-test-branch-chain                  7728    24     322.0    2.7%
 arith-jump-pair                       20207    64     315.7    7.1%
 load-store-chain                       3701    16     231.3    1.3%
@@ -88,10 +88,10 @@ load-base-branch-pair                 28862    14    2061.6    5.7%
 mem-base-pair                         26262    16    1641.4    5.2%
 load-call-chain                        5812     4    1453.0    1.2%
 addi-store-chain                       4266     4    1066.5    0.8%
-base-load-chain                        6794     7     970.6    1.3%
+load0-load10-chain                     6794     7     970.6    1.3%
 load-sp-branch-pair                    5290     6     881.7    1.0%
 bit-test-branch-chain                 14523    24     605.1    2.9%
-base-load-off-chain                    4039     7     577.0    0.8%
+load5-load5-chain                      4039     7     577.0    0.8%
 arith-jump-pair                       32733    64     511.5    6.5%
 load-store-chain                       6414    16     400.9    1.3%
 pre-inc-pair                           2994     8     374.2    0.6%

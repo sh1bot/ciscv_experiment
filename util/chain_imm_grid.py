@@ -1,13 +1,17 @@
 """
 util/chain_imm_grid.py — the joint (A-offset, B-offset) demand of pointer chases.
 
-`deref-load-chain` and `base-load-chain` each REQUIRE one of the two offsets to
-be zero, so the population they take lies entirely on the axes of the A x B
-plane.  Asking how wide their fields should be from that population can only
-ever re-derive the axes.  The question this answers is the one the frames
-cannot see: over EVERY chain the pairer could form, what does the joint demand
-look like -- and how much of it sits off the axes, where neither frame can
-encode it and a two-immediate draw could.
+Every pointer-chase frame constrains its offsets, so the population it takes is
+a sub-region of the A x B plane and asking how wide its fields should be from
+that population can only re-derive the region.  This answers the question no
+frame can see about itself: over EVERY chain the pairer could form, what is the
+joint demand?
+
+It is what showed that the frames of the day -- `deref-load-chain` and a wide
+`base-load-chain`, each requiring ONE offset to be zero -- could only ever
+reach the axes, leaving a quarter of all chases off them with both offsets
+real.  That is the measurement `load5-load5-chain` exists because of.  The
+census is deliberately frame-agnostic, so it stays valid as the frames change.
 
 METHOD.  The two chain rules are replaced by ONE permissive rule that keeps all
 three structural gates -- must_chain_base (B's base IS A's loaded value),
@@ -74,10 +78,15 @@ def install_permissive():
             raise NotPair("A missing base/dest register")
         return None
 
-    idx = min(i for i, r in enumerate(rules.RULES)
-              if r.name in ("deref-load-chain", "base-load-chain"))
-    kept = [r for r in rules.RULES
-            if r.name not in ("deref-load-chain", "base-load-chain")]
+    # Every load->load chain rule, whatever the frames are currently called:
+    # naming them individually is how this went stale last time, leaving a live
+    # chain rule in place beside the permissive one.
+    chain = {r.name for r in rules.RULES
+             if r.check.__name__ in ("_load0_load10_chain", "_load5_load5_chain")}
+    if not chain:
+        raise SystemExit("no load->load chain rules found — has rules.py moved on?")
+    idx = min(i for i, r in enumerate(rules.RULES) if r.name in chain)
+    kept = [r for r in rules.RULES if r.name not in chain]
     kept.insert(idx, PairingRule(name=PERMISSIVE,
                                  a_mnemonic_set=rules._CHAIN_LOAD_MN,
                                  b_mnemonic_set=rules._CHAIN_LOAD_MN,
@@ -152,13 +161,13 @@ def grid(counts, maxb, title, out=sys.stdout):
     off = sum(v for (a, b, _s), v in counts.items() if a > 0 and b > 0)
     bad = sum(v for (a, b, _s), v in counts.items() if a < 0 or b < 0)
     print(f"\n  on the A axis (B offset zero) : {on_a:7}  {100*on_a/total:5.1f}%"
-          f"   <- deref-load-chain's population", file=out)
+          f"   <- offset on the FIRST load only", file=out)
     print(f"  on the B axis (A offset zero) : {on_b:7}  {100*on_b/total:5.1f}%"
-          f"   <- base-load-chain's population", file=out)
+          f"   <- load0-load10-chain's population", file=out)
     print(f"    of which both offsets zero  : {both0:7}  {100*both0/total:5.1f}%"
           f"   <- counted in both axes above", file=out)
     print(f"  OFF the axes (both nonzero)   : {off:7}  {100*off/total:5.1f}%"
-          f"   <- encodable by NEITHER frame", file=out)
+          f"   <- load5-load5-chain's population", file=out)
     print(f"  structurally unencodable      : {bad:7}  {100*bad/total:5.1f}%"
           f"   <- negative or unaligned offset", file=out)
 

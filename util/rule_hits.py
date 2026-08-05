@@ -6,9 +6,11 @@ its file-totals block, so the counts are what the PAIRER actually took on the
 SCHEDULED stream — not an adjacency ceiling (see `analysis/frame_score.py` for
 that, and CLAUDE.md on why adjacency is the wrong question).
 
-Two rules share one frame (`deref-load-chain`/`base-load-chain`), so hits are
-folded to frames before the codepoint division: a frame's cost is its opcode
-block, whatever number of rules.py rules reach it.
+A frame may be reached by more than one rules.py rule, so hits are folded to
+frames before the codepoint division: a frame's cost is its opcode block,
+whatever number of rules reach it.  No frame is shared today -- the last pair
+that was, `deref-load-chain`/`base-load-chain`, turned out to share an
+op-select with nothing selecting between them and was split.
 
 Codepoints come from `encoding.yaml` via `encoding_render.opcode_codepoints` —
 the same function `encoding_assign` prices the namespace with — so hits/cp is

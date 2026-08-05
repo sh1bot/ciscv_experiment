@@ -7,10 +7,10 @@ and `chain-width-sweep.txt`.
 
 The two frames are now
 
-    base-load-chain      lx tmp, 0(rs1a)        ; load rdb, k*immb(tmp)
-    base-load-off-chain  lx tmp, k*imma(rs1a)   ; load rdb, k*immb(tmp)
+    load0-load10-chain      lx tmp, 0(rs1a)        ; load rdb, k*immb(tmp)
+    load5-load5-chain  lx tmp, k*imma(rs1a)   ; load rdb, k*immb(tmp)
 
-replacing an earlier `deref-load-chain` / `base-load-chain` pair, which in turn
+replacing an earlier `deref-load-chain` / `load0-load10-chain` pair, which in turn
 replaced a single frame that drew both of their rows over ONE op-select with
 nothing selecting between them — so the offset in the word could not be
 attributed to a load at all.
@@ -63,8 +63,8 @@ That is why one frame pinning `imma` to zero cannot be the whole story.
 
 | | before | after |
 |---|---|---|
-| `base-load-chain` | 6017 hits, 49 cp | **6794 hits, 7 cp** |
-| `base-load-off-chain` (was `deref-load-chain`) | 2467 hits, 49 cp | **4039 hits, 7 cp** |
+| `load0-load10-chain` | 6017 hits, 49 cp | **6794 hits, 7 cp** |
+| `load5-load5-chain` (was `deref-load-chain`) | 2467 hits, 49 cp | **4039 hits, 7 cp** |
 | both | 8484 over 98 cp | **10833 over 14 cp** |
 | excl/cp | 122.7 / 34.2 | **969.7 / 574.3** |
 | namespace reserved | 902/1024 | **790/1024**, 234 spare |
@@ -81,7 +81,7 @@ pairs that either could take, resolved only by `RULES` order.
 
 ## How the ten bits should be split
 
-Only `base-load-off-chain` has a choice.  Its ten bits come from `funct5`+`rs2`
+Only `load5-load5-chain` has a choice.  Its ten bits come from `funct5`+`rs2`
 — free because `tmp` is implicit — so a bit given to `imma` is taken from
 `immb`, and **every split summing to ten costs the same 7 codepoints**.  This
 is not a cost trade; it is purely about which division catches the most.
@@ -101,7 +101,7 @@ is not a cost trade; it is purely about which division catches the most.
 symmetrically in both directions.  Predicted from the grid at 10823 chain
 pairs; realised 10833, within ten.
 
-Symmetric wins for a specific reason, not out of tidiness: `base-load-chain`
+Symmetric wins for a specific reason, not out of tidiness: `load0-load10-chain`
 has already absorbed the entire `imma == 0` row, so what is left for the split
 frame is the *diagonal* mass, and the grid shows that spread evenly rather than
 concentrated on either axis.  Going to eleven bits (5+6) would reach ~10977 and
@@ -109,11 +109,11 @@ cost an opcode doubling for ~154 pairs.
 
 ### The `wide` column moves, and that is not overlap
 
-`base-load-chain`'s own count drifts from 6869 to 6793 across the sweep — a
+`load0-load10-chain`'s own count drifts from 6869 to 6793 across the sweep — a
 spread of 76 pairs, 1.1%.  The rules cannot overlap: one demands `imma == 0`
 and the other demands it nonzero.  What moves is the greedy pairer.  Narrowing
 the split frame leaves instructions unpaired, and the pairer then makes
-different choices with them, a few of which land on `base-load-chain`.  Greedy
+different choices with them, a few of which land on `load0-load10-chain`.  Greedy
 list scheduling is not monotone, so this is expected — and it is measured here
 rather than assumed away.
 

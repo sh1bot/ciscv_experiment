@@ -244,8 +244,8 @@ not the frame.  Do not cut it on pairing-rate evidence.
   to delete, since rule identity never changes the schedule; `excl > 0` is an
   estimate of the deletion cost, not a bound (greedy scheduling is not
   monotone) — the true cost needs a leave-one-out re-run per frame.
-- `CHAINS.md` — the pointer-chase frames, redesigned.  `base-load-chain`
-  (`lx tmp, 0(rs1a)`; `load rdb, immb10(tmp)`) and `base-load-off-chain`
+- `CHAINS.md` — the pointer-chase frames, redesigned.  `load0-load10-chain`
+  (`lx tmp, 0(rs1a)`; `load rdb, immb10(tmp)`) and `load5-load5-chain`
   (both loads offset, ten bits split 5+5).  The A slot spends ONE opcode:
   A's loaded value is B's base address, and it is `lw`/`ld` in 11583 of 11583
   measured chains.  10833 pairs over 14 codepoints where the old pair took

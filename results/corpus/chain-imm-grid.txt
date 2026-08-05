@@ -22,10 +22,10 @@
   ----------------------------------------------------------------------------------------------------------
   col        27      4    969    517    552    591    659    551    149    341     23      2      3     4388
 
-  on the A axis (B offset zero) :     929   21.2%   <- deref-load-chain's population
-  on the B axis (A offset zero) :    2731   62.2%   <- base-load-chain's population
+  on the A axis (B offset zero) :     929   21.2%   <- offset on the FIRST load only
+  on the B axis (A offset zero) :    2731   62.2%   <- load0-load10-chain's population
     of which both offsets zero  :     326    7.4%   <- counted in both axes above
-  OFF the axes (both nonzero)   :     959   21.9%   <- encodable by NEITHER frame
+  OFF the axes (both nonzero)   :     959   21.9%   <- load5-load5-chain's population
   structurally unencodable      :      95    2.2%   <- negative or unaligned offset
 
 RV32 — rs1a = sp?
@@ -50,10 +50,10 @@ RV32 — rs1a = sp?
   ----------------------------------------------------------------------------------------------------------
   col        61     15   1533    680    864    934   1114    657    412    794    115     13      3     7195
 
-  on the A axis (B offset zero) :    1496   20.8%   <- deref-load-chain's population
-  on the B axis (A offset zero) :    4062   56.5%   <- base-load-chain's population
+  on the A axis (B offset zero) :    1496   20.8%   <- offset on the FIRST load only
+  on the B axis (A offset zero) :    4062   56.5%   <- load0-load10-chain's population
     of which both offsets zero  :     450    6.3%   <- counted in both axes above
-  OFF the axes (both nonzero)   :    1946   27.0%   <- encodable by NEITHER frame
+  OFF the axes (both nonzero)   :    1946   27.0%   <- load5-load5-chain's population
   structurally unencodable      :     141    2.0%   <- negative or unaligned offset
 
 RV64 — rs1a = sp?
@@ -79,10 +79,10 @@ RV64 — rs1a = sp?
   -----------------------------------------------------------------------------------------------------------------
   col        88     19   2502   1197   1416   1525   1773   1208    561   1135    138     15      3      3    11583
 
-  on the A axis (B offset zero) :    2425   20.9%   <- deref-load-chain's population
-  on the B axis (A offset zero) :    6793   58.6%   <- base-load-chain's population
+  on the A axis (B offset zero) :    2425   20.9%   <- offset on the FIRST load only
+  on the B axis (A offset zero) :    6793   58.6%   <- load0-load10-chain's population
     of which both offsets zero  :     776    6.7%   <- counted in both axes above
-  OFF the axes (both nonzero)   :    2905   25.1%   <- encodable by NEITHER frame
+  OFF the axes (both nonzero)   :    2905   25.1%   <- load5-load5-chain's population
   structurally unencodable      :     236    2.0%   <- negative or unaligned offset
 
 RV32 + RV64 — rs1a = sp?

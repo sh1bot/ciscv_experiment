@@ -12,8 +12,8 @@
 #     alu-store-chain: 408
 #     load-sp-branch-pair: 514
 #     load-base-branch-pair: 3951
-#     base-load-chain: 700
-#     base-load-off-chain: 740
+#     load0-load10-chain: 700
+#     load5-load5-chain: 740
 #     mem-sp-pair: 7213
 #     mem-base-pair: 1660
 #     load-store-chain: 659

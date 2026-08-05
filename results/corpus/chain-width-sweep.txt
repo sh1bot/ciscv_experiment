@@ -1,4 +1,4 @@
-# base-load-off-chain field split.  14 corpora, 10 bits to divide.
+# load5-load5-chain field split.  14 corpora, 10 bits to divide.
 #
 # Every split summing to the field width costs the SAME 7
 # codepoints, so this is not a cost trade -- it is purely about
@@ -32,13 +32,15 @@ per-base detail:
   8,2 RV32  off-chain     855  wide    2731  total   219791
   8,2 RV64  off-chain    1571  wide    4062  total   284313
 
-disjointness check — base-load-chain owns imma == 0, so no
-split of the off-chain field may move its count:
-  imma=2 immb=8:  base-load-chain 6869
-  imma=3 immb=7:  base-load-chain 6814
-  imma=4 immb=6:  base-load-chain 6803
-  imma=5 immb=5:  base-load-chain 6794
-  imma=6 immb=4:  base-load-chain 6794
-  imma=7 immb=3:  base-load-chain 6794
-  imma=8 immb=2:  base-load-chain 6793
-  MOVED — the frames are NOT disjoint
+scheduler sensitivity — load0-load10-chain's own count as the
+SIBLING's split changes.  The rules cannot overlap (imma == 0
+versus nonzero); any movement here is the greedy pairer making
+different choices with the instructions the sibling left free:
+  imma=2 immb=8:  load0-load10-chain 6869
+  imma=3 immb=7:  load0-load10-chain 6814
+  imma=4 immb=6:  load0-load10-chain 6803
+  imma=5 immb=5:  load0-load10-chain 6794
+  imma=6 immb=4:  load0-load10-chain 6794
+  imma=7 immb=3:  load0-load10-chain 6794
+  imma=8 immb=2:  load0-load10-chain 6793
+  spread 76 pairs over 6869 (1.11%) — scheduling noise, not overlap

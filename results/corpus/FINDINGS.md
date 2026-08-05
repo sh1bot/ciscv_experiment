@@ -38,7 +38,7 @@ representative binary.
 |---|---|---|
 | `post-inc-shadd-pair` | 4 of post-inc's 16 | **0 hits on all six corpora.** Not because Zba is missing — `sh2add`/`sh3add` occur up to 2687 times and `pre-inc-pair` does consume them. Compilers form the address *before* the access; a post-access shXadd base update is an idiom nothing emits. |
 | `macro-op-pair` | 11 used of 16 | Raw hits 1 / 13 / 30 / **0** / 89 / **0**. Only the `mul`/`mulh*` clusters ever fire; add/sub, addw/subw, min/max and every div/rem tuple are zero on all six. Keeping just `{mul}×{mulh,mulhu,mulhsu}` is 3 codepoints and frees the 16-block. |
-| chain-load A-slot | 49 → 14 | The A slot of `deref-load-chain` and `base-load-chain` is **100.0% lw/ld across all six**; lb/lbu/lh/lhu/lwu never appear. 7×7 → 2×7 drops the 64-block to 16. |
+| chain-load A-slot | 49 → 14 | **DONE — and better than proposed.** The A slot of `deref-load-chain` and `base-load-chain` is **100.0% lw/ld across all six**; lb/lbu/lh/lhu/lwu never appear. 7×7 → 2×7 drops the 64-block to 16. Re-measured across all fourteen builds and over the whole permissive chain census (11583 chains, on and off the axes) it is 100.0% there too, so the slot took ONE xlen-switchable `lx` rather than two ops: 7 codepoints per frame, block 8. See `CHAINS.md`. |
 | `alu-store-chain` | 32 | ≤0.8 per 1000 everywhere, max 96 raw pairs. `addi-store-chain` drained it, and that is now confirmed out-of-sample. |
 
 Together roughly **100 codepoints**, against 130 currently spare.

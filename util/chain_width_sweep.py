@@ -1,12 +1,12 @@
 """
-util/chain_width_sweep.py — how should base-load-off-chain split its ten bits?
+util/chain_width_sweep.py — how should load5-load5-chain split its ten bits?
 
 The two pointer-chase frames divide the population by whether the FIRST load
 carries an offset:
 
-  base-load-chain      lx tmp, 0(rs1a) ; load rdb, k*immb(tmp)
+  load0-load10-chain      lx tmp, 0(rs1a) ; load rdb, k*immb(tmp)
                        imma pinned zero, so immb takes all ten free bits.
-  base-load-off-chain  lx tmp, k*imma(rs1a) ; load rdb, k*immb(tmp)
+  load5-load5-chain  lx tmp, k*imma(rs1a) ; load rdb, k*immb(tmp)
                        both offsets real, so the same ten bits must be SPLIT.
 
 Only the second frame has a choice to make, and it is a genuine trade: the ten
@@ -29,8 +29,8 @@ frame that would have had them anyway has gained nothing, and only the corpus
 total shows that.
 
 `--verify` re-runs the extreme splits to confirm the two frames stay disjoint:
-base-load-chain demands imma == 0 and base-load-off-chain demands it nonzero,
-so no split of the off-chain field should move base-load-chain's count at all.
+load0-load10-chain demands imma == 0 and load5-load5-chain demands it nonzero,
+so no split of the off-chain field should move load0-load10-chain's count at all.
 
 Usage:  python3 util/chain_width_sweep.py [--total 10] [--verify]
         python3 util/chain_width_sweep.py --splits 3,7 5,5 7,3
@@ -49,7 +49,7 @@ from isa.xlen import detect_xlen
 from rule_hits import CORPORA
 from rule_overlap import driver
 
-WIDE, SPLIT = "base-load-chain", "base-load-off-chain"
+WIDE, SPLIT = "load0-load10-chain", "load5-load5-chain"
 
 
 def codepoints(na, nb, ops=7, field=10):
@@ -75,8 +75,8 @@ def chunk_hits(args):
     import scheduler.rules as rules
     from scheduler.reorder import ScheduleMode
 
-    rules._BOFF_A_BITS = na
-    rules._BOFF_B_BITS = nb
+    rules._L5L5_IMMA_BITS = na
+    rules._L5L5_IMMB_BITS = nb
     counts = Counter()
     for tag, packets in driver()._process_chunk(chunk, False, ScheduleMode.LIST,
                                                 None, 0, xlen):
@@ -126,7 +126,7 @@ def main():
     else:
         splits = [(na, args.total - na) for na in range(2, args.total - 1)]
 
-    print(f"# base-load-off-chain field split.  {len(names)} corpora, "
+    print(f"# load5-load5-chain field split.  {len(names)} corpora, "
           f"{args.total} bits to divide.")
     print("#\n# Every split summing to the field width costs the SAME 7")
     print("# codepoints, so this is not a cost trade -- it is purely about")
@@ -159,22 +159,22 @@ def main():
 
     if args.verify:
         # NOT a disjointness test.  Rule-level disjointness is structural --
-        # base-load-chain demands imma == 0 and base-load-off-chain demands it
+        # load0-load10-chain demands imma == 0 and load5-load5-chain demands it
         # nonzero, so no chase can satisfy both -- and it is measured directly
         # by util/rule_overlap.py, which reports `hidden` 0 for each.  What
         # this column shows is the SCHEDULER's sensitivity: narrowing the split
         # frame leaves instructions unpaired, the greedy pairer then makes
-        # different choices, and a few land on base-load-chain instead.  Greedy
+        # different choices, and a few land on load0-load10-chain instead.  Greedy
         # list scheduling is not monotone, so a nonzero spread here is expected
         # and says nothing about whether the rules overlap.
         wides = {(na, nb): combined(bb)[WIDE] for (na, nb), bb in seen.items()}
         lo, hi = min(wides.values()), max(wides.values())
-        print("\nscheduler sensitivity — base-load-chain's own count as the")
+        print("\nscheduler sensitivity — load0-load10-chain's own count as the")
         print("SIBLING's split changes.  The rules cannot overlap (imma == 0")
         print("versus nonzero); any movement here is the greedy pairer making")
         print("different choices with the instructions the sibling left free:")
         for k, v in wides.items():
-            print(f"  imma={k[0]} immb={k[1]}:  base-load-chain {v}")
+            print(f"  imma={k[0]} immb={k[1]}:  load0-load10-chain {v}")
         print(f"  spread {hi - lo} pairs over {hi} ({100 * (hi - lo) / hi:.2f}%)"
               f" — scheduling noise, not overlap")
 

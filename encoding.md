@@ -155,7 +155,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * A covers li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) as
   register/immediate choices, so they need no opcodes of their own.
 
-## base-load-chain
+## load0-load10-chain
 
 *Pointer chase: bare first load, the second carries a wide offset.*
 
@@ -178,7 +178,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
   columns the pair leaves free because `tmp` is implicit and A's offset
   is pinned at zero.  This single form is 59.9% of all chases.
 
-## base-load-off-chain
+## load5-load5-chain
 
 *Pointer chase with BOTH loads offset: a pointer in a slot, then indexed.*
 
@@ -190,13 +190,13 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│imma[4:0]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
-* The offset-bearing sibling of base-load-chain, on the pattern of
+* The offset-bearing sibling of load0-load10-chain, on the pattern of
   addi-store-off-chain.  It replaces the old `deref-load-chain`, whose
   population (offset on the FIRST load, second at zero) is the immb=0
   column here -- 2397 of its 2425 chases, the 28 lost being those
   needing more than five bits of `imma`.
 * The ten free bits are split evenly because the corpus says so, not
-  for symmetry.  base-load-chain has already absorbed the whole imma=0
+  for symmetry.  load0-load10-chain has already absorbed the whole imma=0
   row, so what is left to catch is diagonal mass, and it is spread:
   measured unions are 5+5 10823, 6+4 10541, 4+6 10459, 7+3 9705,
   3+7 9802.  Eleven bits (5+6) reaches 10977 and costs an opcode

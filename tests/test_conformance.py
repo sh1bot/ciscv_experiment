@@ -110,3 +110,42 @@ def test_encoding_md_regenerated():
     python3 util/encoding_render.py -o encoding.md"""
     r = _run("util/encoding_render.py", "--check")
     assert r.returncode == 0, (r.stdout[-2000:] if r.stdout else r.stderr)
+
+
+def test_width_naming_frames_match_their_declared_widths():
+    """A frame whose NAME states its immediate widths must actually have them.
+
+    `load0-load10-chain` and `load5-load5-chain` put a measured tuning decision
+    -- the 5+5 split, chosen because it topped the corpus total in
+    `util/chain_width_sweep.py` -- into the identifier.  That is good
+    documentation and a live hazard: re-sweeping on a different corpus could
+    prefer 4+6, and nothing else in the tree would notice the name had started
+    lying.  This makes the name part of the contract the yaml is gated on.
+
+    Naming a frame `load<A>-load<B>-chain` is therefore an opt-in: do it and
+    the widths are pinned to the name, or pick a name without numbers.
+    """
+    import re
+    import yaml as _yaml
+    sys.path.insert(0, os.path.join(ROOT, "util"))
+    from encoding_render import imm_field_bits
+
+    spec = _yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
+    grid = spec["grid"]
+    checked = 0
+    for node in spec["doc"]:
+        frame = node.get("frame")
+        if not frame or not frame.get("ops"):
+            continue
+        m = re.fullmatch(r"load(\d+)-load(\d+)-chain", frame["name"])
+        if not m:
+            continue
+        checked += 1
+        want_a, want_b = int(m.group(1)), int(m.group(2))
+        # A width of 0 means the slot draws no immediate field at all.
+        got_a = imm_field_bits(frame, grid, "a")
+        got_b = imm_field_bits(frame, grid, "b")
+        assert (got_a, got_b) == (want_a, want_b), (
+            f"{frame['name']} draws imma={got_a} immb={got_b}, but its name "
+            f"claims {want_a} and {want_b}. Rename the frame or fix the rows.")
+    assert checked >= 2, f"expected the two chain frames, found {checked}"
