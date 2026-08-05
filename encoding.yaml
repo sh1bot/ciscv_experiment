@@ -227,10 +227,11 @@ opsets:
   # Only addi earns extra range (7-bit, 4 codepoints) -- it carries li/mv, so it
   # is where the wide constants are. Spending 8 codepoints on an 8-bit addi, as
   # the first attempt did, buys almost nothing and starves the op list.
-  # Re-optimised after const-store-pair was carved out: that frame drains the
-  # `li tmp, K` + store cases from store-chain (869 -> 295 pairs), which were
-  # what justified a 7-bit addi. 6 bits now suffice, freeing 2 slots for two
-  # more opcodes. Capture over the three chain populations 578 -> 639.
+  # Re-optimised after the li + store cases were carved out of store-chain
+  # (869 -> 295 pairs; first as a `const-store-pair` frame, since generalised
+  # into addi-store-chain), which were what justified a 7-bit addi. 6 bits now
+  # suffice, freeing 2 slots for two more opcodes. Capture over the three
+  # chain populations 578 -> 639.
   alu_chain: &alu_chain
     - {op: addi, imm: {bits: 6, signed: true}}     # 2 codepoints; carries li/mv
     - add
@@ -542,6 +543,15 @@ doc:
           three opcode doublings (census li fit 66.9% -> 85.3% of 2293, ~13
           pairs/codepoint for the extra 32).
         - >-
+          The row spells the constant in rs2.  A site with the constant on
+          the LEFT of an asymmetric compare (`blt tmp, rs`) is still
+          encodable via the dead-tmp rewrite `bXX K, rs` -> `bYY rs, K+1`
+          (blt<->bge, bltu<->bgeu) -- tmp carries only the comparison
+          constant and dies at B, so changing its value is licensed.
+          rules.py accepts those sites and rejects the two edge cases the
+          rewrite cannot reach: K at the top of the field (K+1 overflows)
+          and K = -1 under an unsigned compare (the predicate flips).
+        - >-
           TODO: could replace li with alu op and compare result with zero
           (mostly?).
   - frame:
@@ -550,10 +560,17 @@ doc:
       budget: 32
       level: 2
       templates:
-        - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
-        - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
+        - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, 4*immb"]
+        - ["slli/srli tmp, rs1a, imma", "beqz/bnez tmp, 4*immb"]
       ops:
         - {a: [{op: andi, imm: {bits: 6, signed: false}}, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
+      notes:
+        - >-
+          The shift forms are the E1/E2 rewrite targets (low-mask and
+          high-mask zero tests); a single-bit sign test via `slli` + `blt
+          tmp, zero` is equivalence E5, a candidate this frame does NOT yet
+          encode -- its b list has no blt/bge -- and rules.py matches
+          accordingly.
       rows:
         - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
 
@@ -683,9 +700,9 @@ doc:
       budget: 8
       level: 2
       templates:
-        - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
+        - ["shXadd  rsda, rs2a, rsda", "load    rdb, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "load    rdb, 0(rsda)"]
-        - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
+        - ["shXadd  rsda, rs2a, rsda", "store   rs2b, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "store   rs2b, 0(rsda)"]
       ops:            # addi split by width so each declares its true scale
         - {a: [{op: addi, imm: {bits: 10, signed: true, scale: 8}}], b: [ld, sd]}
@@ -709,6 +726,19 @@ doc:
         - >-
           The shXadd rows keep the 5-bit scaled immb: their stride is the
           register, so the offset field still earns its column.
+        - >-
+          `rsda` is the ADDED operand (Zba rs2): the template form is
+          `shXadd rsda, rs2a, rsda` -- the pointer advanced by the scaled
+          stride rs2a, which is what "advance a pointer" means.  The other
+          RSD spelling, `shXadd a, a, x` (rd = rs1) scales the pointer
+          itself; one row cannot decode both, so rules.py admits only the
+          template's form.  rules.py used to accept BOTH spellings -- an
+          over-promise, since only one decodes -- and the split was
+          measured (2026-08-05) before pinning this one: scheduled
+          pre-inc pairs rd=rs2-only 67 / rd=rs1-only 79 on musl-rv32, but
+          156 / 69 on sqlite-rv64, and the rs2 convention wins the corpus
+          TOTAL on both (+7 and +88 over rs1) -- displaced rs1-form sites
+          pair elsewhere, displaced rs2-form sites do not.
   - frame:
       name: post-inc-pair
       does: "Access through a pointer, then advance it (post-increment)."
@@ -917,6 +947,12 @@ doc:
           This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
           cpp-rv32.  A cpp-only reading makes it look like the worst frame in
           the encoding; it is not.
+        - >-
+          rules.py EXCLUDES the li form (rs1a = x0) here even though the row
+          draws rs1a and could encode it: li + store belongs to the frames
+          that price it (addi-store-chain at offset zero, alu-store-chain up
+          to a 5-bit offset).  The residue -- li + store at an offset only
+          this frame's sixth bit reaches -- stays solo.
   - frame:
       name: load-call-chain
       does: "Load a function pointer and call through it (virtual dispatch)."
@@ -1288,6 +1324,12 @@ doc:
         - {a: [addi], b: [sw, sd]}
       rows:
         - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
+      notes:
+        - >-
+          `rs1b` is a drawn 5-bit field: ANY register may be the one stored
+          at the top of the new frame.  ra is the overwhelmingly common case
+          but not a constraint -- a leaf function that keeps its fp saves s0
+          there instead, and rules.py accepts it.
 
   - frame:
       name: epilogue-pair
@@ -1300,15 +1342,23 @@ doc:
         - {a: [addi], b: [jalr, ret]}
       rows:
         - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
+      notes:
+        - >-
+          The row draws only the target register: the rs2+rs1 columns carry
+          the sp adjustment, so a `jalr` here has a ZERO offset by
+          construction -- there is no field for one -- and rules.py rejects
+          the nonzero-offset spelling.
 
   - frame:
       name: arith-jump-pair
       does: "A last in-place computation, then a control transfer."
       budget: 64
       level: 2
+      # No `mv` template: the op set has no mv codepoint (the block is full at
+      # 16 x 4) and `mv rsda, rs2a` is neither RSD nor li, so rules.py does
+      # not match it either.  `li` rides addi's codepoints (rs1 = x0).
       templates:
         - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
-        - ["mv     rsda, rs2a", "jr/jalr rs1b"]
         - ["li     rsda, imma", "jr/jalr rs1b"]
       ops:
         - {a: *rsd_alu_j, b: [ret, jalr, j, jal]}

@@ -154,6 +154,14 @@ No general register block is reserved at present. Earlier drafts held out a cont
  * `imma` is a 5-bit register column; `li` declares 8 bits, bought by
    three opcode doublings (census li fit 66.9% -> 85.3% of 2293, ~13
    pairs/codepoint for the extra 32).
+ * The row spells the constant in rs2. A site with the constant on the
+   LEFT of an asymmetric compare (`blt tmp, rs`) is still encodable via
+   the dead-tmp rewrite `bXX K, rs` -> `bYY rs, K+1` (blt<->bge,
+   bltu<->bgeu) -- tmp carries only the comparison constant and dies at
+   B, so changing its value is licensed. rules.py accepts those sites and
+   rejects the two edge cases the rewrite cannot reach: K at the top of
+   the field (K+1 overflows) and K = -1 under an unsigned compare (the
+   predicate flips).
  * TODO: could replace li with alu op and compare result with zero
    (mostly?).
 
@@ -162,15 +170,20 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Test a bit or bit-field and branch on the result.*
 
     andi    tmp, rs1a, imma
-    beqz/bnez tmp, immb
+    beqz/bnez tmp, 4*immb
 
-    slli    tmp, rs1a, imma
-    blt/bge tmp, zero, 4*immb
+    slli/srli tmp, rs1a, imma
+    beqz/bnez tmp, 4*immb
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│immb[9:5]│g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+
+ * The shift forms are the E1/E2 rewrite targets (low-mask and high-mask
+   zero tests); a single-bit sign test via `slli` + `blt tmp, zero` is
+   equivalence E5, a candidate this frame does NOT yet encode -- its b
+   list has no blt/bge -- and rules.py matches accordingly.
 
 ## load-base-branch-pair
 
@@ -266,13 +279,13 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 *Advance a pointer, then access through it (pre-increment).*
 
-    shXadd  rsda, rsda, rs2a
+    shXadd  rsda, rs2a, rsda
     load    rdb, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
     load    rdb, 0(rsda)
 
-    shXadd  rsda, rsda, rs2a
+    shXadd  rsda, rs2a, rsda
     store   rs2b, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
@@ -295,6 +308,17 @@ No general register block is reserved at present. Earlier drafts held out a cont
    ceiling, not full coverage.
  * The shXadd rows keep the 5-bit scaled immb: their stride is the
    register, so the offset field still earns its column.
+ * `rsda` is the ADDED operand (Zba rs2): the template form is `shXadd
+   rsda, rs2a, rsda` -- the pointer advanced by the scaled stride rs2a,
+   which is what "advance a pointer" means. The other RSD spelling,
+   `shXadd a, a, x` (rd = rs1) scales the pointer itself; one row cannot
+   decode both, so rules.py admits only the template's form. rules.py
+   used to accept BOTH spellings -- an over-promise, since only one
+   decodes -- and the split was measured (2026-08-05) before pinning this
+   one: scheduled pre-inc pairs rd=rs2-only 67 / rd=rs1-only 79 on musl-
+   rv32, but 156 / 69 on sqlite-rv64, and the rs2 convention wins the
+   corpus TOTAL on both (+7 and +88 over rs1) -- displaced rs1-form sites
+   pair elsewhere, displaced rs2-form sites do not.
 
 ## post-inc-pair
 
@@ -409,6 +433,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
  * This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
    cpp-rv32. A cpp-only reading makes it look like the worst frame in the
    encoding; it is not.
+ * rules.py EXCLUDES the li form (rs1a = x0) here even though the row
+   draws rs1a and could encode it: li + store belongs to the frames that
+   price it (addi-store-chain at offset zero, alu-store-chain up to a
+   5-bit offset). The residue -- li + store at an offset only this
+   frame's sixth bit reaches -- stays solo.
 
 ## load-call-chain
 
@@ -651,6 +680,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs1b   │g│imm[4:0] │imm[9:5] │ fn3 │ unused  │ opcode5 │1 0│
 
+ * `rs1b` is a drawn 5-bit field: ANY register may be the one stored at
+   the top of the new frame. ra is the overwhelmingly common case but not
+   a constraint -- a leaf function that keeps its fp saves s0 there
+   instead, and rules.py accepts it.
+
 ## epilogue-pair
 
 *Function epilogue: release the stack frame and return.*
@@ -663,14 +697,16 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs1b   │g│imm[4:0] │imm[9:5] │ fn3 │ unused  │ opcode5 │1 0│
 
+ * The row draws only the target register: the rs2+rs1 columns carry the
+   sp adjustment, so a `jalr` here has a ZERO offset by construction --
+   there is no field for one -- and rules.py rejects the nonzero-offset
+   spelling.
+
 ## arith-jump-pair
 
 *A last in-place computation, then a control transfer.*
 
     alu     rsda, rsda, rs2a/imma
-    jr/jalr rs1b
-
-    mv     rsda, rs2a
     jr/jalr rs1b
 
     li     rsda, imma

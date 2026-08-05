@@ -460,6 +460,10 @@ def _rsd_slot_imm_ok(insn: Instruction, widths: dict, slot: str) -> None:
     rs1 = x0 and is declared separately in the yaml (it breaks the RSD form the
     rest of the frame relies on), so it is looked up under its own name.
     """
+    if insn.imm_unresolved:
+        # An unresolved relocation (e.g. `addi rd, rd, %lo(sym)`) is not a
+        # constant this frame's field measured; dropping it mis-encodes.
+        raise NotPair(f"{slot}-unresolved-immediate")
     if insn.imm is None:
         return
     key = "li" if insn.is_li else insn.mnemonic
@@ -573,6 +577,7 @@ def b_chain_mem(bits: int):
 # a.rd is None, so the ALU/mem checks below never see a destination-less A.
 @must_chain
 @no_escape
+@a_base_not_from_auipc
 @a_chain_mem(6)
 @b_chain_imm_ok
 def _load_alu_chain(a: Instruction, b: Instruction) -> None:
@@ -604,6 +609,11 @@ _ADDI_STORE_BITS = 10                        # signed immediate field
 
 def _addi_store_chain(a: Instruction, b: Instruction) -> None:
     """A computes an addi; B stores the result, after which it is dead."""
+    if a.base_from_auipc or b.base_from_auipc:
+        # a with a tainted rs1a is the lo half of an auipc address
+        # materialisation: its immediate is a link-layout artifact, not a
+        # displacement this frame measured (ACCOUNTING.md sec 8).
+        raise NotPair("relocatable-offset")
     if a.imm is None:
         raise NotPair("MALFORMED: missing-immediate")
     lo, hi = -(1 << (_ADDI_STORE_BITS - 1)), (1 << (_ADDI_STORE_BITS - 1)) - 1
@@ -622,6 +632,7 @@ def _addi_store_chain(a: Instruction, b: Instruction) -> None:
 @must_chain_stored
 @no_escape
 @a_chain_imm_ok
+@b_base_not_from_auipc
 @b_chain_mem(5)
 def _alu_store_chain(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
@@ -823,6 +834,8 @@ _MEM_SP_OFF_BITS = _w("mem-sp-pair", "a", "lx")
 
 
 @exclusive_rd
+@a_base_not_from_auipc
+@b_base_not_from_auipc
 def _mem_base_pair(a: Instruction, b: Instruction) -> None:
     """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
     if a.mnemonic != b.mnemonic:
@@ -1077,6 +1090,7 @@ def post_inc_family(role: str):
     return deco
 
 
+@a_base_not_from_auipc
 @post_inc_family("mem_addi")
 def _post_inc_addi(a: Instruction, b: Instruction) -> None:
     """`addi rsda, rsda, k*immb` — stride a nonzero width-scaled uimm5."""
@@ -1146,6 +1160,9 @@ _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 _CHAIN_LI_BITS = _w("li-branch-chain", "a", "li")
 
 
+_ASYM_BRANCH_MN = frozenset({"blt", "bge", "bltu", "bgeu"})
+
+
 @must_chain
 @no_escape
 def _chain_li_branch(a: Instruction, b: Instruction) -> None:
@@ -1155,6 +1172,17 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     # The 5-bit imma column plus the doublings the yaml's li op buys.
     if not a.imm_fits(_CHAIN_LI_BITS):
         raise NotPair(f"immediate out of {_CHAIN_LI_BITS}-bit signed range")
+    # The row spells the constant in rs2 (`bXX rs1b, tmp`).  A pair with the
+    # constant on the LEFT of an asymmetric compare is encoded by the dead-tmp
+    # rewrite `bXX tmp(K), rs` -> `bYY rs, tmp(K+1)` (blt<->bge, bltu<->bgeu),
+    # legal because tmp carries only the comparison constant and dies at B.
+    # That needs K+1 representable: K at the top of the field overflows it, and
+    # for the unsigned compares K = -1 (unsigned max) flips the predicate.
+    if (b.mnemonic in _ASYM_BRANCH_MN and b.rs1 == a.rd and b.rs2 != a.rd):
+        if a.imm == (1 << (_CHAIN_LI_BITS - 1)) - 1:
+            raise NotPair("swap-rewrite-overflows-field")
+        if b.mnemonic in ("bltu", "bgeu") and a.imm == -1:
+            raise NotPair("swap-rewrite-wraps-unsigned")
     return None
 
 
@@ -1245,7 +1273,7 @@ def _shift_for_zero_test(imm) -> Optional[tuple]:
     if imm is None:
         return None
     if imm > 1 and (imm & (imm + 1)) == 0:          # 2^N - 1
-        return ("slli", 64 - imm.bit_length())
+        return ("slli", XLEN - imm.bit_length())    # E1: s = XLEN - n
     if imm < -1 and (-imm & (-imm - 1)) == 0:        # ~(2^N - 1) = -(2^N)
         return ("srli", (-imm).bit_length() - 1)
     return None
@@ -1368,10 +1396,12 @@ def _index_mem_chain(a: Instruction, b: Instruction) -> None:
 # ---------------------------------------------------------------------------
 # pre-inc-pair
 # ---------------------------------------------------------------------------
-# A is in RSD form: rd == rs1 (or commutative: rd == rs2).  A writes its
-# result back to its own source register — a pre-increment or accumulate.
-# B reads A's rd as its rs1 — the updated pointer (for loads/stores) or the
-# left-hand side of a comparison.  For memory B, the offset must be zero.
+# A is in RSD form: A writes its result back to its own source register — a
+# pre-increment.  For addi that is rd == rs1; for shXadd it is rd == rs2, the
+# ADDED operand (`shXadd rsda, rs2a, rsda`, the pointer advanced by a scaled
+# stride) — the rd == rs1 spelling scales the pointer itself and is not this
+# frame's shape (see the yaml note).  B reads A's rd as its rs1 — the updated
+# pointer.  For the addi rows, B's offset must be zero.
 #
 # Canonical order only: B depends on A's result, so the pair cannot be
 # reversed.  A's rd must not be destroyed by B (B.rd != A.rd) since
@@ -1399,10 +1429,19 @@ _PRE_INC_OFF_BITS = _w("pre-inc-pair", "b", "lw")
 @a_is_rsd
 @must_chain_base
 @exclusive_rd
+@a_base_not_from_auipc
+@b_base_not_from_auipc
 def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
         raise NotPair("bad-tuple")
+    if a.mnemonic != "addi" and a.rd != a.rs2:
+        # The row writes `shXadd rsda, rs2a, rsda` — rsda is the ADDED
+        # operand (Zba rs2): the pointer, advanced by the scaled stride.
+        # is_rsd also admits rd == rs1 (`shXadd a, a, x`, the Horner
+        # accumulator), but that spelling scales the OTHER operand and the
+        # one row cannot decode both; only the template's form is encodable.
+        raise NotPair("A-shXadd-not-template-form")
     if a.mnemonic == "addi":
         # The addi rows access AT the bumped pointer (offset structurally
         # zero) and spend the freed column on a 10-bit width-scaled bump —
@@ -1432,9 +1471,9 @@ _EPILOGUE_B_MN = frozenset({"jalr", "ret"})
 
 
 def _prologue_pair(a: Instruction, b: Instruction) -> None:
-    """A reserves stack frame, B stores return address at top of frame
-    A: addi sp, sp, -N  - width-scaled negative uimm x16, nonzero
-    B: sw ra, N-4(sp)  - store return address
+    """A reserves the stack frame, B stores a register at the top of it.
+    A: addi sp, sp, -N       — width-scaled negative uimm x16, nonzero
+    B: sw/sd rs1b, N-k(sp)   — rs1b is a drawn field; ra in practice
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
@@ -1442,8 +1481,10 @@ def _prologue_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-big-imm")
     if b.rs1 != 2:
         raise NotPair("B-not-SP-base")
-    if b.rs2 != 1:
-        raise NotPair("B-not-RA-src")
+    if b.rs2 is None:
+        raise NotPair("MALFORMED: missing store source")
+    # The stored register is the drawn `rs1b` field (encoding.yaml row), so
+    # any register encodes; ra is merely the overwhelmingly common case.
     if b.imm + b.access_width + a.imm != 0:
         raise NotPair("B-bad-delta")
 
@@ -1457,8 +1498,9 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
     not a valid packet -- is_control_transfer also keeps ret/jalr out of A.
 
     A: addi sp, sp, +N  — width-scaled uimm×16, nonzero
-    B: ret or jalr rd∈{0,1} with 12-bit signed offset (architectural, not a
-       yaml field — the jump target register is what the row encodes)
+    B: ret or jr/jalr rd∈{0,1} with a ZERO offset — the row draws only the
+       target register (`rs1b`); a nonzero jalr offset has no field to live
+       in, so it cannot ride here.
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
@@ -1466,8 +1508,8 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-big-imm")
     if b.rd not in (0, 1):
         raise NotPair("B rd must be x0 or x1")
-    if not b.imm_fits(12):
-        raise NotPair("B-big-imm")
+    if b.mnemonic != "ret" and b.imm not in (0, None):
+        raise NotPair("B-nonzero-offset")
 
 
 # ---------------------------------------------------------------------------
@@ -1560,6 +1602,10 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
             raise NotPair("A-big-imm")
         return None
     if a.reads_memory:
+        if a.base_from_auipc:
+            # The offset is a %pcrel_lo link artifact, not a displacement
+            # this frame's field measured (ACCOUNTING.md sec 8).
+            raise NotPair("A-relocatable-offset")
         off, width = a.imm, a.access_width
         if off is None or off < 0 or not width:
             raise NotPair("A-big-imm")
@@ -1595,6 +1641,7 @@ _LOAD_STORE_OFF_BITS = _w("load-store-chain", "a", "lw")
 @must_chain_stored
 @no_escape
 @a_base_not_from_auipc
+@b_base_not_from_auipc
 def _load_store_chain(a: Instruction, b: Instruction) -> None:
     """Load a value and store it straight back out; the temporary dies."""
     if a.rd is None or a.rbase is None or b.rbase is None:
@@ -1687,6 +1734,7 @@ _ASO_B_BITS = _w("addi-store-off-chain", "b", "sw")
 @must_chain_stored
 @no_escape
 @a_base_not_from_auipc
+@b_base_not_from_auipc
 def _addi_store_off_chain(a: Instruction, b: Instruction) -> None:
     """Compute a value, store it at an offset from another base."""
     if a.rd is None or a.rs1 is None or b.rbase is None:
@@ -1767,6 +1815,8 @@ def _is_hardcoded_call(insn: Instruction) -> bool:
 
 def _arg_call_a_ok(a: Instruction) -> bool:
     """Whichever of the frame's A rows can hold `a`, if any."""
+    if a.imm_unresolved:
+        return False       # a relocation is not the zero immediate `i` defaults to
     m, rd, rs1, imm = a.mnemonic, a.rd, a.rs1, a.imm
     i = imm if imm is not None else 0
     if m in ("mv",) or (m in ("addi", "addiw") and i == 0 and rs1 not in (0, None)):

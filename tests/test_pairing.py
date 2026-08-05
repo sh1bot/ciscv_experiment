@@ -439,7 +439,7 @@ class TestDualOpPair:
 
     def test_shadd_store_reversed_is_pre_inc(self):
         """Reversed (shadd, store) is a pre-increment, not this frame."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
+        a = make_insn("sh3add", rd=12, rs1=13, rs2=12)   # a2 += a3*8
         b = make_insn("sd", rs1=12, rs2=13, imm=0)
         assert can_pair(a, b) is None
         assert _rule_reason("pre-inc-pair", a, b) is None
@@ -573,11 +573,13 @@ class TestIndepPair:
         b = make_insn("jalr", rd=0, rs1=15, imm=0)
         assert can_pair(a, b) is None
 
-    def test_epilogue_addi_jalr_nonzero_imm_pairs(self):
-        """jalr with nonzero 12-bit offset (PIC call pattern) also pairs."""
+    def test_epilogue_addi_jalr_nonzero_imm_no_pair(self):
+        """A nonzero jalr offset has no field: the row's rs2+rs1 columns carry
+        the sp adjustment and only the target register (rs1b) is drawn, so
+        `jalr x0, -92(ra)` cannot ride this frame (encoding.yaml epilogue-pair)."""
         a = make_insn("addi", rd=2, rs1=2, imm=96)
         b = make_insn("jalr", rd=0, rs1=1, imm=-92)
-        assert can_pair(a, b) is None
+        assert _rule_reason("epilogue-pair", a, b) is not None
 
     def test_epilogue_jalr_rd1_pairs(self):
         """jalr with rd=1 (link register) provisionally allowed."""
@@ -687,13 +689,13 @@ class TestPreIncPair:
 
     def test_sh2add_lw_rsd_pairs(self):
         """sh2add in RSD form updates pointer; lw loads from zero offset."""
-        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)  # a1 = a1*4 + a2
+        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)  # a2 += a3*4
         b = make_insn("lw", rd=10, rs1=12, imm=0)
         assert can_pair(a, b) is None
 
     def test_shadd_load_pairs(self):
-        """sh3add in RSD form scales an index; the qword load reads it."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
+        """sh3add advances the pointer by a scaled stride; the qword load reads it."""
+        a = make_insn("sh3add", rd=12, rs1=13, rs2=12)
         b = make_insn("ld", rd=10, rs1=12, imm=0)
         assert _rule_reason("pre-inc-pair", a, b) is None
 
@@ -714,9 +716,17 @@ class TestPreIncPair:
 
     def test_shadd_width_must_match_scale(self):
         """sh2add scales by 4, so it pairs with word ops, not qword ones."""
-        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
+        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)
         assert _rule_reason("pre-inc-pair", a, make_insn("lw", rd=10, rs1=12, imm=0)) is None
         assert _rule_reason("pre-inc-pair", a, make_insn("ld", rd=10, rs1=12, imm=0)) is not None
+
+    def test_shadd_horner_form_no_pair(self):
+        """`shXadd a, a, x` (rd == rs1) scales the POINTER — the Horner
+        accumulator shape, not the template's `shXadd rsda, rs2a, rsda`
+        pointer walk.  One row cannot decode both operand orders."""
+        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
+        b = make_insn("lw", rd=10, rs1=12, imm=0)
+        assert _rule_reason("pre-inc-pair", a, b) is not None
 
     def test_addi_ld_not_rsd_no_pair(self):
         """A does not update its own source: not RSD form."""
@@ -752,7 +762,7 @@ class TestPreIncPair:
 
     def test_shxadd_keeps_offset_field(self):
         """shXadd rows still draw the 5-bit scaled immb offset."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=14)
+        a = make_insn("sh3add", rd=12, rs1=14, rs2=12)
         b = make_insn("ld", rd=10, rs1=12, imm=248)      # 31*8, fits 5b
         assert _rule_reason("pre-inc-pair", a, b) is None
         b = make_insn("ld", rd=10, rs1=12, imm=256)      # 32*8, over 5b
@@ -1418,14 +1428,15 @@ class TestProloguePair:
         b = make_insn("sd", rs1=2, rs2=1, imm=0)          # 0+8-16 != 0
         assert _rule_reason("prologue-pair", a, b) == "B-bad-delta"
 
-    def test_not_ra_source_no_prologue(self):
-        """prologue-pair is for saving ra; storing a0 is not one.
-
-        pre-inc-pair does claim it — adjusting sp then storing at an offset
-        from the new sp is a genuine pre-increment — so assert on this frame."""
+    def test_non_ra_source_pairs(self):
+        """The stored register is the drawn 5-bit `rs1b` field (encoding.yaml
+        row), so any register encodes — ra is the common case, not a
+        constraint.  (An earlier ra-only restriction pointed these pairs at
+        pre-inc-pair, but its addi rows now demand a zero access offset, so
+        they paired as nothing at all.)"""
         a = make_insn("addi", rd=2, rs1=2, imm=-16)
-        b = make_insn("sd", rs1=2, rs2=10, imm=8)         # stores a0, not ra
-        assert _rule_reason("prologue-pair", a, b) is not None
+        b = make_insn("sd", rs1=2, rs2=10, imm=8)         # stores a0
+        assert _rule_reason("prologue-pair", a, b) is None
 
     def test_positive_adjust_no_pair(self):
         a = make_insn("addi", rd=2, rs1=2, imm=16)        # positive → not a prologue

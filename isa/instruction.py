@@ -246,8 +246,10 @@ class Instruction:
 
     @property
     def is_commutative(self) -> bool:
+        # NB: mulhsu is NOT here — rs1 is its signed operand and rs2 its
+        # unsigned one, so swapping them changes the result.
         return self.mnemonic in {
-            "add", "addw", "mul", "mulh", "mulhu", "mulhsu",
+            "add", "addw", "mul", "mulh", "mulhu",
             "and", "or", "xor",
             "min", "minu", "max", "maxu",
             "fadd.s", "fadd.d", "fmul.s", "fmul.d",

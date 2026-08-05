@@ -213,6 +213,40 @@ Follow-on census findings (adjacent sites, musl-rv32 + sqlite-rv64):
   forgoes the pairing (solo `addiw` + branch), losing the optimisation,
   never correctness.
 
+## A12 — findings from the 2026-08-05 yaml/rules conformance review
+
+Open items only; the closed ones (backward-pass dependence safety, pcrel
+guards on every memory slot, epilogue's phantom jalr offset, prologue's
+undeclared ra-only restriction, pre-inc's shXadd operand direction, the
+bit-test and arith-jump template ghosts) were fixed in the review commit.
+
+- **Bare `jalr` as a B op under-specifies rd** (epilogue-pair,
+  arith-jump-pair, setup-jump-pair).  Every other transfer op pins its link
+  register in `pseudo_ops` (`jalr_link_ra`, `jr_t1`, `ret`); bare `jalr`
+  pins nothing, and these frames draw no rd field, so WHICH spellings own a
+  codepoint is a reading of the op list rather than a statement in it.
+  rules.py accepts rd ∈ {x0, x1} (the indirect call rides on
+  `link = packet + 4`).  arith-jump-pair has room for that reading — its
+  fourth b op (`jal`, currently a direct call no rule can ever match) can be
+  renamed `jalr_link_ra` at identical cost.  setup-jump-pair does NOT: its
+  16-block holds 15, and adding the call form to both indirect clusters
+  needs 5 more.  Decide: name the linking ops explicitly and rebudget
+  setup-jump, or restrict its rule to rd = x0 and remeasure.
+- **dual-setup-pair fails the yaml's own budget sanity rule** by the model's
+  count (11 not in (16, 32]); the hand count ~19 is in range.  The
+  widest-row coarseness of `opcode_codepoints` is the known cause (A8's
+  row-contract item).  Either teach the pricer rows or mark the frame
+  exempt, so the header's (budget/2, budget] claim is enforceable again.
+- **The rd-sentinel note overstates enforcement.**  `doc.reserved` says
+  rules.py rejects x0/x2 "wherever a row draws a register" in the rd
+  column; `imm_contracts.rd_column_slots` (deliberately) covers only
+  DESTINATIONS, so a source there — addi-store-chain's `rbase`,
+  arg-call-pair row 3's `rs2a` — may still be x0/x2 (`sw zero, k(sp)` is
+  real traffic).  Harmless while those frames host no guests, since the
+  sentinel is only decoded inside a host's block, but the note and the
+  hosting precondition ("a REGISTER in every row") should say which
+  registers count.
+
 ---
 
 # B. Pre-existing items

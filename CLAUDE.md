@@ -24,6 +24,13 @@ resolves a single selector word.
 
 ## Measurement caveats — remind the user about these when relevant
 
+**`ACCOUNTING.md` §8 is the canonical register of every deliberate
+approximation** — the constraints the scheduler relaxes because the task is to
+measure what the scheme *could* achieve under a toolchain that targeted it
+(packet alignment vs the RVC-linked corpus, unresolved displacements, pcrel
+offsets, `measures_also` billing, dead-temp rewrites). The two below are the
+ones that most often surprise; consult §8 before quoting any number.
+
 - **RVC-eligibility (`[C]` / `rvc_eligible`) is an OPTIMISTIC ceiling, not actual
   compression.** Branch/jump offset ranges are NOT checked and there is no
   RV32/RV64 gating (PLAN §5). So on a real (already-compressed) binary the count
