@@ -22,6 +22,26 @@ The planning documents name `encoding.yaml` as the source of truth (see
    default, but RVE (16 registers) has no x31 and needs another — x7 is the
    candidate.  Settle before any ABI claim; `yaml_migration.md`'s
    "compiler's own register, required dead" wording is now superseded.
+11. **Row layout should name fields, not columns** — DONE (2026-08-04).  `grid` should enumerate the essential fields with their official
+   bit positions — `rd`, `funct3`, `rs1`, `rs2`, `funct5`, `opcode5`, `g`, `h`
+   — and a row should then be a mapping, `{rd: foo, rs1: bar, ...}`, with any
+   field left unset being free for opcode assignment.  A field split into
+   sub-parts states them explicitly:
+
+       rd: [{bits: 2, value: "imma[6:5]"}, {bits: 3, value: "rda"}]
+
+   This replaces the positional cell list, the `*2` span notation and the
+   `imma[6:5]+rda[2:0]` packing hack; `"0 0 0 1 0"` becomes `rd: unused` with
+   the enumerator allocating the pattern from its reserved pool.  `g` and `h`
+   are no longer writable by a row at all — they are opcode bits.
+
+10. **Decoder alignment is an OBJECTIVE, not a coincidence.**
+   `encoding_assign.py` orders frames by A-slot RISC-V format so leading
+   identifier bits track real `opcode[6:2]`.  Hold it while it can be held; if
+   a future assignment cannot satisfy it AND fit the namespace, fitting wins
+   and the alignment degrades to a nicety for that frame — say so explicitly
+   at the point where it is given up, rather than quietly reordering.
+
 5. **Wide `li`** — CLOSED: an ACCEPTED LOSS.  Over 61033 `li` in five
    corpora: 68.8% fit 5 bits, 74.1% fit 6, 90.1% fit 8, 97.4% fit 10, against
    widths of 6 (`indep`), 8 (`li-branch-chain`), 10 (`li-czero`,
@@ -247,3 +267,25 @@ Two open questions that block frame sizing:
 - **Chain and dual slot populations differ** — unary ops are 40.9% of
   independent-pair slot occupancy against 12.6% of chain — and now have
   separate op-set anchors sized separately.
+
+
+## Immediate widths — priced, not yet applied (2026-08-04)
+
+From `results/corpus/IMMEDIATES.md`, against 186 spare codepoints:
+
+- **Buy (44 cp total):** `post-inc-pair` B +1 (+4 cp, 83.6->93.1%),
+  `pre-inc-pair` B +1 (+8, 84.8->99.3%), `addi-store-off-chain` B +1
+  (+16, 72.1->97.9%), `load-store-chain` A +1 (+16, 87.8->96.1%).
+- **Ranked below those:** `load-base-branch-pair` A +2 (+42 cp) — it widens
+  the LOAD OFFSET, and the 5-bit displacement is what binds that frame.
+- **Refuse:** the ALU family. `rsd-alu-pair` A +2 costs 768 codepoints for
+  9.7 points; `alu-alu-chain` +384 for 18.4; `arith-jump-pair` +192 for 12.6.
+
+## In the back pocket
+
+- **`rsd-alu-pair` order-canonicalisation** frees 120 codepoints (16x16 -> a
+  136-cell triangle) for 7-9% of that frame's packets. Do it when something
+  needs the space, not before — see FINDINGS.
+- **`same_op` restructure of `rsd-alu-pair`**: its joint distribution is
+  diagonal-dominated (same-op pairs ~60%), and only 9 distinct mnemonics
+  appear. A top-8 symmetric block covers 98.6-98.9%.

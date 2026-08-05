@@ -97,24 +97,32 @@ def token_bits(tok):
     return name, hi + 1
 
 
-def rows_of(frame):
-    for row in frame["rows"]:
-        if isinstance(row, dict):
-            yield row["c"], row.get("tag")
+def row_values(row):
+    """Every value string of a mapping-form row, split-field parts included."""
+    for key, v in row.items():
+        if key == "tag":
+            continue
+        if isinstance(v, list):
+            for part in v:
+                yield str(part["value"])
         else:
-            yield row, None
+            yield str(v)
 
 
 def frame_capacities(frame):
     """Widest immediate field the frame declares, per SP variant:
     returns {'sp': bits, 'base': bits}. Immediate fields are pooled (we do not
     insist an A-slot immediate use an 'imma' token vs 'immb') -- the physical
-    question is just whether some declared field is wide enough."""
+    question is just whether some declared field is wide enough.
+
+    A field split across two grid fields ("imma[9:5]" in one, "imma[4:0]" in
+    another) declares its width through the highest bit index any piece
+    names, which token_bits already reads per piece."""
     cap = {"sp": 0, "base": 0}
-    for cells, tag in rows_of(frame):
-        key = "sp" if tag == "SP-relative" else "base"
-        for cell in cells:
-            tb = token_bits(cell)
+    for row in frame["rows"]:
+        key = "sp" if row.get("tag") == "SP-relative" else "base"
+        for val in row_values(row):
+            tb = token_bits(val)
             if tb:
                 cap[key] = max(cap[key], tb[1])
     return cap
