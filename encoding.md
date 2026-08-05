@@ -539,12 +539,52 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      rda, imma
     li      rdb, immb
 
+    mv/li   rda, rs1a/imma
+    li      ardb, immb
+
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│   rda   │g│  rs2b   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
+│h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │immb+rdb │ opcode5 │1 0│
+│h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │immb+rdb │ opcode5 │1 0│
+│h│imma+rda │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
+
+ * THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05). With the
+   width caps relaxed to ten bits, wide `li` destinations are argument
+   registers 86-89% of the time on musl-gcc-rv32 + sqlite-rv64 (at 7 bits
+   404 arg vs 51 other, at 8 bits 938 vs 154) and 85%/65% on cpp-rv32 --
+   the arg-call-pair effect, without the call. The band this replaces, 6
+   bits at any rd, is nearly vacant: keeping it alongside the 8-bit band
+   (re-measured, full scheduler) buys +18 pairs over three corpora for a
+   doubled block. Dropped.
+ * Swept with the real scheduler against the 6-bit-any-rd baseline (musl-
+   gcc-rv32 / sqlite-rv64 / cpp-rv32, corpus TOTALS so displacement is
+   netted): +169 / +429 / +216 pairs. Part of the gain is displacement --
+   rsd-alu-pair gives back up to 110, li-branch-chain up to 50 -- which
+   the totals already count.
+ * `addi4spn` deliberately does NOT get the split: its wide destinations
+   are a coin flip on musl+sqlite (129 arg vs 135 other at 7 bits) and
+   splitting it regressed musl-gcc while paying on cpp (+375/-71
+   relative) -- a C++-marshalling bet, not a win. Its 6-bit band stays as
+   it was.
+ * The a0-a7 restriction is enforced by scheduler/rules.py (`_ARG_REGS`,
+   shared with arg-call-pair); the yaml states it as the 3-bit
+   destination part of each split row, which is how arg-call-pair states
+   it too. An `imm: {bits}` contract is an opcode property and must agree
+   across slots (op_contracts), so both slots declare 8 and both get a
+   split row; the rule caps the pair at ONE wide immediate, matching the
+   one split per row.
+ * PRICED 11 BY THE MODEL, ~19 BY HAND, in a 32-block either way.
+   opcode_codepoints scores each op against the slot's WIDEST row, so
+   with the split rows present (7-bit fields) it sees li at ext 1 and
+   stops charging addi4spn's sixth bit, which in the full-rd rows still
+   rides an opcode repeat -- the same widest-row coarseness arg-call-pair
+   already lives with. A band-by-band hand count (li 5-any + 8-args, spn
+   5 + rider, one spelling per unordered pair) is ~19. Both are inside
+   the block; the gap is a known model artifact, not spare room to spend.
 
 ## rsd-alu-pair
 

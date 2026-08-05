@@ -78,6 +78,42 @@ def _contracts():
 
 
 @lru_cache(maxsize=1)
+def _narrow_fields():
+    """{rule_name: {slot: bits}} — the narrowest immediate-carrying row's
+    field per slot (encoding_render.narrow_field_bits): the un-extended base
+    band, where `_contracts` reports what an op may carry at most."""
+    import sys
+    sys.path.insert(0, os.path.join(_ROOT, "util"))
+    from encoding_render import narrow_field_bits
+
+    spec = yaml.safe_load(open(_YAML))
+    grid = spec["grid"]
+    out = {}
+    for node in spec["doc"]:
+        frame = node.get("frame")
+        if not frame or not frame.get("ops"):
+            continue
+        names = (frame.get("rules_py_names")
+                 or [x.strip() for x in frame["name"].split(",")])
+        per_slot = {}
+        for slot in ("a", "b"):
+            try:
+                per_slot[slot] = narrow_field_bits(frame, grid, slot)
+            except Exception:
+                per_slot[slot] = 0
+        for rn in names:
+            out[rn] = per_slot
+    return out
+
+
+def narrow_field_of(rule, slot):
+    """The base-band field width: what an immediate may carry in this slot
+    with NO opcode repeat and no register-restricted split row. Differs from
+    `width_of`'s bare-op fallback exactly when the frame mixes row widths."""
+    return _narrow_fields().get(rule, {}).get(slot, 0) or None
+
+
+@lru_cache(maxsize=1)
 def _rd_column():
     """{rule_name: (slots,)} — which slots' DESTINATION register a frame draws
     in the `rd` column, and so must keep clear of the x0/x2 sentinel (A1.11).

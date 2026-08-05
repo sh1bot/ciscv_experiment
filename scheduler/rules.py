@@ -14,6 +14,7 @@ from functools import wraps
 from isa.instruction import Instruction
 from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
 from scheduler.imm_contracts import width_of as _yaml_width
+from scheduler.imm_contracts import narrow_field_of as _yaml_narrow_field
 from scheduler.imm_contracts import rd_column_slots as _rd_slots
 from scheduler.imm_contracts import link_regs_for as _yaml_link_regs
 from scheduler.imm_contracts import accepts_pcrel_lo as _yaml_pcrel_lo
@@ -1078,30 +1079,37 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
 
 
 _DUAL_ADDI4SPN_BITS = _w("dual-setup-pair", "a", "addi4spn")
-_DUAL_LI_BITS = _w("dual-setup-pair", "a", "li")
-# The un-extended field width: mv declares nothing, so its width IS the field.
-_DUAL_FIELD_BITS = _w("dual-setup-pair", "a", "mv")
+_DUAL_LI_ARG_BITS = _w("dual-setup-pair", "a", "li")
+# The any-rd band is the NARROWEST imm row's field (5): the widest-row
+# fallback `_w` uses for bare ops would read the 7-bit a0-a7 split rows and
+# silently widen a band whose extra bits only exist under that restriction.
+_DUAL_FIELD_BITS = _yaml_narrow_field("dual-setup-pair", "a")
+_ARG_REGS = frozenset(range(10, 18))   # a0-a7: the 3-bit rd column that
+# arg-call-pair row 2 and dual-setup-pair's wide-li rows draw.
 
 
 @dual_family("dual_setup_pair")
 def _dual_indep(a: Instruction, b: Instruction) -> None:
     """Two fully independent small pseudo-ops (li / mv / addi4spn)."""
-    li_lim = 1 << (_DUAL_LI_BITS - 1)
+    nlim = 1 << (_DUAL_FIELD_BITS - 1)
+    arg_lim = 1 << (_DUAL_LI_ARG_BITS - 1)
     for insn in (a, b):
         if not _is_li_mv_addi4spn(insn):
             raise NotPair("is-not-li_mv_addi4spn")
         if insn.is_addi4spn and not insn.uimm_fits(
                 _DUAL_ADDI4SPN_BITS, 2, nonzero='remap'):
             raise NotPair(f"addi4spn immediate {insn.imm} out of range")
-        # li's extra bit above the drawn field rides one opcode repeat.
+        # li's two bands: the bare field with any rd, or the split-rd rows
+        # (7 drawn bits plus one opcode repeat) with an a0-a7 destination.
         if insn.is_li and (insn.imm is None
-                           or not (-li_lim <= insn.imm < li_lim)):
+                           or not (-nlim <= insn.imm < nlim
+                                   or (insn.rd in _ARG_REGS
+                                       and -arg_lim <= insn.imm < arg_lim))):
             raise NotPair("li-big-imm")
-    # Only immb carries the extra bit, so at most one of the two may exceed the
-    # narrow field.  Which SLOT it lands in does not matter: this frame requires
-    # mutual independence, so the encoder may swap the pair to put the wide
-    # operand in immb.
-    nlim = 1 << (_DUAL_FIELD_BITS - 1)
+    # Only immb carries the extra bits, so at most one of the two may exceed
+    # the narrow field.  Which SLOT it lands in does not matter: this frame
+    # requires mutual independence, so the encoder may swap the pair to put
+    # the wide operand in immb.
     wide = sum(1 for i in (a, b)
                if i.is_li and i.imm is not None and not (-nlim <= i.imm < nlim))
     if wide > 1:
@@ -1725,8 +1733,13 @@ _ARG_CALL_LI_BITS = _w("arg-call-pair", "a", "li")           # 7, rd3 row
 _ARG_CALL_SPN_BITS = _w("arg-call-pair", "a", "addi4spn")    # 7, rd3 row
 _ARG_CALL_LOAD_BITS = _w("arg-call-pair", "a", "lw")         # 7, scaled, rd3
 _ARG_CALL_STORE_BITS = _w("arg-call-pair", "a", "sw")        # 5, scaled, rs5
-_ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # 5
-_ARG_REGS = frozenset(range(10, 18))          # a0-a7: the 3-bit rd column
+_ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # reads 7: the
+# bare-op fallback takes the WIDEST imma row (the rd3 split row).  Whether
+# addi_rsd really has the 7-bit row is unverified -- an earlier copy of this
+# constant said 5.  Pre-existing, kept as-is until re-measured (TODO A8):
+# narrowing it here changes arg-call-pair's accepted range.
+# (_ARG_REGS -- the a0-a7 window this frame's 3-bit rd column draws -- is
+# defined beside dual-setup-pair, which shares it.)
 
 
 def _fits_u(v, bits, scale=1):

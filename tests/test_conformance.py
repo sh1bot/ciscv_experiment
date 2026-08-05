@@ -85,15 +85,19 @@ def test_proto_yaml_emits():
 def test_immediate_contracts_derive():
     """The yaml-derived width table must load and cover every rule."""
     sys.path.insert(0, ROOT)
-    from scheduler.imm_contracts import _contracts, width_of
+    from scheduler.imm_contracts import _contracts, narrow_field_of, width_of
     from scheduler.rules import RULES
     table = _contracts()
     missing = [r.name for r in RULES if r.name not in table]
     assert not missing, f"rules with no frame contract: {missing}"
     # Spot values this session got wrong in both directions at some point.
     assert width_of("li-branch-chain", "a", "li") == 8
-    assert width_of("dual-setup-pair", "b", "li") == 6
+    assert width_of("dual-setup-pair", "b", "li") == 8
     assert width_of("mem-base-pair", "a", "lw") == 6
+    # The any-rd band beside the a0-a7 split rows: the widest-row fallback
+    # read 7 here and silently widened the band the day the split rows landed.
+    assert narrow_field_of("dual-setup-pair", "a") == 5
+    assert narrow_field_of("dual-setup-pair", "b") == 5
 
 
 def test_yaml_schema_valid():
