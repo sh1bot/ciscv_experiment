@@ -900,15 +900,16 @@ doc:
           `addi` addend is pointer arithmetic and carries none, so its bits are
           bytes.  `load5-load5-chain` gets a symmetric split because BOTH its
           immediates are scaled offsets; this frame cannot, and scaling A by
-          the store's k would not help -- only 29% of the addends are aligned
-          to their own store's width, and for `sw` it is 2 of 264.  The stored
+          the store's k would not help -- the addends are 93% ODD, only 28.8%
+          are aligned to their own store's width, and for `sw` (65% of the
+          population) it is 5 of 295.  The stored
           value is the chain temporary and is not encoded.
         - >-
           THE WIDTH BELONGS TO B, measured 2026-08-04.  The row draws five bits
-          per column, so a sixth costs a doubling.  Over 412 scheduled pairs on
-          the two sqlite corpora: A's addend fits FIVE bits 98% of the time and
-          two bits 96% of the time, while B's scaled offset fits five only 33%
-          of the time and six 100%.  So A was paying 8 codepoints for the 2%
+          per column, so a sixth costs a doubling.  Over 455 scheduled pairs
+          on sqlite-rv32/rv64 and cpp-rv32/rv64: A's addend fits FIVE bits 97%
+          of the time and two bits 95% of the time, while B's scaled offset
+          fits five only 33% of the time and six 100%.  So A was paying 8 codepoints for the 2%
           that need a sixth bit.  Dropped to 5+6: 16 codepoints to 8, at a cost
           of 5 pairs on sqlite-rv32 and 4 on sqlite-rv64.  Narrowing B too
           (5+5, 4cp) costs a further 135 and 130 -- that bit is real.
