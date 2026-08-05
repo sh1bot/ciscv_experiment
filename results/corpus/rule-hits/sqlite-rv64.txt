@@ -1,21 +1,21 @@
 # sqlite-rv64 (RV64)
 # --- file totals ---
-#   instructions: 189602  packets: 147938  pairs: 41664  solos: 106274
-#   pair rate:    28.2%  (83328/189602 instructions paired)
+#   instructions: 189602  packets: 147630  pairs: 41972  solos: 105658
+#   pair rate:    28.4%  (83944/189602 instructions paired)
 #   RVC-eligible: 59.1%  (112141/189602 instructions)
 #   nops: 75 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 3310
-#     alu-alu-chain: 1065
-#     load-alu-chain: 2330
-#     addi-store-chain: 514
-#     alu-store-chain: 402
+#     rsd-alu-pair: 3312
+#     alu-alu-chain: 1066
+#     load-alu-chain: 2317
+#     addi-store-chain: 515
+#     alu-store-chain: 403
 #     load-sp-branch-pair: 516
-#     load-base-branch-pair: 3726
-#     deref-load-chain: 274
-#     base-load-chain: 602
+#     load-base-branch-pair: 3618
+#     base-load-chain: 674
+#     base-load-off-chain: 627
 #     mem-sp-pair: 6662
-#     mem-base-pair: 1743
+#     mem-base-pair: 1741
 #     load-store-chain: 670
 #     addi-store-off-chain: 200
 #     load-call-chain: 102
@@ -27,10 +27,10 @@
 #     bit-test-branch-chain: 869
 #     prologue-pair: 894
 #     epilogue-pair: 434
-#     czero-or-chain: 612
+#     czero-or-chain: 613
 #     li-czero-chain: 95
 #     index-mem-chain: 432
-#     pre-inc-pair: 236
-#     arith-jump-pair: 4056
-#     setup-jump-pair: 3995
+#     pre-inc-pair: 237
+#     arith-jump-pair: 4054
+#     setup-jump-pair: 3996
 #     arg-call-pair: 0

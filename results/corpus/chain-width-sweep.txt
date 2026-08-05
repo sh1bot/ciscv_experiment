@@ -1,37 +1,44 @@
-# Pointer-chase offset width sweep.  14 corpora.
+# base-load-off-chain field split.  14 corpora, 10 bits to divide.
 #
-# Both frames swept together: their populations are disjoint, so one
-# run reports both curves.  `total` is ALL corpus pairs -- the number
-# that says whether a width bought anything or merely moved it.
+# Every split summing to the field width costs the SAME 7
+# codepoints, so this is not a cost trade -- it is purely about
+# which division catches the most.  `total` is all corpus pairs.
 
-  w     deref    base    both     total   d.cp   b.cp  block
---------------------------------------------------------------
-  6      2463    4893    7356    502425     49     49     64
-  7      2465    5901    8366    503417     49     49     64  +992
-  8      2466    6017    8483    503529     49     49     64  +112
-  9      2467    6017    8484    503529     49     49     64  +0
- 10      2467    6017    8484    503529     49     49     64  +0
- 11      2467    6017    8484    503529     98     98    128  +0
- 12      2467    6017    8484    503529    196    196    256  +0
+ imma immb   off-chain    wide    both     total   cp  block
+------------------------------------------------------------
+    2    8        2066    6869    8935    504004    7      8
+    3    7        3050    6814    9864    504635    7      8
+    4    6        3669    6803   10472    505032    7      8
+    5    5        4039    6794   10833    505255    7      8
+    6    4        3764    6794   10558    505073    7      8
+    7    3        2937    6794    9731    504522    7      8
+    8    2        2426    6793    9219    504104    7      8
 
-per-base detail at each width:
-  w=6   RV32  deref     940  base    2071  total   219269
-  w=6   RV64  deref    1523  base    2822  total   283156
-  w=7   RV32  deref     942  base    2387  total   219578
-  w=7   RV64  deref    1523  base    3514  total   283839
-  w=8   RV32  deref     942  base    2405  total   219595
-  w=8   RV64  deref    1524  base    3612  total   283934
-  w=9   RV32  deref     943  base    2405  total   219595
-  w=9   RV64  deref    1524  base    3612  total   283934
-  w=10  RV32  deref     943  base    2405  total   219595
-  w=10  RV64  deref    1524  base    3612  total   283934
-  w=11  RV32  deref     943  base    2405  total   219595
-  w=11  RV64  deref    1524  base    3612  total   283934
-  w=12  RV32  deref     943  base    2405  total   219595
-  w=12  RV64  deref    1524  base    3612  total   283934
+best: imma=5 immb=5 at 505255 corpus pairs
 
-independence check — widening one form must not move the other:
-  wa=12  wb=6    deref    2467  base    4893  total   502425
-  wa=6   wb=12   deref    2463  base    6017  total   503529
-  compare each against the matching w= row above: deref should
-  match the wa row and base the wb row, exactly.
+per-base detail:
+  2,8 RV32  off-chain     689  wide    2746  total   219741
+  2,8 RV64  off-chain    1377  wide    4123  total   284263
+  3,7 RV32  off-chain     998  wide    2736  total   219944
+  3,7 RV64  off-chain    2052  wide    4078  total   284691
+  4,6 RV32  off-chain    1250  wide    2733  total   220123
+  4,6 RV64  off-chain    2419  wide    4070  total   284909
+  5,5 RV32  off-chain    1392  wide    2731  total   220198
+  5,5 RV64  off-chain    2647  wide    4063  total   285057
+  6,4 RV32  off-chain    1271  wide    2731  total   220137
+  6,4 RV64  off-chain    2493  wide    4063  total   284936
+  7,3 RV32  off-chain    1038  wide    2731  total   219946
+  7,3 RV64  off-chain    1899  wide    4063  total   284576
+  8,2 RV32  off-chain     855  wide    2731  total   219791
+  8,2 RV64  off-chain    1571  wide    4062  total   284313
+
+disjointness check — base-load-chain owns imma == 0, so no
+split of the off-chain field may move its count:
+  imma=2 immb=8:  base-load-chain 6869
+  imma=3 immb=7:  base-load-chain 6814
+  imma=4 immb=6:  base-load-chain 6803
+  imma=5 immb=5:  base-load-chain 6794
+  imma=6 immb=4:  base-load-chain 6794
+  imma=7 immb=3:  base-load-chain 6794
+  imma=8 immb=2:  base-load-chain 6793
+  MOVED — the frames are NOT disjoint

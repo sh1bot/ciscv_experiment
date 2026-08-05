@@ -1,7 +1,7 @@
 # godot (RV64)
 # --- file totals ---
-#   instructions: 90171  packets: 74212  pairs: 15959  solos: 58253
-#   pair rate:    21.5%  (31918/90171 instructions paired)
+#   instructions: 90171  packets: 74206  pairs: 15965  solos: 58241
+#   pair rate:    21.5%  (31930/90171 instructions paired)
 #   RVC-eligible: 49.8%  (44950/90171 instructions)
 #   nops: 1 (excluded from the counts)
 #   rule hits:
@@ -12,8 +12,8 @@
 #     alu-store-chain: 65
 #     load-sp-branch-pair: 989
 #     load-base-branch-pair: 703
-#     deref-load-chain: 41
-#     base-load-chain: 192
+#     base-load-chain: 196
+#     base-load-off-chain: 43
 #     mem-sp-pair: 2547
 #     mem-base-pair: 167
 #     load-store-chain: 88

@@ -1,26 +1,26 @@
 # cpp-rv32 (RV32)
 # --- file totals ---
-#   instructions: 418345  packets: 326347  pairs: 91998  solos: 234349
-#   pair rate:    28.2%  (183996/418345 instructions paired)
+#   instructions: 418345  packets: 326121  pairs: 92224  solos: 233897
+#   pair rate:    28.3%  (184448/418345 instructions paired)
 #   RVC-eligible: 59.9%  (250576/418345 instructions)
 #   nops: 2521 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 3524
+#     rsd-alu-pair: 3526
 #     alu-alu-chain: 1996
-#     load-alu-chain: 2045
+#     load-alu-chain: 2034
 #     addi-store-chain: 710
-#     alu-store-chain: 2190
+#     alu-store-chain: 2189
 #     load-sp-branch-pair: 721
-#     load-base-branch-pair: 4969
-#     deref-load-chain: 604
-#     base-load-chain: 1754
-#     mem-sp-pair: 20690
+#     load-base-branch-pair: 4949
+#     base-load-chain: 1988
+#     base-load-off-chain: 628
+#     mem-sp-pair: 20691
 #     mem-base-pair: 6406
 #     load-store-chain: 1085
 #     addi-store-off-chain: 12
 #     load-call-chain: 2564
 #     macro-op-pair: 59
-#     post-inc-pair: 2677
+#     post-inc-pair: 2674
 #     dual-setup-pair: 13414
 #     li-branch-chain: 3112
 #     inc-branch-pair: 508

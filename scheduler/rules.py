@@ -675,72 +675,88 @@ def _load_base_branch(a: Instruction, b: Instruction) -> None:
 
 
 # ---------------------------------------------------------------------------
-# deref-load-chain / base-load-chain
+# base-load-chain / base-load-off-chain
 # ---------------------------------------------------------------------------
-# Two load+load chains that pack into a single word as
-# {opcode-tuple, rtmp, rd, rb, imm10}, where imm10 is a 10-bit width-scaled
-# unsigned offset and the other load's offset is implied zero.
+# Two load+load pointer chases.  In both, A loads a pointer and B dereferences
+# it: B's base register IS A's destination, which is dead after B.  They differ
+# only in whether the FIRST load carries an offset.
 #
-#   deref-chain: A = load rtmp, imm10(rb);  B = load rd, 0(rtmp)
-#                — pointer chase: A's loaded value is B's base address.
-#   base-chain:  A = load rtmp, 0(rb);       B = load rd, imm10(rtmp)
-#                — pointer chase with the offset on the second load; A's loaded
-#                value is B's base address.
+#   base-chain:      A = lx rtmp, 0(rb);        B = load rd, imm10(rtmp)
+#                    the common case -- a pointer at the head of a structure,
+#                    then a reach into what it points at.  59.9% of all chases.
+#   base-off-chain:  A = lx rtmp, imm5(rb);     B = load rd, imm5(rtmp)
+#                    the pointer itself is at an offset, typically a stack slot.
 #
-# In both, B dereferences A's loaded value (rtmp), which is dead after B.  They
-# differ only in which load carries the imm10 offset.
+# A IS ALWAYS THE NATURAL WORD.  must_chain_base makes A's loaded value B's base
+# address, and a byte or a halfword is not an address.  Measured over every
+# chain the pairer can form -- all 11583 across the suite, on and off the axes
+# -- A is lw on RV32 and ld on RV64, 100.0%, no exceptions.  So the A slot
+# spends one XLEN-switchable opcode (`lx`) rather than seven, and each block is
+# 1x7 = 7 codepoints instead of 7x7 = 49.
 #
-# These were ONE frame until the split.  Sharing a frame meant sharing an
-# op-select, and nothing in the word said which row was in force -- both rows
-# carried the same identifier and the same aaabbb index over one 49-codepoint
-# block, so the offset in the word could not be attributed to a load.  Two
-# frames now, each with its own block and its own width.
+# These two replace an earlier `deref-load-chain` (offset on the FIRST load,
+# second at zero) and a wide `base-load-chain`.  Before that they were a single
+# frame drawing both rows over one op-select with nothing selecting between
+# them, so the offset in the word could not be attributed to a load at all.
+# base-load-off-chain subsumes the deref population as its immb == 0 column,
+# losing only the 28 chases needing more than five bits of imma.
 #
-# They are ALMOST disjoint: each demands the other load's offset be zero, so a
-# pair with two real offsets fits neither and a pair with one fits exactly one.
-# The exception is the pair with NO offset at all -- both loads at zero -- which
-# satisfies both.  That is 775 pairs of the corpus (results/corpus/CHAINS.md),
-# credited to deref-load-chain because it comes first in RULES.  It fits at
-# every width, so widening either frame cannot move it or the other's count.
+# The two are disjoint by construction: base-load-chain demands A's offset be
+# zero and base-load-off-chain demands it be nonzero, so no chase satisfies
+# both and neither shadows the other.
 
+# The union over both bases; the checks enforce which is the natural word for
+# the base actually being scheduled, as _mem_sp_pair does.  A set rather than
+# None so the rules are not eligible for -- and do not annotate -- unrelated
+# instructions.
+_CHAIN_A_MN = frozenset({"lw", "ld"})
 _CHAIN_LOAD_MN = frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"})
-# Two frames since the split, so two widths: the forms are disjoint populations
-# (deref needs B's offset zero, base needs A's) and no longer share a field, so
-# neither is constrained by what the other needs.  They are equal today only
-# because both draw the same two free columns.
-_DEREF_OFF_BITS = _w("deref-load-chain", "a", "lw")   # split imma cells
-_BASE_OFF_BITS = _w("base-load-chain", "b", "lw")     # split immb cells
+
+_BASE_OFF_BITS = _w("base-load-chain", "b", "lw")          # immb, wide form
+_BOFF_A_BITS = _w("base-load-off-chain", "a", "lx")        # imma, split form
+_BOFF_B_BITS = _w("base-load-off-chain", "b", "lw")        # immb, split form
 
 
-@must_chain_base
-@no_escape
-@a_base_not_from_auipc
-def _deref_load_chain(a: Instruction, b: Instruction) -> None:
-    """A loads a pointer at imm10(rb); B dereferences it at 0(rtmp); rtmp then dead."""
+def _chain_a_ok(a: Instruction) -> None:
+    """A must be a natural-word load: it is producing an ADDRESS."""
     if a.rbase is None or a.rd is None:
         raise NotPair("A missing base/dest register")
-    shift = a.access_shift or 0
-    bits = _DEREF_OFF_BITS
-    if not a.uimm_fits(bits, shift):
-        max_off = ((1 << bits) - 1) << shift
-        raise NotPair(f"A offset exceeds {bits}-bit scaled range (max {max_off})")
-    if b.imm != 0:
-        raise NotPair("B offset must be zero")
-    return None
+    if not is_xlen_width(a, XLEN):
+        raise NotPair("not-xlen-width")
 
 
 @must_chain_base
 @no_escape
 @a_base_not_from_auipc
 def _base_load_chain(a: Instruction, b: Instruction) -> None:
-    """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp then dead."""
-    if a.rbase is None or a.rd is None:
-        raise NotPair("A missing base/dest register")
+    """A loads a pointer at 0(rb); B dereferences it at imm10(rtmp); rtmp dead."""
+    _chain_a_ok(a)
     if a.imm != 0:
         raise NotPair("A offset must be zero")
     shift = b.access_shift or 0
     if not b.uimm_fits(_BASE_OFF_BITS, shift):
         raise NotPair("big-imm")
+    return None
+
+
+@must_chain_base
+@no_escape
+@a_base_not_from_auipc
+def _base_load_off_chain(a: Instruction, b: Instruction) -> None:
+    """A loads a pointer at imm5(rb); B dereferences it at imm5(rtmp).
+
+    A's offset must be NONZERO: the zero case is base-load-chain's, which draws
+    ten bits for B rather than five.  Keeping the two disjoint means a chase is
+    never encodable both ways, so neither frame's count is an artefact of where
+    it sits in RULES.
+    """
+    _chain_a_ok(a)
+    if a.imm == 0:
+        raise NotPair("A offset zero — base-load-chain's")
+    if not a.uimm_fits(_BOFF_A_BITS, a.access_shift or 0):
+        raise NotPair("big-imm-A")
+    if not b.uimm_fits(_BOFF_B_BITS, b.access_shift or 0):
+        raise NotPair("big-imm-B")
     return None
 
 
@@ -1793,16 +1809,16 @@ RULES: list[PairingRule] = [
         check=_load_base_branch,
     ),
     PairingRule(
-        name="deref-load-chain",
-        a_mnemonic_set=_CHAIN_LOAD_MN,
-        b_mnemonic_set=_CHAIN_LOAD_MN,
-        check=_deref_load_chain,
-    ),
-    PairingRule(
         name="base-load-chain",
-        a_mnemonic_set=_CHAIN_LOAD_MN,
+        a_mnemonic_set=_CHAIN_A_MN,
         b_mnemonic_set=_CHAIN_LOAD_MN,
         check=_base_load_chain,
+    ),
+    PairingRule(
+        name="base-load-off-chain",
+        a_mnemonic_set=_CHAIN_A_MN,
+        b_mnemonic_set=_CHAIN_LOAD_MN,
+        check=_base_load_off_chain,
     ),
     PairingRule(
         name="mem-sp-pair",

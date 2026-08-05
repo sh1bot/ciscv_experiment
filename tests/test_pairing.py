@@ -1023,68 +1023,157 @@ class TestStoreChainAluPair:
         assert can_pair(a, b) is not None
 
 
-class TestDerefChainLoadPair:
-    """A = load rtmp, imm10(rb); B = load rd, 0(rtmp); rtmp dead after B."""
-
-    def test_basic_pairs(self):
-        a = make_ld(10, 12, imm=512)   # ld x10, 512(x12)
-        b = make_ld(11, 10, imm=0)     # ld x11, 0(x10)
-        assert can_pair(a, b) is None
-
-    def test_b_offset_nonzero_no_pair(self):
-        a = make_ld(10, 12, imm=512)
-        b = make_ld(11, 10, imm=8)     # B must dereference at offset zero
-        assert can_pair(a, b) is not None
-
-    def test_b_base_mismatch_no_pair(self):
-        a = make_ld(10, 12, imm=512)
-        b = make_ld(11, 13, imm=0)     # B base is not A's result
-        assert can_pair(a, b) is not None
-
-    def test_a_offset_over_10bit_no_pair(self):
-        # ld scale 8: 10-bit max scaled = 1023*8 = 8184; 8192 too big
-        a = make_ld(10, 12, imm=8192)
-        b = make_ld(11, 10, imm=0)
-        assert can_pair(a, b) is not None
-
-    def test_a_auipc_got_load_no_pair(self):
-        # A is the load half of an auipc+load GOT access; its offset is a
-        # %pcrel_lo relocation, not a real displacement.
-        a = make_ld(10, 12, imm=512)
-        a.base_from_auipc = True
-        b = make_ld(11, 10, imm=0)
-        assert can_pair(a, b) is not None
-
-
 class TestBaseChainLoadPair:
-    """A = load rtmp, 0(rb); B = load rd, imm10(rtmp); rtmp dead after B."""
+    """A = lx rtmp, 0(rb); B = load rd, imm10(rtmp); rtmp dead after B.
+
+    `ld` is the natural word only on RV64, and the A slot now spends ONE
+    XLEN-switchable opcode on it (the loaded value is B's base ADDRESS, so a
+    byte or halfword there is meaningless), which is why these set the base.
+    """
 
     def test_basic_pairs(self):
-        a = make_ld(10, 12, imm=0)     # ld x10, 0(x12)
-        b = make_ld(11, 10, imm=512)   # ld x11, 512(x10)
-        assert can_pair(a, b) is None
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=0)     # ld x10, 0(x12)
+            b = make_ld(11, 10, imm=512)   # ld x11, 512(x10)
+            assert can_pair(a, b) is None
+        finally:
+            _r.set_xlen(old)
 
-    def test_a_offset_nonzero_no_pair(self):
-        a = make_ld(10, 12, imm=8)     # A must dereference at offset zero
-        b = make_ld(11, 10, imm=512)
-        assert can_pair(a, b) is not None
+    def test_a_not_natural_word_no_pair(self):
+        """A loads a byte, so it is not producing an address."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_insn("lbu", rd=10, rs1=12, imm=0)
+            b = make_ld(11, 10, imm=512)
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
+
+    def test_wrong_base_natural_word_no_pair(self):
+        """`ld` is not the natural word on RV32, so the A slot cannot hold it."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(32)
+        try:
+            a = make_ld(10, 12, imm=0)
+            b = make_ld(11, 10, imm=512)
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
 
     def test_b_base_mismatch_no_pair(self):
-        a = make_ld(10, 12, imm=0)
-        b = make_ld(11, 13, imm=512)   # B base is not A's result
-        assert can_pair(a, b) is not None
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=0)
+            b = make_ld(11, 13, imm=512)   # B base is not A's result
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
 
     def test_b_offset_over_10bit_no_pair(self):
-        a = make_ld(10, 12, imm=0)
-        b = make_ld(11, 10, imm=8192)
-        assert can_pair(a, b) is not None
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=0)
+            b = make_ld(11, 10, imm=8192)
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
 
     def test_a_auipc_got_load_no_pair(self):
         # A is the load half of an auipc+load GOT access — excluded.
-        a = make_ld(10, 12, imm=0)
-        a.base_from_auipc = True
-        b = make_ld(11, 10, imm=512)
-        assert can_pair(a, b) is not None
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=0)
+            a.base_from_auipc = True
+            b = make_ld(11, 10, imm=512)
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
+
+
+class TestBaseChainLoadOffPair:
+    """A = lx rtmp, imm5(rb); B = load rd, imm5(rtmp); rtmp dead after B.
+
+    The offset-bearing sibling: the pointer itself sits at an offset, typically
+    a stack slot.  It replaces the old deref-load-chain, whose population is
+    this frame's immb == 0 column.
+    """
+
+    def test_both_offsets_pair(self):
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            # ld scale 8: scaled 5-bit max is 31, raw 248
+            a = make_ld(10, 12, imm=248)   # ld x10, 248(x12)
+            b = make_ld(11, 10, imm=248)   # ld x11, 248(x10)
+            assert can_pair(a, b) is None
+        finally:
+            _r.set_xlen(old)
+
+    def test_deref_shape_pairs_here(self):
+        """The old deref-load-chain shape -- offset on A, B at zero."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=64)
+            b = make_ld(11, 10, imm=0)
+            assert can_pair(a, b) is None
+        finally:
+            _r.set_xlen(old)
+
+    def test_a_offset_over_5bit_no_pair(self):
+        """512/8 = 64 needs seven bits; the split field holds five."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=512)
+            b = make_ld(11, 10, imm=0)
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
+
+    def test_b_offset_over_5bit_with_a_offset_no_pair(self):
+        """With A offset nonzero this is base-load-off-chain's, and B gets only
+        five bits there -- base-load-chain's ten are unavailable."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            a = make_ld(10, 12, imm=8)
+            b = make_ld(11, 10, imm=512)
+            assert can_pair(a, b) is not None
+        finally:
+            _r.set_xlen(old)
+
+    def test_frames_are_disjoint(self):
+        """A's offset zero is base-load-chain's and nonzero is the sibling's, so
+        no chase is ever encodable both ways."""
+        import scheduler.rules as _r
+        old = _r.XLEN
+        _r.set_xlen(64)
+        try:
+            for a_imm in (0, 8, 248):
+                a = make_ld(10, 12, imm=a_imm)
+                b = make_ld(11, 10, imm=8)
+                accepting = [n for n in ("base-load-chain", "base-load-off-chain")
+                             if _rule_reason(n, a, b) is None]
+                assert len(accepting) <= 1, (a_imm, accepting)
+        finally:
+            _r.set_xlen(old)
 
 
 def _rule_reason(name, a, b):

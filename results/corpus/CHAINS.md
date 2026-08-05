@@ -1,138 +1,133 @@
-# The pointer-chase frames: the split, and how wide the offset should be
+# The pointer-chase frames: the redesign, and how the offset is split
 
-Measured 2026-08-04 against main.  Regenerate the sweep with
-`python3 util/chain_width_sweep.py --widths 6,7,8,9,10,11,12 --verify`
-and the hit counts with `util/rule_hits.py` / `util/rule_overlap.py`.
+Measured 2026-08-05 against main.  Regenerate with `util/rule_hits.py`,
+`util/rule_overlap.py`, `util/chain_imm_grid.py --corpora ...` and
+`util/chain_width_sweep.py --verify`.  Raw output in `chain-imm-grid.txt`
+and `chain-width-sweep.txt`.
 
-## Why they had to be split
+The two frames are now
 
-`deref-load-chain` and `base-load-chain` were one frame named
-`"deref-load-chain, base-load-chain"`, drawing two rows:
+    base-load-chain      lx tmp, 0(rs1a)        ; load rdb, k*immb(tmp)
+    base-load-off-chain  lx tmp, k*imma(rs1a)   ; load rdb, k*immb(tmp)
 
-    │o│imma[9:5]│o│imma[4:0]│  rs1a   │o o o│   rdb   │0 1 1 0 o│1 0│
-    │o│immb[9:5]│o│immb[4:0]│  rs1a   │o o o│   rdb   │0 1 1 0 o│1 0│
+replacing an earlier `deref-load-chain` / `base-load-chain` pair, which in turn
+replaced a single frame that drew both of their rows over ONE op-select with
+nothing selecting between them — so the offset in the word could not be
+attributed to a load at all.
 
-Both rows carried the **same identifier** and the same `aaabbb` op-select over
-one 49-codepoint block, and nothing anywhere in the word said which row was in
-force.  A decoder holding the word could not tell whether the 10-bit field was
-the first load's offset or the second's — which is the entire difference
-between the two forms.  The yaml said as much, in the form of a standing
-`TODO: decide how to balance imma and immb sizes`.
+## The A slot spends one opcode, not seven
 
-They are two frames now, identifiers `0111` and `0110`, one 64-block each.
-That costs **+64 codepoints** (838 → 902 of 1024 reserved, 122 spare).
+`must_chain_base` makes A's loaded value B's base ADDRESS.  A byte or a
+halfword is not an address, so A can only ever be the natural word — and the
+corpus agrees without a single exception:
 
-The split changed accounting only, not pairing: the two frames take 8484 pairs
-between them, exactly what the combined frame took.  What changed is the
-honest price.  The old figure of 8484 hits over 49 codepoints — 173.1 per
-codepoint — was never achievable, because the encoding it was billed against
-could not distinguish the two forms.  The real figure is 8484 over 98, **86.6
-per codepoint**.
+| population | chains | A mnemonic |
+|---|---|---|
+| RV32 on-axis / off-axis / unencodable | 3334 / 959 / 95 | `lw` **100.0%** each |
+| RV64 on-axis / off-axis / unencodable | 5108 / 1946 / 141 | `ld` **100.0%** each |
 
-## What each form is worth
+All 11583 chains the pairer can form, measured with the offset conditions
+removed so the off-axis population is visible too.  So A is `lx`, the
+XLEN-switchable opcode `mem-sp-pair` already uses, and each block is 1x7 = 7
+codepoints instead of 7x7 = 49.
 
-| frame | cp | hits | reach | excl | excl/cp | RV32 | RV64 |
-|---|---|---|---|---|---|---|---|
-| `base-load-chain`  | 49 | 6017 | 6792 | 6011 | 122.7 | 2405 | 3612 |
-| `deref-load-chain` | 49 | 2467 | 2467 | 1676 |  34.2 |  943 | 1524 |
+## What the frames were missing
 
-**The offset sits on the second load 71% of the time.**  That asymmetry is the
-main thing the split reveals: as one frame the two were indistinguishable in
-the hit counts as well as in the encoding, and the roster carried them as a
-single 173-per-codepoint entry that hid a 3.6x spread between its halves.
-`base-load-chain` earns its block comfortably; `deref-load-chain` at 34.2
-excl/cp sits in the bottom third of the roster.
+Each old frame required one offset to be zero, so between them they could only
+ever encode the axes of the A x B plane.  `chain_imm_grid` removes the offset
+conditions — keeping every structural gate — to show the joint demand:
 
-The ratio holds on both bases (RV32 2.6x, RV64 2.4x), so it is a property of
-the chase, not of a word size.
+| region | chains | share |
+|---|---|---|
+| B axis (A offset zero) | 6793 | 58.6% |
+| A axis (B offset zero) | 2425 | 20.9% |
+| both zero (counted in both above) | 776 | 6.7% |
+| **off the axes, both nonzero** | **2905** | **25.1%** |
+| negative or unaligned — unencodable at any width | 236 | 2.0% |
 
-### The two frames are not quite disjoint
+A quarter of all pointer chases were unreachable by construction.
 
-Each demands the *other* load's offset be zero, so a chase carrying two real
-offsets fits neither and one carrying a single offset fits exactly one.  The
-exception is the chase with **no offset at all** — both loads at zero — which
-satisfies both rules.  That is 775 pairs, credited to `deref-load-chain` only
-because it comes first in `RULES`; they are the whole of the gap between
-`base-load-chain`'s reach (6792) and its hits (6017).
+### `sp` as the base is the discriminator
 
-So `deref-load-chain`'s own exclusive population is **1676**, not 2467.  Nearly
-a third of what it appears to earn is a tie it wins on rule order.  Whoever
-gets those 775, they cost nothing extra: they fit at every width, and both
-frames must handle a zero offset anyway.
+| rs1a | chains | A-only | B-only | both nonzero |
+|---|---|---|---|---|
+| `== sp` | 1664 | 574 (34%) | **17 (1%)** | **961 (58%)** |
+| `!= sp` | 9919 | 1075 (11%) | **6000 (60%)** | 1944 (20%) |
 
-## How wide should the offset be?
+Two idioms in one shape.  An sp-based chase reads a pointer *out of a stack
+slot*, so the slot displacement is an A offset by construction — it is almost
+never B-only.  A non-sp chase loads from `0(reg)` and reaches into a struct.
+That is why one frame pinning `imma` to zero cannot be the whole story.
 
-A field is five bits per register column it consumes and grows past that only
-by taking more opcode entries — an op declaring N bits occupies `2^(N-field)`
-of them.  Both frames draw 10 bits from `funct5`+`rs2`, columns the pair leaves
-free because `tmp` is implicit.  So:
+## Realised result
 
-* **at or below 10 bits the width is free** — the columns are already drawn,
-  and narrowing cannot spend them on anything else;
-* **above 10 every bit doubles the block**: 49 → 98 codepoints at 11 (block
-  128), 196 at 12 (block 256).
+| | before | after |
+|---|---|---|
+| `base-load-chain` | 6017 hits, 49 cp | **6794 hits, 7 cp** |
+| `base-load-off-chain` (was `deref-load-chain`) | 2467 hits, 49 cp | **4039 hits, 7 cp** |
+| both | 8484 over 98 cp | **10833 over 14 cp** |
+| excl/cp | 122.7 / 34.2 | **969.7 / 574.3** |
+| namespace reserved | 902/1024 | **790/1024**, 234 spare |
+| corpus pairs | 503529 | **505255** |
 
-Full corpus, 14 builds, real scheduler and pairer at each setting:
+**+2349 chain pairs and 84 codepoints back.**  Note the corpus total rose by
+only 1726, not 2349: about 620 of the chain frames' gain is taken from pairs
+other frames would have had anyway.  That gap is the reason the sweep below
+scores on corpus total rather than on the frames' own counts.
 
-```
-  w     deref    base    both     total   d.cp   b.cp  block
---------------------------------------------------------------
-  6      2463    4893    7356    502425     49     49     64
-  7      2465    5901    8366    503417     49     49     64  +992
-  8      2466    6017    8483    503529     49     49     64  +112
-  9      2467    6017    8484    503529     49     49     64  +0
- 10      2467    6017    8484    503529     49     49     64  +0
- 11      2467    6017    8484    503529     98     98    128  +0
- 12      2467    6017    8484    503529    196    196    256  +0
-```
+`rule_overlap` reports `hidden` 0 for both frames — neither shadows the other,
+as the predicates guarantee (`imma == 0` versus nonzero).  The old pair had 775
+pairs that either could take, resolved only by `RULES` order.
 
-`total` is all corpus pairs, not the two frames' own — a width that gains pairs
-by taking them from a frame that would have had them anyway has gained nothing.
-Here the two move together, so the width is buying real pairs up to the point
-it stops.
+## How the ten bits should be split
 
-**Demand saturates at 9 bits, and 8 is within one pair of it.**  Every bit
-above that is provably worthless: 11 and 12 bits buy *zero* pairs for a
-doubling and a quadrupling of the block.
-
-The two curves are very different, and that is the answer to the balance
-question the yaml asked:
-
-| | 6 bits | 7 | 8 | 9 | saturates at |
-|---|---|---|---|---|---|
-| `deref-load-chain` | 2463 | 2465 | 2466 | 2467 | **9**, but flat from 6 — the whole range is 4 pairs |
-| `base-load-chain`  | 4893 | 5901 | 6017 | 6017 | **8**, and it costs 1124 pairs to drop to 6 |
-
-`deref-load-chain` needs almost no range at all: 99.8% of its population fits
-in six bits.  `base-load-chain` is where the width goes — dropping it from 8 to
-6 costs 1124 pairs, 281 times what the same cut costs its sibling.  A pointer
-chase that offsets the *first* load is indexing a small header; one that
-offsets the *second* is reaching into a struct, and structs are bigger than
-headers.
-
-### What to set
-
-**Keep both at 10.**  It is free at the current draw, it is above the measured
-saturation with headroom for codebases unlike this corpus, and narrowing to the
-measured 9/8 would save nothing — the columns cannot be spent elsewhere.
-
-The actionable half of the result is the ceiling, not the floor: **never widen
-either frame past 10**, because the corpus says a doubling would buy nothing.
-And if these two are ever pushed back into one block with a selector bit, the
-budget should not be split evenly — give `base-load-chain` the bits and leave
-`deref-load-chain` six.
-
-### Independence
-
-Both curves come from single runs at `(wa, wb)`, which is only legitimate if
-widening one form cannot move the other.  Checked rather than assumed, in both
-directions:
+Only `base-load-off-chain` has a choice.  Its ten bits come from `funct5`+`rs2`
+— free because `tmp` is implicit — so a bit given to `imma` is taken from
+`immb`, and **every split summing to ten costs the same 7 codepoints**.  This
+is not a cost trade; it is purely about which division catches the most.
 
 ```
-  wa=12  wb=6    deref    2467  base    4893  total   502425
-  wa=6   wb=12   deref    2463  base    6017  total   503529
+ imma immb   off-chain    wide    both     total   cp  block
+    2    8        2066    6869    8935    504004    7      8
+    3    7        3050    6814    9864    504635    7      8
+    4    6        3669    6803   10472    505032    7      8
+    5    5        4039    6794   10833    505255    7      8
+    6    4        3764    6794   10558    505073    7      8
+    7    3        2937    6794    9731    504522    7      8
+    8    2        2426    6793    9219    504104    7      8
 ```
 
-Each frame's count matches its own width's row exactly and ignores the other's
-— 2467 is the `w=12` deref, 4893 the `w=6` base, and so on.  The no-offset
-population they share fits at every width, so it never moves.
+**5+5, and it is a clean single peak** — 505255 corpus pairs, falling away
+symmetrically in both directions.  Predicted from the grid at 10823 chain
+pairs; realised 10833, within ten.
+
+Symmetric wins for a specific reason, not out of tidiness: `base-load-chain`
+has already absorbed the entire `imma == 0` row, so what is left for the split
+frame is the *diagonal* mass, and the grid shows that spread evenly rather than
+concentrated on either axis.  Going to eleven bits (5+6) would reach ~10977 and
+cost an opcode doubling for ~154 pairs.
+
+### The `wide` column moves, and that is not overlap
+
+`base-load-chain`'s own count drifts from 6869 to 6793 across the sweep — a
+spread of 76 pairs, 1.1%.  The rules cannot overlap: one demands `imma == 0`
+and the other demands it nonzero.  What moves is the greedy pairer.  Narrowing
+the split frame leaves instructions unpaired, and the pairer then makes
+different choices with them, a few of which land on `base-load-chain`.  Greedy
+list scheduling is not monotone, so this is expected — and it is measured here
+rather than assumed away.
+
+## What is still on the floor
+
+524 chases, 4.6% of the 11347 structurally encodable:
+
+* **213 with `imma` above five bits** — the pointer sits deep in a frame.
+* **311 with `imma` 1–5 but `immb` above five** — a deep reach from an offset
+  pointer.  These are the ones eleven bits would buy.
+* plus the **236** with negative or unaligned offsets, which no unsigned
+  width-scaled field can hold at any width, and which sit outside the 11347.
+
+The floor is not evenly spread.  The `immb` = 6–7 population it gives up is
+concentrated in sqlite and godot — godot puts 41.6% of its chases at `immb` = 7
+and 18% at 8, against cpp-rv64's 3.3% — so a corpus with wider structures would
+pay more for the 5+5 split than this suite does.

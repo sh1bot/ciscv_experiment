@@ -155,38 +155,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
 * A covers li (rs1a = x0), mv (imma = 0) and addi4spn (rs1a = sp) as
   register/immediate choices, so they need no opcodes of their own.
 
-## deref-load-chain
-
-*Pointer chase: the FIRST load carries the offset, the second reads 0(tmp).*
-
-    load    tmp, k*imma(rs1a)
-    load    rdb, 0(tmp)
-
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│imma[9:5]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-
-* Split from a single "deref-load-chain, base-load-chain" frame that
-  drew BOTH rows over one 49-codepoint op-select.  Nothing selected
-  between them: the two rows carried the same identifier and the same
-  `aaabbb` index, so a decoder holding the word could not tell whether
-  the 10-bit field was the first load's offset or the second's.  Two
-  frames now, each paying for its own op-select.
-* The two forms are ALMOST disjoint -- each demands the other load's
-  offset be zero -- but a chase with NO offset on either load satisfies
-  both, and those 775 pairs land here only because this frame comes
-  first in RULES.  Its own exclusive population is 1676.
-* imma is 10 bits: five from `funct5`, five from `rs2`, which the pair
-  leaves free because `tmp` is implicit.  Widening past 10 costs an
-  opcode doubling per bit (49 -> 98 codepoints at 11), which the width
-  sweep in results/corpus/CHAINS.md prices against what it returns.
-
 ## base-load-chain
 
-*Pointer chase: the SECOND load carries the offset, the first reads 0(rs1a).*
+*Pointer chase: bare first load, the second carries a wide offset.*
 
-    load    tmp, 0(rs1a)
+    lx      tmp, 0(rs1a)
     load    rdb, k*immb(tmp)
 
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
@@ -194,11 +167,45 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│immb[9:5]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
-* The sibling of deref-load-chain; see its notes for why the two were
-  split.  Same shape, same cost, and the offset sits on the other load.
-* immb is sized independently of imma now that the two rows no longer
-  share a field.  Both are 10 bits because the columns are free at
-  that width, not because the two demands happen to match.
+* The A slot spends ONE opcode, not seven.  `must_chain_base` makes A's
+  loaded value B's base address, and a byte or halfword is not an
+  address -- so A is the natural word by construction.  Measured over
+  every chain the pairer can form, all 11583 of them across the suite,
+  A is `lw` on RV32 and `ld` on RV64 100.0% of the time, with no
+  exception on or off the axes.  That is what `lx` names, and it takes
+  the block from 7x7=49 codepoints to 1x7=7.
+* `immb` gets the full ten bits -- five from `funct5`, five from `rs2`,
+  columns the pair leaves free because `tmp` is implicit and A's offset
+  is pinned at zero.  This single form is 59.9% of all chases.
+
+## base-load-off-chain
+
+*Pointer chase with BOTH loads offset: a pointer in a slot, then indexed.*
+
+    lx      tmp, k*imma(rs1a)
+    load    rdb, k*immb(tmp)
+
+┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│imma[4:0]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+
+* The offset-bearing sibling of base-load-chain, on the pattern of
+  addi-store-off-chain.  It replaces the old `deref-load-chain`, whose
+  population (offset on the FIRST load, second at zero) is the immb=0
+  column here -- 2397 of its 2425 chases, the 28 lost being those
+  needing more than five bits of `imma`.
+* The ten free bits are split evenly because the corpus says so, not
+  for symmetry.  base-load-chain has already absorbed the whole imma=0
+  row, so what is left to catch is diagonal mass, and it is spread:
+  measured unions are 5+5 10823, 6+4 10541, 4+6 10459, 7+3 9705,
+  3+7 9802.  Eleven bits (5+6) reaches 10977 and costs an opcode
+  doubling for 154 pairs.
+* `rs1a` = sp is what makes this frame necessary rather than a
+  rounding error.  An sp-based chase -- a pointer read out of a stack
+  slot, then indexed -- is 58% both-offsets-nonzero and 1% B-only,
+  against 20% and 60% for a non-sp chase.  The slot displacement is an
+  A offset by construction.
 
 ## li-branch-chain
 

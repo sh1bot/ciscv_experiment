@@ -244,13 +244,14 @@ not the frame.  Do not cut it on pairing-rate evidence.
   to delete, since rule identity never changes the schedule; `excl > 0` is an
   estimate of the deletion cost, not a bound (greedy scheduling is not
   monotone) — the true cost needs a leave-one-out re-run per frame.
-- `CHAINS.md` — the `deref-load-chain` / `base-load-chain` split (they shared
-  one op-select with nothing selecting between the rows, so the offset in the
-  word could not be attributed to a load) and the offset-width sweep behind it,
-  raw output in `chain-width-sweep.txt`.  Demand saturates at 9 bits; 11 and 12
-  buy zero pairs for a doubled block.  The offset sits on the SECOND load 71%
-  of the time, and `deref-load-chain` needs only six bits to cover 99.8% of its
-  population.
+- `CHAINS.md` — the pointer-chase frames, redesigned.  `base-load-chain`
+  (`lx tmp, 0(rs1a)`; `load rdb, immb10(tmp)`) and `base-load-off-chain`
+  (both loads offset, ten bits split 5+5).  The A slot spends ONE opcode:
+  A's loaded value is B's base address, and it is `lw`/`ld` in 11583 of 11583
+  measured chains.  10833 pairs over 14 codepoints where the old pair took
+  8484 over 98.  Raw output in `chain-imm-grid.txt` (joint A x B demand, with
+  the offset conditions removed so the 25% off-axis population is visible) and
+  `chain-width-sweep.txt` (the 5+5 split, a clean single peak).
 - `scores.txt`, `baseline.txt`, `scheduler-runs.txt` — raw outputs behind the
   tables.  HISTORICAL: all three predate the jalr decode fix and the frame
   additions since; `scores.txt` is superseded by the table at the top of this

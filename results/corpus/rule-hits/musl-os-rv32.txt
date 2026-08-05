@@ -1,19 +1,19 @@
 # musl-os-rv32 (RV32)
 # --- file totals ---
-#   instructions: 109844  packets: 84384  pairs: 25460  solos: 58924
-#   pair rate:    30.2%  (50920/109844 instructions paired)
+#   instructions: 109844  packets: 84369  pairs: 25475  solos: 58894
+#   pair rate:    30.2%  (50950/109844 instructions paired)
 #   RVC-eligible: 50.9%  (55935/109844 instructions)
 #   nops: 36 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 2201
 #     alu-alu-chain: 1255
-#     load-alu-chain: 516
+#     load-alu-chain: 514
 #     addi-store-chain: 112
 #     alu-store-chain: 303
 #     load-sp-branch-pair: 131
-#     load-base-branch-pair: 626
-#     deref-load-chain: 28
-#     base-load-chain: 13
+#     load-base-branch-pair: 625
+#     base-load-chain: 19
+#     base-load-off-chain: 38
 #     mem-sp-pair: 8901
 #     mem-base-pair: 1429
 #     load-store-chain: 227
@@ -21,7 +21,7 @@
 #     load-call-chain: 36
 #     macro-op-pair: 32
 #     post-inc-pair: 670
-#     dual-setup-pair: 2980
+#     dual-setup-pair: 2982
 #     li-branch-chain: 690
 #     inc-branch-pair: 162
 #     bit-test-branch-chain: 216
