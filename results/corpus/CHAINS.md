@@ -7,10 +7,10 @@ and `chain-width-sweep.txt`.
 
 The two frames are now
 
-    load0-load10-chain      lx tmp, 0(rs1a)        ; load rdb, k*immb(tmp)
-    load5-load5-chain  lx tmp, k*imma(rs1a)   ; load rdb, k*immb(tmp)
+    load0-load10-chain   lx tmp, 0(rs1a)       ; load rdb, k*immb(tmp)
+    load5-load5-chain    lx tmp, k*imma(rs1a)  ; load rdb, k*immb(tmp)
 
-replacing an earlier `deref-load-chain` / `load0-load10-chain` pair, which in turn
+replacing an earlier `deref-load-chain` / `base-load-chain` pair, which in turn
 replaced a single frame that drew both of their rows over ONE op-select with
 nothing selecting between them — so the offset in the word could not be
 attributed to a load at all.
@@ -63,7 +63,7 @@ That is why one frame pinning `imma` to zero cannot be the whole story.
 
 | | before | after |
 |---|---|---|
-| `load0-load10-chain` | 6017 hits, 49 cp | **6794 hits, 7 cp** |
+| `load0-load10-chain` (was `base-load-chain`) | 6017 hits, 49 cp | **6794 hits, 7 cp** |
 | `load5-load5-chain` (was `deref-load-chain`) | 2467 hits, 49 cp | **4039 hits, 7 cp** |
 | both | 8484 over 98 cp | **10833 over 14 cp** |
 | excl/cp | 122.7 / 34.2 | **969.7 / 574.3** |
