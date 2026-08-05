@@ -389,14 +389,23 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs1a   │g│immb[4:0]│  rbase  │ fn3 │imma[4:0]│ opcode5 │1 0│
 
- * `immb` is width-scaled and unsigned; `imma` is signed. The stored
-   value is the chain temporary and is not encoded.
- * SIX BITS EACH IS PAID FOR, measured 2026-08-04. The row draws five, so
-   6+6 costs 16 codepoints against 4 -- and narrowing to 5+5 loses 318
-   pairs across five corpora: sqlite-rv32 -140, sqlite-rv64 -134, cpp-
-   rv64 -30, cpp-rv32 -9, musl-os-rv32 -5. That is 26 pairs per codepoint
-   recovered, well above what the spare namespace is worth, so the width
-   stays.
+ * `immb` is width-scaled and unsigned; `imma` is signed -- and that
+   asymmetry is the frame's whole shape. A memory offset carries an
+   access width, so five bits of `immb` reach 4x or 8x further; an `addi`
+   addend is pointer arithmetic and carries none, so its bits are bytes.
+   `load5-load5-chain` gets a symmetric split because BOTH its immediates
+   are scaled offsets; this frame cannot, and scaling A by the store's k
+   would not help -- only 29% of the addends are aligned to their own
+   store's width, and for `sw` it is 2 of 264. The stored value is the
+   chain temporary and is not encoded.
+ * THE WIDTH BELONGS TO B, measured 2026-08-04. The row draws five bits
+   per column, so a sixth costs a doubling. Over 412 scheduled pairs on
+   the two sqlite corpora: A's addend fits FIVE bits 98% of the time and
+   two bits 96% of the time, while B's scaled offset fits five only 33%
+   of the time and six 100%. So A was paying 8 codepoints for the 2% that
+   need a sixth bit. Dropped to 5+6: 16 codepoints to 8, at a cost of 5
+   pairs on sqlite-rv32 and 4 on sqlite-rv64. Narrowing B too (5+5, 4cp)
+   costs a further 135 and 130 -- that bit is real.
  * This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
    cpp-rv32. A cpp-only reading makes it look like the worst frame in the
    encoding; it is not.
