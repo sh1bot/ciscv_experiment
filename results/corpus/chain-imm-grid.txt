@@ -1,0 +1,90 @@
+# Joint (A-offset, B-offset) demand over every chain the pairer can
+# form, with the offset conditions of the two chain frames removed.
+# Cells are pair counts. `neg`/`unal` are offsets no unsigned
+# width-scaled field can hold, whatever its width.
+
+=== RV32 ===  (4388 chains)
+        B offset bits ->
+  A         neg   unal      0      1      2      3      4      5      6      7      8      9     10      row
+  ----------------------------------------------------------------------------------------------------------
+  neg         .      .     40      .      4      4     12      2      1      .      .      .      .       63
+  unal        .      .      .      .      .      1      .      .      .      .      .      .      .        1
+  0          10      .    326    397    433    400    395    378     68    316     18      .      .     2741
+  1           1      .     80     30     20     18     21      7      .      .      .      .      .      177
+  2           2      1    166     28     32     87    110     72      4      1      .      1      .      504
+  3           8      2    138     29     41     24     37      7     26      3      .      .      .      315
+  4           3      1    127     18      8     35     46     31      5     12      5      1      3      295
+  5           1      .     78      7      6     17     34     34     16      5      .      .      .      198
+  6           1      .     11      8      5      2      .      2      2      .      .      .      .       31
+  7           .      .      2      .      3      3      4     18     27      4      .      .      .       61
+  8           1      .      .      .      .      .      .      .      .      .      .      .      .        1
+  9           .      .      1      .      .      .      .      .      .      .      .      .      .        1
+  ----------------------------------------------------------------------------------------------------------
+  col        27      4    969    517    552    591    659    551    149    341     23      2      3     4388
+
+  on the A axis (B offset zero) :     929   21.2%   <- deref-load-chain's population
+  on the B axis (A offset zero) :    2731   62.2%   <- base-load-chain's population
+    of which both offsets zero  :     326    7.4%   <- counted in both axes above
+  OFF the axes (both nonzero)   :     959   21.9%   <- encodable by NEITHER frame
+  structurally unencodable      :      95    2.2%   <- negative or unaligned offset
+
+RV32 — rs1a = sp?
+  rs1a == sp:     524 chains   A-only    194  B-only      3  both    303   >10 bits: A 0, B 0
+  rs1a != sp:    3864 chains   A-only    409  B-only   2402  both    656   >10 bits: A 0, B 0
+
+=== RV64 ===  (7195 chains)
+        B offset bits ->
+  A         neg   unal      0      1      2      3      4      5      6      7      8      9     11      row
+  ----------------------------------------------------------------------------------------------------------
+  neg         .      .     36      2      3      6      .     16      .      1      .      .      .       64
+  unal        .      .      1      .      .      .      .      .      .      .      .      .      .        1
+  0          10      .    450    395    640    588    517    398    284    692     98      .      .     4072
+  1           4      .    160     70     31     35     23     36     12      4      .      4      .      379
+  2           6      8    244     58     69    140    390     33     20     22      .      .      .      990
+  3          11      4    343     93     66     48     42     45     16     28      .      .      .      696
+  4          23      2    204     24     15     69     49     61     23     23      8      9      3      513
+  5           6      1     81     33     35     21     81     43     32     20      5      .      .      358
+  6           .      .     13      5      5     27     11     24     25      4      4      .      .      118
+  7           1      .      .      .      .      .      1      1      .      .      .      .      .        3
+  8           .      .      1      .      .      .      .      .      .      .      .      .      .        1
+  ----------------------------------------------------------------------------------------------------------
+  col        61     15   1533    680    864    934   1114    657    412    794    115     13      3     7195
+
+  on the A axis (B offset zero) :    1496   20.8%   <- deref-load-chain's population
+  on the B axis (A offset zero) :    4062   56.5%   <- base-load-chain's population
+    of which both offsets zero  :     450    6.3%   <- counted in both axes above
+  OFF the axes (both nonzero)   :    1946   27.0%   <- encodable by NEITHER frame
+  structurally unencodable      :     141    2.0%   <- negative or unaligned offset
+
+RV64 — rs1a = sp?
+  rs1a == sp:    1140 chains   A-only    380  B-only     14  both    658   >10 bits: A 0, B 3
+  rs1a != sp:    6055 chains   A-only    666  B-only   3598  both   1288   >10 bits: A 0, B 0
+
+=== RV32 + RV64 ===  (11583 chains)
+        B offset bits ->
+  A         neg   unal      0      1      2      3      4      5      6      7      8      9     10     11      row
+  -----------------------------------------------------------------------------------------------------------------
+  neg         .      .     76      2      7     10     12     18      1      1      .      .      .      .      127
+  unal        .      .      1      .      .      1      .      .      .      .      .      .      .      .        2
+  0          20      .    776    792   1073    988    912    776    352   1008    116      .      .      .     6813
+  1           5      .    240    100     51     53     44     43     12      4      .      4      .      .      556
+  2           8      9    410     86    101    227    500    105     24     23      .      1      .      .     1494
+  3          19      6    481    122    107     72     79     52     42     31      .      .      .      .     1011
+  4          26      3    331     42     23    104     95     92     28     35     13     10      3      3      808
+  5           7      1    159     40     41     38    115     77     48     25      5      .      .      .      556
+  6           1      .     24     13     10     29     11     26     27      4      4      .      .      .      149
+  7           1      .      2      .      3      3      5     19     27      4      .      .      .      .       64
+  8           1      .      1      .      .      .      .      .      .      .      .      .      .      .        2
+  9           .      .      1      .      .      .      .      .      .      .      .      .      .      .        1
+  -----------------------------------------------------------------------------------------------------------------
+  col        88     19   2502   1197   1416   1525   1773   1208    561   1135    138     15      3      3    11583
+
+  on the A axis (B offset zero) :    2425   20.9%   <- deref-load-chain's population
+  on the B axis (A offset zero) :    6793   58.6%   <- base-load-chain's population
+    of which both offsets zero  :     776    6.7%   <- counted in both axes above
+  OFF the axes (both nonzero)   :    2905   25.1%   <- encodable by NEITHER frame
+  structurally unencodable      :     236    2.0%   <- negative or unaligned offset
+
+RV32 + RV64 — rs1a = sp?
+  rs1a == sp:    1664 chains   A-only    574  B-only     17  both    961   >10 bits: A 0, B 3
+  rs1a != sp:    9919 chains   A-only   1075  B-only   6000  both   1944   >10 bits: A 0, B 0
