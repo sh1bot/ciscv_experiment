@@ -1,16 +1,36 @@
-# HISTORICAL: measured 2026-08-02; predates the 2026-08-04 parser corrections
-# and arg-call-pair. Live scores: results/corpus/README.md.
-corpus             insns   pairs  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
-------------------------------------------------------------------------------------------
-testcase0          21876    4105    17771     81.2%     81.6%    99.5%   102.2%        -87
-godot              90172   13243    76929     85.3%     76.3%   111.8%    62.0%      +8125
-musl-rv32         119026   27193    91833     77.2%     74.9%   103.0%    91.0%      +2678
-musl-rv64         102040   21641    80399     78.8%     72.7%   108.3%    77.8%      +6175
-sqlite-rv32       192768   44013   148755     77.2%     72.1%   107.0%    81.9%      +9757
-sqlite-rv64       189677   40852   148825     78.5%     72.1%   108.9%    77.1%     +12103
-cpp-rv32          420866   88706   332160     78.9%     71.1%   110.9%    73.0%     +32747
-cpp-rv64          411687   83454   328233     79.7%     71.4%   111.7%    70.8%     +34484
-musl-gcc-rv32     119956   25334    94622     78.9%     71.9%   109.7%    75.2%      +8342
-musl-gcc-rv64     103442   20347    83095     80.3%     72.9%   110.1%    72.7%      +7643
-------------------------------------------------------------------------------------------
-TOTAL to parity (8-corpus table)                                                   +105982
+corpus             insns   pairs  nops  packets  packet %  real RVC   vs RVC  P/(C/2)  to parity
+------------------------------------------------------------------------------------------------
+cpp-rv32          418345   92224  2521   326121     78.0%     71.0%   109.8%    75.9%     +29229
+cpp-rv64          409200   86930  2487   322270     78.8%     71.2%   110.6%    73.7%     +31008
+godot              90171   15965     1    74206     82.3%     76.3%   107.9%    74.7%      +5403
+musl-gcc-rv32     119919   25859    37    94060     78.4%     71.9%   109.1%    76.8%      +7817
+musl-gcc-rv64     103412   20456    30    82956     80.2%     72.9%   110.0%    73.1%      +7534
+musl-gccnoc-rv32 (no compressed instructions — skipped; see cross_parity)
+musl-gccnoc-rv64 (no compressed instructions — skipped; see cross_parity)
+musl-norvc-rv32  (no compressed instructions — skipped; see cross_parity)
+musl-norvc-rv64  (no compressed instructions — skipped; see cross_parity)
+musl-os-rv32      109844   25475    36    84369     76.8%     74.7%   102.8%    91.6%      +2331
+musl-os-rv64       93259   19963    30    73296     78.6%     72.5%   108.4%    77.8%      +5703
+musl-osnoc-rv32  (no compressed instructions — skipped; see cross_parity)
+musl-osnoc-rv64  (no compressed instructions — skipped; see cross_parity)
+musl-rv32         118990   27480    36    91510     76.9%     74.9%   102.7%    92.0%      +2391
+musl-rv64         102010   21876    30    80134     78.6%     72.7%   108.0%    78.6%      +5940
+sqlite-gcc-rv64   167354   33430   156   133924     80.0%     71.2%   112.4%    69.3%     +14818
+sqlite-rv32       192688   45001    80   147687     76.6%     72.1%   106.3%    83.7%      +8769
+sqlite-rv64       189602   41972    75   147630     77.9%     72.1%   108.0%    79.3%     +10983
+sqlitem-noc-rv64 (no compressed instructions — skipped; see cross_parity)
+sqlitem-rv64      201823   44465    82   157358     78.0%     71.8%   108.6%    78.1%     +12477
+testcase0          21875    4159     1    17716     81.0%     81.6%    99.2%   103.5%       -141
+------------------------------------------------------------------------------------------------
+TOTAL to parity                                                                    +144262
+
+`nops` are excluded from the counts on both sides: what they are for is out of
+scope for this experiment.
+
+packet % and real RVC are size against a 4-byte-per-instruction baseline;
+vs RVC under 100% means packets are smaller. P/(C/2) is progress toward the
+break-even point where pairs exceed half the compressed-instruction count.
+
+'to parity' is that same gap expressed in PAIRS: how many more this corpus
+needs before packets beat real RVC. Negative means already past, by that
+margin. It is the number to watch — every other column is a ratio.
