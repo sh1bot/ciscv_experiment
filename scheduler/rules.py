@@ -16,6 +16,7 @@ from scheduler.imm_contracts import width_of as _yaml_width
 from scheduler.imm_contracts import narrow_field_of as _yaml_narrow_field
 from scheduler.imm_contracts import rd_column_slots as _rd_slots
 from scheduler.imm_contracts import link_regs_for as _yaml_link_regs
+from scheduler.imm_contracts import link_regs_closed as _yaml_link_closed
 from scheduler.imm_contracts import accepts_pcrel_lo as _yaml_pcrel_lo
 
 
@@ -1566,7 +1567,9 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # *-branch rules apply (see CLAUDE.md); returns and register-indirect jumps need
 # no offset field and are always encodable.
 
-_SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
+# `jal` is gone: `j` already declares rd=x0, bare `jal` declared nothing,
+# and the corpus never took a linking `jal` through these frames.
+_SMALL_JUMP_MN = frozenset({"ret", "jalr", "j"})
 _MVLOAD_JUMP_A_MN = frozenset({"addi", "lbu", "lw", "ld"})
 _MVLOAD_JUMP_LI_BITS = _w("setup-jump-pair", "a", "li")
 _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
@@ -2126,8 +2129,34 @@ def _guard_sentinel(rule: "PairingRule") -> None:
     rule.check = wraps(inner)(checked) if inner else checked
 
 
+# A slot whose ops ALL hard-code their destination has codepoints for exactly
+# those spellings, so anything else is unencodable and must not be scheduled.
+# The closed test is the whole point: `link_regs_for` is a UNION of what
+# individual ops pin, and reading it as a whitelist on an OPEN slot -- one
+# still listing a bare `jalr` -- rejects every linking transfer the frame does
+# encode.  That mistake was made and measured here at 7716 pairs before the
+# jump frames were split into `jalr_link_ra` / `jr_any`, which is what closed
+# them.
+def _guard_link_regs(rule: "PairingRule") -> None:
+    decls = {slot: frozenset(_yaml_link_regs(rule.name, slot))
+             for slot in ("a", "b")
+             if _yaml_link_regs(rule.name, slot)
+             and _yaml_link_closed(rule.name, slot)}
+    if not decls:
+        return
+    inner = rule.check
+    def checked(a: Instruction, b: Instruction):
+        for slot, allowed in decls.items():
+            insn = a if slot == "a" else b
+            if insn.rd is not None and insn.rd not in allowed:
+                raise NotPair(f"{slot}-rd-not-declared")
+        return inner(a, b) if inner else None
+    rule.check = wraps(inner)(checked) if inner else checked
+
+
 for _rule in RULES:
     _guard_sentinel(_rule)
+    _guard_link_regs(_rule)
 
 A_SLOT_DISQUALIFIERS: list[str] = [
     "is_unknown",

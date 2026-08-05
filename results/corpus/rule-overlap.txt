@@ -18,9 +18,9 @@ czero-or-chain                       2    4269    4442    4269   2134.5     173
 epilogue-pair                        2    4070    4070    3019   1509.5       0
 post-inc-pair                        4    5752    5752    5752   1438.0       0
 mem-base-pair                       16   14166   57570   14166    885.4   43404
-setup-jump-pair                     15   11578   19304   11573    771.5    7726
 load-base-branch-pair               14   10712   11945   10712    765.1    1233
 load-call-chain                      4    2784    2784    2713    678.2       0
+setup-jump-pair                     20   11578   19304   11573    578.6    7726
 load0-load10-chain                   7    2730    2730    2726    389.4       0
 bit-test-branch-chain               24    6794    6794    6794    283.1       0
 addi-store-chain                     4    1754    1754     967    241.8       0
@@ -41,7 +41,7 @@ rsd-alu-pair                       256   18008   18008   13340     52.1       0
 arg-call-pair                       16     583     603     583     36.4      20
 addi-store-off-chain                 8     229    2313     229     28.6    2084
 ------------------------------------------------------------------------------
-TOTAL                              795  224129          163707    205.9
+TOTAL                              800  224129          163707    204.6
 
 how many frames could encode each pair:
   1 frame :   163707   73.0%   <- only this frame can
@@ -74,8 +74,8 @@ dual-setup-pair                     11   48136   53967   48136   4376.0    5831
 czero-or-chain                       2    4526    4725    4526   2263.0     199
 post-inc-pair                        4    8457    8457    8457   2114.2       0
 epilogue-pair                        2    4823    4823    4146   2073.0       0
-setup-jump-pair                     15   19614   32225   19606   1307.1   12611
 load-base-branch-pair               14   18151   20969   18151   1296.5    2818
+setup-jump-pair                     20   19614   32225   19606    980.3   12611
 mem-sp-pair                          2   54514   54514    1840    920.0       0
 mem-base-pair                       16   12444   65132   12444    777.8   52688
 load-call-chain                      4    3027    3027    2925    731.2       0
@@ -99,7 +99,7 @@ alu-alu-chain                      128    8512    9236    8512     66.5     724
 addi-store-off-chain                 8     426    1898     426     53.2    1472
 macro-op-pair                        9      93      93      93     10.3       0
 ------------------------------------------------------------------------------
-TOTAL                              795  291317          213853    269.0
+TOTAL                              800  291317          213853    267.3
 
 how many frames could encode each pair:
   1 frame :   213853   73.4%   <- only this frame can
@@ -133,9 +133,9 @@ mem-sp-pair                          2  108512  108512   12445   6222.5       0
 czero-or-chain                       2    8795    9167    8795   4397.5     372
 epilogue-pair                        2    8893    8893    7165   3582.5       0
 post-inc-pair                        4   14209   14209   14209   3552.2       0
-setup-jump-pair                     15   31192   51529   31179   2078.6   20337
 load-base-branch-pair               14   28863   32914   28863   2061.6    4051
 mem-base-pair                       16   26610  122702   26610   1663.1   96092
+setup-jump-pair                     20   31192   51529   31179   1559.0   20337
 load-call-chain                      4    5811    5811    5638   1409.5       0
 load0-load10-chain                   7    6791    6791    6785    969.3       0
 bit-test-branch-chain               24   14512   14512   14512    604.7       0
@@ -157,7 +157,7 @@ rsd-alu-pair                       256   43320   43320   31898    124.6       0
 addi-store-off-chain                 8     655    4211     655     81.9    3556
 macro-op-pair                        9     725     725     725     80.6       0
 ------------------------------------------------------------------------------
-TOTAL                              795  515446          377560    474.9
+TOTAL                              800  515446          377560    471.9
 
 how many frames could encode each pair:
   1 frame :   377560   73.2%   <- only this frame can

@@ -14,9 +14,9 @@ czero-or-chain                         4269     2    2134.5    1.9%
 epilogue-pair                          4070     2    2035.0    1.8%
 post-inc-pair                          5752     4    1438.0    2.6%
 mem-base-pair                         14166    16     885.4    6.3%
-setup-jump-pair                       11578    15     771.9    5.2%
 load-base-branch-pair                 10712    14     765.1    4.8%
 load-call-chain                        2784     4     696.0    1.2%
+setup-jump-pair                       11578    20     578.9    5.2%
 addi-store-chain                       1754     4     438.5    0.8%
 load0-load10-chain                     2730     7     390.0    1.2%
 bit-test-branch-chain                  6794    24     283.1    3.0%
@@ -37,7 +37,7 @@ alu-alu-chain                          7792   128      60.9    3.5%
 arg-call-pair                           583    16      36.4    0.3%
 addi-store-off-chain                    229     8      28.6    0.1%
 -------------------------------------------------------------------
-TOTAL                                224129   795     281.9
+TOTAL                                224129   800     280.2
 
 RV64  (godot, musl-rv64, musl-os-rv64, musl-gcc-rv64, sqlite-rv64, sqlitem-rv64, sqlite-gcc-rv64, cpp-rv64)
 frame                                  hits    cp   hits/cp   share
@@ -48,8 +48,8 @@ dual-setup-pair                       48136    11    4376.0   16.5%
 epilogue-pair                          4823     2    2411.5    1.7%
 czero-or-chain                         4526     2    2263.0    1.6%
 post-inc-pair                          8457     4    2114.2    2.9%
-setup-jump-pair                       19614    15    1307.6    6.7%
 load-base-branch-pair                 18151    14    1296.5    6.2%
+setup-jump-pair                       19614    20     980.7    6.7%
 mem-base-pair                         12444    16     777.8    4.3%
 load-call-chain                        3027     4     756.8    1.0%
 load-sp-branch-pair                    3693     6     615.5    1.3%
@@ -72,7 +72,7 @@ alu-alu-chain                          8512   128      66.5    2.9%
 addi-store-off-chain                    426     8      53.2    0.1%
 macro-op-pair                            93     9      10.3    0.0%
 -------------------------------------------------------------------
-TOTAL                                291317   795     366.4
+TOTAL                                291317   800     364.1
 
 RV32 + RV64  (testcase0, musl-rv32, musl-os-rv32, musl-gcc-rv32, sqlite-rv32, cpp-rv32, godot, musl-rv64, musl-os-rv64, musl-gcc-rv64, sqlite-rv64, sqlitem-rv64, sqlite-gcc-rv64, cpp-rv64)
 frame                                  hits    cp   hits/cp   share
@@ -83,9 +83,9 @@ dual-setup-pair                       80174    11    7288.5   15.6%
 epilogue-pair                          8893     2    4446.5    1.7%
 czero-or-chain                         8795     2    4397.5    1.7%
 post-inc-pair                         14209     4    3552.2    2.8%
-setup-jump-pair                       31192    15    2079.5    6.1%
 load-base-branch-pair                 28863    14    2061.6    5.6%
 mem-base-pair                         26610    16    1663.1    5.2%
+setup-jump-pair                       31192    20    1559.6    6.1%
 load-call-chain                        5811     4    1452.8    1.1%
 load0-load10-chain                     6791     7     970.1    1.3%
 addi-store-chain                       3635     4     908.8    0.7%
@@ -107,7 +107,7 @@ alu-alu-chain                         16304   128     127.4    3.2%
 addi-store-off-chain                    655     8      81.9    0.1%
 macro-op-pair                           725     9      80.6    0.1%
 -------------------------------------------------------------------
-TOTAL                                515446   795     648.4
+TOTAL                                515446   800     644.3
 
 corpus sizes (insns / packets / pairs):
   testcase0            21875    17682    4193

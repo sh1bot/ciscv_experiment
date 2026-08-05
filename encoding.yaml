@@ -131,6 +131,17 @@ pseudo_ops:
     base: jalr
     encode: {rd: x6}                     # jalr t1, rs -- a linking JUMP
     match:  [{op: jalr, rd: x6}]
+  # The NON-linking spelling, rs1 free -- `jr rs`.  jr_t1 and ret pin their
+  # base register; this one does not, so it is the partner jalr_link_ra needed.
+  # Without it a frame wanting both the linking and non-linking indirect
+  # transfer had only bare `jalr`, which declares no rd at all: one codepoint
+  # covering two behaviours, in rows whose rd column is the sentinel and so
+  # has no field to tell them apart.
+  jr_any:
+    base: jalr
+    encode: {rd: x0}                     # jr imm(rs) -- an indirect JUMP
+    match:  [{op: jalr, rd: x0}]
+    after: ret                           # ret and jr_t1 are the pinned-base
   ret:
     base: jalr
     encode: {rd: x0, rs1: x1, imm: 0}
@@ -1353,7 +1364,13 @@ doc:
       templates:
         - ["addi    sp, 16*imm", "jr      rs1b"]
       ops:
-        - {a: [addi], b: [jalr, ret]}
+        # NO linking spelling.  An epilogue tears the frame down and transfers
+        # away; a `jalr ra` here would return into the frame it just freed, so
+        # a register tail call is `jr`, never a call.  The corpus agrees --
+        # 8490 `ret` and 403 `jr` through x5/x6/x14/x15, and not one linking
+        # transfer -- so declaring jalr_link_ra would buy nothing and cost the
+        # frame its 2-codepoint block.
+        - {a: [addi], b: [jr_any, ret]}
       rows:
         - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
       notes:
@@ -1375,7 +1392,7 @@ doc:
         - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
         - ["li     rsda, imma", "jr/jalr rs1b"]
       ops:
-        - {a: *rsd_alu_j, b: [ret, jalr, j, jal]}
+        - {a: *rsd_alu_j, b: [ret, jalr_link_ra, jr_any, j]}
       rows:
         - {funct5: rs1b, rs2: rs2a, rs1: rsda, rd: "unused"}
         - {funct5: rs1b, rs2: "imma[4:0]", rs1: rsda, rd: "unused"}
@@ -1387,7 +1404,7 @@ doc:
       # that B's jump does not read.  That independence is what costs the room
       # -- rda, rs1a and rs1b must all be fielded, so the load row is full at
       # 20 bits and its offset can never exceed five.
-      budget: 16
+      budget: 32
       level: 2
       templates:
         - ["mv      rda, rs1a", "jr      rs1b"]
@@ -1397,8 +1414,8 @@ doc:
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
       ops:
-        - {a: [mv, lbu, lw, ld], b: [ret, jalr]}
-        - {a: [li], b: [ret, jalr]}
+        - {a: [mv, lbu, lw, ld], b: [ret, jalr_link_ra, jr_any]}
+        - {a: [li], b: [ret, jalr_link_ra, jr_any]}
         - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
         - {a: [li], b: [j]}
       rows:

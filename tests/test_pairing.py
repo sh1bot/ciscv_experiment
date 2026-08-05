@@ -1662,3 +1662,49 @@ class TestMacroOpCarry:
         b = make_insn("add", rd=10, rs1=12, rs2=13)
         b.live_out = {10}
         assert can_pair(a, b) is not None
+
+
+class TestJumpFrameLinkDeclarations:
+    """The jump frames declare which link register their B slot writes.
+
+    Their rows draw `rd: unused` -- the sentinel that selects them -- so the B
+    destination is NOT encoded in a field; the only thing that can say whether
+    ra is written is the op-select.  A bare `jalr` codepoint declares nothing,
+    so one codepoint covered both the linking and non-linking transfer with no
+    bit to tell them apart.  Split into `jalr_link_ra` (rd=x1) and `jr_any`
+    (rd=x0), the choice is a codepoint and the frames are unambiguous.
+    """
+
+    def _accepts(self, name, a, b):
+        from scheduler.pairing import find_b_partners
+        return any(r.name == name for _x, r in find_b_partners(a, [b]))
+
+    def test_both_transfer_kinds_are_declared(self):
+        from scheduler.imm_contracts import link_regs_for, link_regs_closed
+        for frame in ("arith-jump-pair", "setup-jump-pair"):
+            assert sorted(link_regs_for(frame, "b")) == [0, 1], frame
+            assert link_regs_closed(frame, "b"), frame
+
+    def test_linking_and_non_linking_both_pair(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=4)
+        for rd in (0, 1):
+            b = make_insn("jalr", rd=rd, rs1=15, imm=0)
+            assert self._accepts("arith-jump-pair", a, b), f"rd=x{rd}"
+
+    def test_undeclared_link_register_does_not_pair(self):
+        """x6 is load-call-chain's second link register, not this frame's."""
+        a = make_insn("addi", rd=10, rs1=10, imm=4)
+        b = make_insn("jalr", rd=6, rs1=15, imm=0)
+        assert not self._accepts("arith-jump-pair", a, b)
+
+    def test_epilogue_never_links(self):
+        """An epilogue frees its frame and transfers away; linking would return
+        into the frame it just destroyed, so a register tail call is `jr`.  The
+        corpus has 8490 ret and 403 jr here and not one linking transfer."""
+        from scheduler.imm_contracts import link_regs_for
+        assert sorted(link_regs_for("epilogue-pair", "b")) == [0]
+        a = make_insn("addi", rd=2, rs1=2, imm=16)
+        assert self._accepts("epilogue-pair", a,
+                             make_insn("jalr", rd=0, rs1=15, imm=0))
+        assert not self._accepts("epilogue-pair", a,
+                                 make_insn("jalr", rd=1, rs1=15, imm=0))
