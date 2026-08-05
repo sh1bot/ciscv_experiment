@@ -151,15 +151,25 @@ def test_width_naming_frames_match_their_declared_widths():
     assert checked >= 2, f"expected the two chain frames, found {checked}"
 
 
-def test_every_register_operand_gets_a_full_five_bit_field():
-    """No frame draws a register in a field narrower than five bits.
+# Registers a frame deliberately draws in fewer than five bits, with the class
+# the rule must restrict them to.  A narrow register field is legitimate, but it
+# is a CONSTRAINT the rule owes: arg-call-pair splits its rd column into two
+# bits of imma[6:5] and three of rda, so rda is a0-a7 and every op sharing that
+# row must say so.  One did not (`addi_rsd`), and took 53 pairs it cannot
+# encode.  Anything not listed here must get the full five bits.
+NARROW_REGISTER_FIELDS = {
+    ("arg-call-pair", "rda"): 3,       # a0-a7, enforced by _ARG_REGS
+}
 
-    Every register operand encodes as a full 5-bit field, x0..x31, so `rules.py`
-    carries no register-class check at all and none of its frames can overclaim
-    by accepting a register its row cannot hold.  That is a property of the
-    LAYOUT, not of the rules, and nothing else asserts it: draw a register into
-    a narrower field and every pairing rule would silently start accepting
-    pairs the encoding cannot express.  Hence this gate.
+
+def test_register_fields_are_five_bits_or_declared_narrow():
+    """Every register operand gets a full 5-bit field, or is declared narrow.
+
+    Registers are normally x0..x31 and no rule needs a class check.  Where a row
+    SPLITS a column -- packing an immediate fragment beside the register -- the
+    register gets fewer bits and the rule owes a matching restriction, which no
+    other check enforces.  An earlier version of this test skipped split cells
+    outright and so missed the only narrow field in the tree.
     """
     import yaml as _yaml
     spec = _yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
@@ -175,11 +185,24 @@ def test_every_register_operand_gets_a_full_five_bit_field():
             if not isinstance(row, dict):
                 continue
             for col, val in row.items():
-                v = str(val)
-                if v.startswith("imm") or v == "unused" or "[" in v:
-                    continue          # immediate, sentinel, or an explicit split
-                if width.get(col, 5) < 5:
-                    bad.append(f"{frame['name']}: {v} in {col} "
-                               f"({width[col]} bits)")
-    assert not bad, ("register operands in narrow fields — the register-class "
-                     "clamp is no longer dead code:\n  " + "\n  ".join(bad))
+                col_bits = width.get(col, 5)
+                # A split cell is a list of {bits, value} parts, most
+                # significant first; each part gets exactly its own `bits`.
+                parts = (val if isinstance(val, list)
+                         else [{"bits": col_bits, "value": val}])
+                for part in parts:
+                    v = str(part.get("value", part))
+                    got = part.get("bits", col_bits)
+                    if v.startswith("imm") or v == "unused":
+                        continue
+                    if got >= 5:
+                        continue
+                    declared = NARROW_REGISTER_FIELDS.get((frame["name"], v))
+                    if declared == got:
+                        continue
+                    bad.append(f"{frame['name']}: {v} in {col} gets {got} bits"
+                               + ("" if declared is None else
+                                  f" (declared {declared})"))
+    assert not bad, ("register operands in fields narrower than five bits, not "
+                     "declared in NARROW_REGISTER_FIELDS — the owning rule must "
+                     "restrict them:\n  " + "\n  ".join(bad))

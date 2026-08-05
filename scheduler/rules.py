@@ -1735,7 +1735,14 @@ def _arg_call_a_ok(a: Instruction) -> bool:
         # so the codepoint is spent on 512 instead of wasting it on 0
         return rd in _ARG_REGS and _fits_u(i - 4, _ARG_CALL_SPN_BITS, 4)
     if m in ("addi", "addiw") and rd == rs1 and rd not in (0, None):
-        return _fits_s(i, _ARG_CALL_RSD_BITS)
+        # Row 2's rd column is SPLIT -- two bits of imma[6:5] and only three of
+        # rda -- so this destination is the 3-bit class, exactly as the li /
+        # addi4spn / load rows sharing that row already require.  This branch
+        # was the one op on that row not saying so.  Latent, not live: all 49
+        # addi_rsd pairs in the corpus already land in a0-a7, so adding the
+        # restriction rejects nothing.  Row 1 (mv) keeps the full 5-bit column
+        # and is deliberately unrestricted.
+        return rd in _ARG_REGS and _fits_s(i, _ARG_CALL_RSD_BITS)
     if m in ("lw", "ld") and rs1 == 2:
         return rd in _ARG_REGS and _fits_u(i, _ARG_CALL_LOAD_BITS, MEM_SCALE[m])
     if m in ("sw", "sd") and rs1 == 2:
