@@ -391,6 +391,15 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
  * `immb` is width-scaled and unsigned; `imma` is signed. The stored
    value is the chain temporary and is not encoded.
+ * SIX BITS EACH IS PAID FOR, measured 2026-08-04. The row draws five, so
+   6+6 costs 16 codepoints against 4 -- and narrowing to 5+5 loses 318
+   pairs across five corpora: sqlite-rv32 -140, sqlite-rv64 -134, cpp-
+   rv64 -30, cpp-rv32 -9, musl-os-rv32 -5. That is 26 pairs per codepoint
+   recovered, well above what the spare namespace is worth, so the width
+   stays.
+ * This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
+   cpp-rv32. A cpp-only reading makes it look like the worst frame in the
+   encoding; it is not.
 
 ## load-call-chain
 
