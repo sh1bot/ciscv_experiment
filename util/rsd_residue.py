@@ -63,7 +63,7 @@ TARGET = "rsd-alu-pair"
 # widening the OP SET and widening the IMMEDIATES are different decisions with
 # different costs, and "broad-last - narrow-last" alone conflates them.
 MODES = ("narrow-first", "narrow-last", "wideimm-last", "wideops-last",
-         "broad-last")
+         "broad-last", "imm5-last", "imm6-last", "imm7-last")
 
 
 def _is_alu():
@@ -76,6 +76,36 @@ def _is_alu():
     choosing ALU opcodes against a population that was partly loads."""
     from analysis.alu_pair_cooccurrence import is_alu
     return is_alu
+
+
+def _imm_fits(insn, bits):
+    """Does this op's immediate fit a uniform `bits`-wide field?
+
+    Signedness comes from `analysis.imm_traits`, the project's single source of
+    truth for immediate semantics by subform -- arithmetic/compare/li signed,
+    shift amounts unsigned -- rather than being re-decided here.  A
+    register-register op has no immediate and always fits.
+    """
+    from analysis.encoding_budget import subform
+    from analysis.imm_traits import signed
+    if insn.imm is None:
+        return True
+    sf = subform(insn)
+    if signed(sf):
+        return -(1 << (bits - 1)) <= insn.imm <= (1 << (bits - 1)) - 1
+    return 0 <= insn.imm <= (1 << bits) - 1
+
+
+def _order_free(a, b):
+    """Could these two be emitted in either order?
+
+    rsd-alu-pair packs two INDEPENDENT results, but nothing in the rule stops B
+    reading A's destination, so order is free only when neither reads the
+    other's.  Where it IS free the frame need not encode both orientations --
+    the A and B op sets can be chosen so that whichever orientation is
+    encodable is the one emitted.
+    """
+    return (a.rd not in b.uses_regs) and (b.rd not in a.uses_regs)
 
 
 def install(mode):
@@ -102,8 +132,12 @@ def install(mode):
 
     is_alu = _is_alu()
     wide_imm = mode in ("wideimm-last", "broad-last")
-    wide_ops = mode in ("wideops-last", "broad-last")
-    if mode in ("wideimm-last", "wideops-last", "broad-last"):
+    wide_ops = mode not in ("wideimm-last",)
+    # immN-last: broad ops, but a UNIFORM N-bit immediate instead of the
+    # per-subform contract.  This is the axis the unlimited-immediate residue
+    # could not price -- it counted pairs no 32-bit packet could hold.
+    imm_bits = int(mode[3]) if mode.startswith("imm") else None
+    if mode in ("wideimm-last", "wideops-last", "broad-last") or imm_bits:
 
         # Every structural gate the frame has.  The two immediate-range gates
         # are applied only when this mode keeps them, so dropping them is
@@ -122,7 +156,11 @@ def install(mode):
                 if (a.mnemonic not in rules._RSD_ALU_MN
                         or b.mnemonic not in rules._RSD_ALU_MN):
                     raise NotPair("outside-declared-op-set")
-            if not wide_imm:
+            if imm_bits is not None:
+                for i in (a, b):
+                    if not _imm_fits(i, imm_bits):
+                        raise NotPair("big-imm")
+            elif not wide_imm:
                 rules._imm_in_range(a)
                 rules._imm_in_range(b)
             return None
@@ -150,7 +188,8 @@ def chunk(args):
             continue
         for item in packets:
             if item[0] == "pair" and item[3] == TARGET:
-                counts[(subform(item[1]), subform(item[2]))] += 1
+                counts[(subform(item[1]), subform(item[2]),
+                        _order_free(item[1], item[2]))] += 1
     return counts
 
 
@@ -169,11 +208,11 @@ def measure(names, mode):
 def write_table(co, path_csv, path_ops):
     """Square matrix + op index, the format biclique_tiling.py reads."""
     import json
-    ops = sorted({o for pair in co for o in pair})
+    ops = sorted({o for k in co for o in k[:2]})
     idx = {o: i for i, o in enumerate(ops)}
     m = [[0] * len(ops) for _ in ops]
-    for (a, b), n in co.items():
-        m[idx[a]][idx[b]] = n
+    for (a, b, _free), n in co.items():
+        m[idx[a]][idx[b]] += n
     with open(path_csv, "w") as fh:
         for row in m:
             fh.write(",".join(str(v) for v in row) + "\n")
@@ -182,17 +221,93 @@ def write_table(co, path_csv, path_ops):
     return ops
 
 
+def coverage(pairs, A, B):
+    """Mass an A-set x B-set frame covers.
+
+    A forced pair needs its own orientation.  An order-free pair needs EITHER,
+    because the scheduler can emit whichever one the sets encode -- that is the
+    whole benefit of choosing A and B separately rather than symmetrically.
+    """
+    tot = 0
+    for (x, y, free), n in pairs.items():
+        if (x in A and y in B) or (free and y in A and x in B):
+            tot += n
+    return tot
+
+
+def optimise(pairs, na, nb, rounds=40):
+    """Best (A, B) op sets of sizes na, nb by alternating maximisation.
+
+    Alternating rather than exhaustive: choosing 16 of 83 ops for each side is
+    C(83,16)^2, so the sets are re-picked greedily against the other side until
+    they stop moving, from several starts to blunt the local optimum.
+    """
+    ops = sorted({o for k in pairs for o in k[:2]})
+    row = Counter()
+    col = Counter()
+    for (x, y, _f), n in pairs.items():
+        row[x] += n
+        col[y] += n
+
+    best = (0, (), ())
+    starts = [(set(o for o, _ in row.most_common(na)),
+               set(o for o, _ in col.most_common(nb))),
+              (set(o for o, _ in col.most_common(na)),
+               set(o for o, _ in row.most_common(nb)))]
+    for A, B in starts:
+        for _ in range(rounds):
+            # re-pick A against fixed B, by exact marginal contribution
+            gain = Counter()
+            for (x, y, free), n in pairs.items():
+                if y in B:
+                    gain[x] += n
+                elif free and x in B:
+                    gain[y] += n
+            newA = set(o for o, _ in gain.most_common(na))
+            gain = Counter()
+            for (x, y, free), n in pairs.items():
+                if x in newA:
+                    gain[y] += n
+                elif free and y in newA:
+                    gain[x] += n
+            newB = set(o for o, _ in gain.most_common(nb))
+            if (newA, newB) == (A, B):
+                break
+            A, B = newA, newB
+        c = coverage(pairs, A, B)
+        if c > best[0]:
+            best = (c, tuple(sorted(A)), tuple(sorted(B)))
+    return best
+
+
+def report_sets(pairs, label, budgets, out=sys.stdout):
+    total = sum(pairs.values())
+    free = sum(n for k, n in pairs.items() if k[2])
+    print(f"\n### {label}   {total} pairs, {100*free/total:.1f}% order-free",
+          file=out)
+    print(f"{'|A|x|B|':>9}{'cp':>6}{'covered':>10}{'%':>8}   ops", file=out)
+    for na, nb in budgets:
+        c, A, B = optimise(pairs, na, nb)
+        print(f"{na:4}x{nb:<4}{na*nb:6}{c:10}{100*c/total:7.1f}%", file=out)
+        print(f"           A: {', '.join(A)}", file=out)
+        print(f"           B: {', '.join(B)}", file=out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", default=os.path.join(ROOT, "results"))
     ap.add_argument("--corpora", default=None)
+    ap.add_argument("--modes", default=None,
+                    help="comma-separated subset of MODES")
     args = ap.parse_args()
     names = args.corpora.split(",") if args.corpora else CORPORA
+    modes = args.modes.split(",") if args.modes else list(MODES)
+    BUDGETS = [(4, 4), (8, 4), (4, 8), (8, 8), (16, 8), (8, 16), (16, 16)]
 
     print("# rsd-alu-pair: what survives exclusion by every other frame.")
     print("# Generated by util/rsd_residue.py.\n")
     results = {}
-    for mode in MODES:
+    for mode in modes:
         by_base = measure(names, mode)
         tot = Counter()
         tot.update(by_base[32])
@@ -201,33 +316,54 @@ def main():
         print(f"{mode:14} RV32 {sum(by_base[32].values()):7}   "
               f"RV64 {sum(by_base[64].values()):7}   "
               f"total {sum(tot.values()):8}   "
-              f"distinct (opA,opB) {len(tot):5}", file=sys.stderr)
+              f"distinct (opA,opB) {len({k[:2] for k in tot}):5}",
+              file=sys.stderr)
 
-    nf = sum(results["narrow-first"][1].values())
-    nl = sum(results["narrow-last"][1].values())
-    bl = sum(results["broad-last"][1].values())
+    have = lambda m: m in results
+    nf = sum(results["narrow-first"][1].values()) if have("narrow-first") else 0
+    nl = sum(results["narrow-last"][1].values()) if have("narrow-last") else 0
+    bl = sum(results["broad-last"][1].values()) if have("broad-last") else 0
     print(f"{'population':16}{'RV32':>9}{'RV64':>9}{'total':>10}{'combos':>9}")
     print("-" * 53)
-    for mode in MODES:
+    for mode in modes:
         by_base, tot = results[mode]
         print(f"{mode:16}{sum(by_base[32].values()):9}"
-              f"{sum(by_base[64].values()):9}{sum(tot.values()):10}{len(tot):9}")
+              f"{sum(by_base[64].values()):9}{sum(tot.values()):10}{len({k[:2] for k in tot}):9}")
     print("-" * 53)
-    print(f"\npriority artefact  (narrow-first - narrow-last): {nf - nl:+7}"
-          f"   {100 * (nf - nl) / nf:5.1f}% of today's credited hits are pairs")
-    print(f"                                                            "
-          f"another frame would have taken anyway")
-    print(f"turned away by the op set and immediate widths"
-          f"\n                   (broad-last - narrow-last): {bl - nl:+7}")
+    if nf and nl:
+        print(f"\npriority artefact  (narrow-first - narrow-last): {nf - nl:+7}"
+              f"   {100 * (nf - nl) / nf:5.1f}% of today's credited hits are pairs")
+        print(f"                                                            "
+              f"another frame would have taken anyway")
+    if bl and nl:
+        print(f"turned away by the op set and immediate widths"
+              f"\n                   (broad-last - narrow-last): {bl - nl:+7}")
 
-    for mode in MODES:
+    print("\n\n## A and B op sets chosen SEPARATELY")
+    print("An order-free pair needs only ONE of its two orientations encodable,")
+    print("so the A set and the B set need not match.  |A|x|B| is the codepoint")
+    print("cost, and these are single-tile: compare against biclique_tiling's")
+    print("b>0 splits, which buy shape at the price of block structure.")
+    for mode in modes:
+        if mode in ("narrow-first", "narrow-last"):
+            continue
+        _by, tot = results[mode]
+        report_sets(tot, mode, BUDGETS)
+
+    for mode in modes:
         by_base, tot = results[mode]
         stem = os.path.join(args.out_dir, f"rsd_{mode.replace('-', '_')}")
         ops = write_table(tot, stem + ".csv", stem + "_ops.json")
+        with open(stem + "_pairs.json", "w") as fh:
+            import json as _j
+            _j.dump([[a, b, f, n] for (a, b, f), n in tot.items()], fh)
         if mode == "broad-last":
             print(f"\nresidue op alphabet ({len(ops)}): {', '.join(ops)}")
             print(f"\ntop residue (opA, opB) combinations:")
-            for (a, b), n in tot.most_common(25):
+            flat = Counter()
+            for (a, b, _f), n in tot.items():
+                flat[(a, b)] += n
+            for (a, b), n in flat.most_common(25):
                 print(f"  {n:7}  {a:12} {b}")
     print(f"\nwrote {args.out_dir}/rsd_*.csv (+_ops.json). Tile with:")
     print(f"  python3 util/biclique_tiling.py "

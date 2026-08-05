@@ -145,3 +145,93 @@ That is the next measurement, not a conclusion available now: the residue needs
 the same joint (immA, immB) grid treatment `chain_imm_grid` gave the pointer
 chases, so op-set choice and immediate width can be traded against each other
 instead of one being assumed while the other is swept.
+
+## Shaving the immediate limit, and choosing A and B separately
+The residue above was measured with UNLIMITED immediates, which counts pairs
+no 32-bit packet could hold.  Re-measured with a uniform N-bit immediate on
+both slots instead — signedness per `analysis/imm_traits`, so shifts stay
+unsigned and arithmetic signed — the population is honest:
+
+```
+population      RV32     RV64     total   order-free
+narrow-last     9689    13617     23306        (today's frame, demoted)
+imm5-last      13518    18209     31727         85.8%
+imm6-last      14572    21566     36138         86.0%
+imm7-last      16750    25119     41869         87.0%
+broad-last     24731    37359     62090         87.1%   <- unlimited, inflated
+```
+
+**Order is free in ~86% of the residue.**  `rsd-alu-pair` packs two independent
+results, and nothing in it forces an order except when one op reads the other's
+destination.  Where order is free the frame does not need both orientations
+encodable — the scheduler can emit whichever one the A and B sets allow.  So A
+and B can be chosen separately, and a pair `{x, y}` counts as covered if
+`x∈A, y∈B` OR `y∈A, x∈B`.
+
+`util/rsd_residue.py` optimises the two sets against exactly that objective by
+alternating maximisation.  `util/biclique_tiling.py` cannot: it works on the
+ordered matrix, so it must cover both orientations, but in exchange it can use
+`b>0` block structure that a single A×B tile cannot.  Both are reported.
+
+```
+                single tile A x B          biclique tiler (b=3)
+imm    pop      64cp    128cp   256cp      64cp    128cp   256cp
+ 5   31727     63.4%   76.9%   83.8%     67.6%   77.5%   86.0%
+ 6   36138     67.1%   78.0%   85.2%     67.9%   78.6%   86.4%
+ 7   41869     71.3%   79.8%   86.3%     70.5%   80.5%   87.6%
+ inf 62090     76.3%   83.0%   88.6%     75.3%   84.8%   90.1%
+```
+
+At 64 codepoints the order-free single tile **beats** the block tiler on the
+wider immediates (71.3% vs 70.5% at 7 bits, 76.3% vs 75.3% unlimited):
+exploiting order-freedom is worth about as much as block structure, and the two
+are not combined here.  At 256 the tiler's extra shape wins by 1–2 points.
+
+### The number that matters
+
+Today's frame covers **23306 pairs for 256 codepoints**.  Against the same
+demoted, exclusion-corrected population:
+
+| | covered | codepoints |
+|---|---|---|
+| today (`narrow-last`, 9 ops, per-subform immediates) | 23306 | **256** |
+| 6-bit immediate, A×B = 8×8 | **24231** | **64** |
+| 7-bit immediate, A×B = 8×8 | **29865** | **64** |
+| 7-bit immediate, A×B = 16×8 | 33422 | 128 |
+
+**A 64-codepoint frame with a 6-bit immediate covers more than the current
+256-codepoint frame does.**  At 7 bits it covers 28% more for a quarter of the
+namespace.  Both fit the word: two RSD ops need `rd`(4) + imm(N) twice, so 7
+bits leaves 32 − 22 − 2 = 8 bits of op-select, which is exactly the 256 an
+8×8×(b=3) block wants.
+
+### The sets themselves
+
+**5-bit immediate**
+- `8x8` (64 cp) — 20127 pairs, 63.4%
+  - A: add, addi_rsd, addiw, czero.eqz, li, or, slli, srli
+  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, sub
+- `16x8` (128 cp) — 24411 pairs, 76.9%
+  - A: add, addi_rsd, addiw, andi, czero.eqz, czero.nez, li, mul, or, sh1add, sh2add, sh3add, slli, slliw, srli, sub
+  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, srli
+
+**6-bit immediate**
+- `8x8` (64 cp) — 24231 pairs, 67.1%
+  - A: add, addi_rsd, czero.nez, li, or, slli, srli, sub
+  - B: add, addi_rsd, addiw, andi, czero.eqz, li, or, slli
+- `16x8` (128 cp) — 28174 pairs, 78.0%
+  - A: add, addi_rsd, addiw, andi, czero.eqz, czero.nez, li, mul, or, sh1add, sh2add, sh3add, slli, srai, srli, sub
+  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, srli
+
+**7-bit immediate**
+- `8x8` (64 cp) — 29865 pairs, 71.3%
+  - A: add, addi_rsd, addiw, andi, czero.nez, li, slli, srli
+  - B: add, addi_rsd, czero.eqz, li, or, sh2add, slli, sub
+- `16x8` (128 cp) — 33422 pairs, 79.8%
+  - A: add, addi_rsd, addiw, andi, czero.eqz, czero.nez, li, mul, or, sh1add, sh2add, sh3add, slli, srai, srli, sub
+  - B: add, addi_rsd, czero.eqz, czero.nez, li, or, slli, srli
+
+`add`, `addi_rsd`, `li`, `or`, `slli`, `srli` and `czero.eqz`/`czero.nez` are in
+every set at every width.  `czero.*`, `mul`, `sh1add`/`sh2add`/`sh3add` and
+`sub` are NOT in the frame's declared nine — and `xor` and `and`, which are,
+appear only once the sets grow past 8.
