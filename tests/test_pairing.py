@@ -970,8 +970,8 @@ class TestChainAluPair:
         assert can_pair(a, b) is None
 
     def test_high_chain_register_pairs(self):
-        """The chain register dies within the pair and is not encoded, so it is
-        exempt from the x0..x15 range limit even when it is a high register."""
+        """The chain register dies within the pair and is never encoded, so a
+        high register is as good as a low one."""
         a = make_insn("add", rd=16, rs1=8, rs2=9)     # chain reg x16 (out of window)
         b = make_insn("add", rd=10, rs1=16, rs2=11)   # consumes x16; x16 dead after
         assert can_pair(a, b) is None

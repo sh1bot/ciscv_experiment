@@ -19,7 +19,7 @@ and pairer:
   * BROADEN it -- drop the immediate-range gates entirely and drop the nine-op
     mnemonic set, so the census is not pre-filtered by decisions the tiling was
     supposed to make.  The structural gates stay: RSD-or-li form, the swappable
-    rule, x0..x15 registers, distinct destinations.  Those are what the frame
+    rule, distinct destinations.  Those are what the frame
     IS; the op set and the immediate widths are what is being chosen.
   * DEMOTE it to the END of `RULES`, so every other frame claims what it can
     first.  What the broadened rule then takes is exactly the residue: pairs
@@ -146,7 +146,6 @@ def install(mode):
         @rules.b_is_rsd_or_li
         @rules.a_rsd_swappable
         @rules.b_rsd_swappable
-        @rules.uses_low_regs
         @rules.exclusive_rd
         def _probe(a, b):
             if wide_ops:

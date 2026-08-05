@@ -528,8 +528,8 @@ musl-norvc-rv32 -O2    118755  27856  46.9%    76.5%    100.0%   76.5%
 RVC's register fields are 3 bits, so codegen targeting it biases allocation
 into x8..x15. Our packet rows draw FULL 5-bit fields, so that clustering is
 pure loss to us: we inherit a constraint imposed for a compression scheme we
-do not use. (This is the same axis as opening `_RSD_ALU_REGS` from x0..x15 to
-x0..x31 earlier, which was worth 377 pairs.)
+do not use. (Same axis as widening the RSD register class to the full x0..x31
+earlier, which was worth 377 pairs.)
 
 Directly measured on musl-rv64: **68.5% of register references fall in x8..x15
 with `c`, 63.9% without** — a 4.6pp redistribution, so the bias is real.

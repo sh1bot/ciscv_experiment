@@ -28,8 +28,8 @@ Two changes, then the real scheduler and pairer:
   whatever the frames actually are today, not a snapshot.
 * **Broaden** it — drop the immediate-range gates and the nine-op mnemonic set,
   so the census is not pre-filtered by the very decisions the tiling is meant
-  to make.  Structural gates stay (RSD-or-li form, swappable rule, x0..x15,
-  distinct destinations): those are what the frame *is*.
+  to make.  Structural gates stay (RSD-or-li form, swappable rule, distinct
+  destinations): those are what the frame *is*.
 
 The two relaxations are also measured separately, because widening the op set
 and widening the immediates are different decisions with different costs.
@@ -279,21 +279,17 @@ would see if demoted, and it is not demoted — so it still harvests 8350 pairs
 `dual-setup-pair` could take for 17 codepoints.  Whether to reorder them is
 open, and unchanged by this.
 
-~~`uses_low_regs` still clamps registers to x0..x15~~ — CHECKED, and it does
-not.  `_RSD_ALU_REGS` is `frozenset(range(32))`, so `_confirm_low_regs` tests
-membership in a set containing every register and can never reject: the clamp
-was already vacuous, and the yaml note's 377 pairs had been reclaimed earlier
-by widening that set.  The note is accurate and past tense; I read it as a live
-discrepancy and it was not.
+**Registers were never the constraint they looked like.**  An earlier version
+of this section said a register clamp was costing pairs.  It was not: the check
+tested membership in a set containing every register, so it could never reject.
+Removing it changed the corpus by **exactly zero pairs** — 513095 before and
+after, no frame moved — and the whole apparatus has since been deleted from
+`rules.py` along with the four other rules that carried it.
 
-Removing `@uses_low_regs` from the frame changed the corpus by **exactly zero
-pairs** (513095 before and after, no frame moved), which is the measurement
-that settles it.  It is gone anyway, because a decorator that looks like a
-constraint and is not is worse than no decorator.  The same vacuity covers
-`alu-alu-chain`, `load-alu-chain`, `alu-store-chain` and `arith-jump-pair`;
-every register operand in every frame row sits in a 5-bit column, which
-`tests/test_conformance.py` now gates so the clamp cannot silently become
-load-bearing again.
+What replaces it is the property that made it pointless: every register operand
+in every frame row lands in a 5-bit column, so registers are always x0..x31 and
+no rule needs a class check.  That is a fact about the LAYOUT, and
+`tests/test_conformance.py` now gates it.
 
-So the figures above are NOT floors for this reason — an earlier version of
+So the figures above are NOT floors on register grounds — an earlier version of
 this section said they were.

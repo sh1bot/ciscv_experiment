@@ -493,8 +493,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
    pairs. The ceiling is no higher -- adjacent tuple matches with
    positionally shared operands number 31 on musl-rv32, 25 on cpp- rv32,
    2 on sqlite-gcc-rv64, 0 on sqlite-rv64 -- so nothing is suppressing
-   it. Notably the frame is NOT register-window constrained: rules.py
-   carries no x0-x15 set, and this row draws four full 5-bit fields.
+   it. Notably the frame is NOT register-window constrained: this row
+   draws four full 5-bit fields, so every register encodes.
  * ORDER IS NOT ARBITRARY, and it is not a dependency either. The two ops
    read the same two sources and neither consumes the other's result, so
    they commute -- but the RISC-V M extension names one sequence as THE
@@ -550,9 +550,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
  * The four register operands occupy the four 5-bit columns -- 20 bits,
    the whole operand budget -- so registers here are a FULL 5-bit field,
-   x0..x31. An earlier note anticipated cutting them to 4 bits; that is
-   not needed, and scheduler/rules.py enforcing x0..x15 was costing 377
-   pairs across the corpus.
+   x0..x31. An earlier draft anticipated cutting them to 4 bits; that is
+   not needed and was never adopted.
  * The two slots declare DIFFERENT op sets, and deliberately. Range past
    the row's five drawn bits is bought in opcode entries -- an op
    declaring N bits occupies 2^(N-5) of them -- so weight, not op count,

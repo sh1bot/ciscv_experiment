@@ -8,7 +8,6 @@ The mechanism (can_pair, greedy_pair, stamp_slot_eligibility) lives in pairing.p
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Final
-from collections.abc import Iterable
 from functools import wraps
 
 from isa.instruction import Instruction
@@ -132,15 +131,6 @@ _RSD_ALU_MN = frozenset({
     "add",  "and",  "or",   "xor",
     "slli", "srli",                          # shift-immediate forms
     })
-# x0..x31 — a FULL 5-bit field.  Because this is every register, the checks
-# built on it (`_confirm_low_regs`, and so `uses_low_regs`,
-# `chain_uses_low_regs`, `uses_low_regs_here`) can never reject anything: they
-# are dead code, kept only because deleting them touches four more rules.
-# That is correct only while every register operand lands in a 5-bit column,
-# which tests/test_conformance.py now gates
-# (test_every_register_operand_gets_a_full_five_bit_field).  Measured: removing
-# the clamp from rsd-alu-pair changed the corpus by exactly zero pairs.
-_RSD_ALU_REGS = frozenset(range(32))
 
 # Signed immediate widths, derived from the yaml op contracts at import.
 _RSD_IMM_BITS   = {mn: _w("rsd-alu-pair", "a", mn)
@@ -234,8 +224,9 @@ def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS,
     `widths` selects the per-frame contract: rsd-alu-pair passes _RSD_IMM_BITS,
     arith-jump-pair the narrower _RSD_JUMP_BITS its row can actually draw.
 
-    Register-range checks are not done here: they belong to the uses_low_regs
-    family of decorators, which every caller already applies.
+    Register ranges are not checked anywhere: every frame draws its register
+    operands in 5-bit columns, so there is no narrower class to enforce (gated
+    by tests/test_conformance.py).
     """
     bits = widths.get(insn.mnemonic)
     if bits is not None:
@@ -405,47 +396,6 @@ def exclusive_rd(func: Callable):
     return check_rd_exclusive
 
 
-def _get_fields(insn: Iterable[Instruction], fields: Iterable[str], f: Callable):
-    field_names = {
-            "a.rd": (0, "rd"),
-            "a.rs1": (0, "rs1"),
-            "a.rs2": (0, "rs2"),
-            "b.rd": (1, "rd"),
-            "b.rs1": (1, "rs1"),
-            "b.rs2": (1, "rs2"),
-    }
-    def per_field(name: str):
-        n, field = field_names[name]
-        return f(getattr(insn[n], field, None))
-    return map(per_field, fields)
-
-
-def _confirm_low_regs(a: Instruction, b: Instruction, fields: Iterable[str]):
-    r_is_low = lambda r: r is None or r in _RSD_ALU_REGS
-    if not all(_get_fields((a, b), fields, r_is_low)):
-        raise NotPair("big-reg")
-
-
-def uses_low_regs(func: Callable):
-    all_regs = ("a.rd", "a.rs1", "a.rs2", "b.rd", "b.rs1", "b.rs2")
-    @wraps(func)
-    def check_low_regs(a: Instruction, b: Instruction):
-        _confirm_low_regs(a, b, all_regs)
-        return func(a, b)
-    return check_low_regs
-
-
-def chain_uses_low_regs(func: Callable):
-    @wraps(func)
-    def check_low_regs1(a: Instruction, b: Instruction):
-        if b.is_commutative and b.rs2 == a.rd:
-            _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs1"))
-        else:
-            _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs2"))
-        return func(a, b)
-    return check_low_regs1
-
-
 def a_imm_ok(func: Callable):
     """A-slot's immediate / shift amount is in the RSD-encodable range."""
     @wraps(func)
@@ -472,16 +422,6 @@ def a_jump_imm_ok(func: Callable):
         _imm_in_range(a, _RSD_JUMP_BITS, _RSD_JUMP_SHIFT_BITS)
         return func(a, b)
     return check_a_jump_imm_ok
-
-
-def uses_low_regs_here(*these_regs: str):
-    def uses_low_regs_dec(func: Callable):
-        @wraps(func)
-        def check_low_regs_here(a: Instruction, b: Instruction):
-            _confirm_low_regs(a, b, these_regs)
-            return func(a, b)
-        return check_low_regs_here
-    return uses_low_regs_dec
 
 
 # ---------------------------------------------------------------------------
@@ -533,24 +473,19 @@ def _rsd_slot_imm_ok(insn: Instruction, widths: dict, slot: str) -> None:
         raise NotPair("big-imm")
 
 
-# NO uses_low_regs.  Every one of this frame's four rows puts `rsda` in the
-# 5-bit `rs1` column, `rsdb` in the 5-bit `rd` column and rs2a/rs2b in `rs2`
-# and `funct5` -- four full 5-bit register fields, 20 bits, the whole operand
-# budget.  The x0..x15 clamp the rest of the pairing rules carry has no
-# encoding behind it here, and it was refusing pairs the row can hold.
 @a_is_rsd_or_li
 @b_is_rsd_or_li
 @a_rsd_swappable
 @b_rsd_swappable
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
-    """Both instructions RSD or li form, x0..x15, immediates in range, and the
-    two slots write distinct destination registers.
+    """Both instructions RSD or li form, immediates in range, and the two slots
+    write distinct destination registers.
 
     Distinct destinations: rsd-alu-pair exists to pack two independent, both-live
     ALU results.  If a.rd == b.rd then either B consumes A (a producer/consumer
-    chain — handled, more capably, by alu-alu-chain, whose shared register need
-    not be in x0..x15) or B does not (making A's write dead).  Either way this
+    chain — handled, more capably, by alu-alu-chain) or B does not (making A's
+    write dead).  Either way this
     rule should not claim the pair; require distinct destinations.
     """
     _rsd_slot_imm_ok(a, _RSD_A_W, "A")
@@ -561,7 +496,6 @@ def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
 # alu-alu-chain
 # ---------------------------------------------------------------------------
 
-@chain_uses_low_regs
 @must_chain
 @no_escape
 @a_chain_imm_ok
@@ -574,9 +508,7 @@ def _alu_alu_chain(a: Instruction, b: Instruction) -> None:
     overwrites it (b.rd == a.rd) or it is not live in b.live_out.
 
     Because a.rd is produced and consumed within the packet and dies there, it
-    is not encoded and is exempt from the x0..x15 range limit — hence
-    @chain_uses_low_regs (which skips a.rd and B's consuming source), matching
-    load-chain / store-chain.
+    is not encoded at all.
     """
     if not any(a.mnemonic in A and b.mnemonic in B
                for A, B in _ALU_ALU_BLOCKS):
@@ -638,7 +570,6 @@ def b_chain_mem(bits: int):
 # a.rd (the chain register) is dead after B and not encoded in the packet, so it
 # is exempt from range checks.  @must_chain / @must_chain_stored already reject
 # a.rd is None, so the ALU/mem checks below never see a destination-less A.
-@chain_uses_low_regs
 @must_chain
 @no_escape
 @a_chain_mem(6)
@@ -687,7 +618,6 @@ def _addi_store_chain(a: Instruction, b: Instruction) -> None:
         raise NotPair("B-big-imm")           # the one row encodes no offset
 
 
-@chain_uses_low_regs
 @must_chain_stored
 @no_escape
 @a_chain_imm_ok
@@ -1509,7 +1439,7 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # legacy scheduler's arith_jump / mv_load_jump rules — its single largest
 # advantage on real code, and offset-independent (unlike its memory rules).
 #
-#   arith-jump-pair:   A = RSD ALU op (or li), x0..x15, imm in range
+#   arith-jump-pair:   A = RSD ALU op (or li), imm in range
 #   setup-jump-pair:  A = mv, li (10-bit signed), or lbu/lw/ld with a
 #                          non-negative offset fitting a 5-bit scaled field
 #   B (both):          ret / jr / indirect jalr (imm 0) / direct j / jal x0
@@ -1563,7 +1493,6 @@ def _is_small_jump(insn: Instruction) -> bool:
 
 @a_is_rsd_or_li
 @a_rsd_swappable
-@uses_low_regs_here("a.rd", "a.rs1", "a.rs2")
 @a_jump_imm_ok
 def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
