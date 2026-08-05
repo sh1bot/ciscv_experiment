@@ -85,15 +85,19 @@ def test_proto_yaml_emits():
 def test_immediate_contracts_derive():
     """The yaml-derived width table must load and cover every rule."""
     sys.path.insert(0, ROOT)
-    from scheduler.imm_contracts import _contracts, width_of
+    from scheduler.imm_contracts import _contracts, narrow_field_of, width_of
     from scheduler.rules import RULES
     table = _contracts()
     missing = [r.name for r in RULES if r.name not in table]
     assert not missing, f"rules with no frame contract: {missing}"
     # Spot values this session got wrong in both directions at some point.
     assert width_of("li-branch-chain", "a", "li") == 8
-    assert width_of("dual-setup-pair", "b", "li") == 6
+    assert width_of("dual-setup-pair", "b", "li") == 8
     assert width_of("mem-base-pair", "a", "lw") == 6
+    # The any-rd band beside the a0-a7 split rows: the widest-row fallback
+    # read 7 here and silently widened the band the day the split rows landed.
+    assert narrow_field_of("dual-setup-pair", "a") == 5
+    assert narrow_field_of("dual-setup-pair", "b") == 5
 
 
 def test_yaml_schema_valid():
@@ -155,10 +159,15 @@ def test_width_naming_frames_match_their_declared_widths():
 # the rule must restrict them to.  A narrow register field is legitimate, but it
 # is a CONSTRAINT the rule owes: arg-call-pair splits its rd column into two
 # bits of imma[6:5] and three of rda, so rda is a0-a7 and every op sharing that
-# row must say so.  One did not (`addi_rsd`), and took 53 pairs it cannot
-# encode.  Anything not listed here must get the full five bits.
+# row must say so.  One did not (`addi_rsd`) -- latent, since its corpus pairs
+# all land in the class anyway.  Anything not listed here gets the full five.
 NARROW_REGISTER_FIELDS = {
-    ("arg-call-pair", "rda"): 3,       # a0-a7, enforced by _ARG_REGS
+    ("arg-call-pair", "rda"): 3,        # a0-a7, enforced by _ARG_REGS
+    # dual-setup-pair's wide-li band: the split rows buy two more immediate
+    # bits by giving the destination three, so `_dual_indep` demands a0-a7
+    # for exactly those and leaves its full-5-bit rows unrestricted.
+    ("dual-setup-pair", "rda"): 3,
+    ("dual-setup-pair", "rdb"): 3,
 }
 
 
@@ -206,3 +215,13 @@ def test_register_fields_are_five_bits_or_declared_narrow():
     assert not bad, ("register operands in fields narrower than five bits, not "
                      "declared in NARROW_REGISTER_FIELDS — the owning rule must "
                      "restrict them:\n  " + "\n  ".join(bad))
+
+def test_frame_containment_runs():
+    """The static overlap report must survive every yaml edit.
+
+    It reads clusters, rows and field widths together, so it breaks on schema
+    changes that the renderer alone would not notice.
+    """
+    r = _run("util/frame_containment.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "SOLE ENCODER" in r.stdout

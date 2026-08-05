@@ -1,15 +1,15 @@
 # musl-rv64 (RV64)
 # --- file totals ---
-#   instructions: 102010  packets: 79821  pairs: 22189  solos: 57632
-#   pair rate:    27.8%  (44378/102010 instructions paired)
+#   instructions: 102010  packets: 79684  pairs: 22326  solos: 57358
+#   pair rate:    28.0%  (44652/102010 instructions paired)
 #   RVC-eligible: 55.6%  (56719/102010 instructions)
 #   nops: 30 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 2551
-#     alu-alu-chain: 832
+#     rsd-alu-pair: 2290
+#     alu-alu-chain: 833
 #     load-alu-chain: 522
 #     addi-store-chain: 116
-#     alu-store-chain: 295
+#     alu-store-chain: 298
 #     load-sp-branch-pair: 142
 #     load-base-branch-pair: 743
 #     load0-load10-chain: 21
@@ -19,18 +19,18 @@
 #     load-store-chain: 325
 #     addi-store-off-chain: 0
 #     load-call-chain: 32
-#     macro-op-pair: 0
+#     macro-op-pair: 3
 #     post-inc-pair: 849
-#     dual-setup-pair: 4354
-#     li-branch-chain: 951
+#     dual-setup-pair: 4803
+#     li-branch-chain: 881
 #     inc-branch-pair: 147
 #     bit-test-branch-chain: 254
-#     prologue-pair: 1019
-#     epilogue-pair: 462
-#     czero-or-chain: 310
+#     prologue-pair: 1029
+#     epilogue-pair: 461
+#     czero-or-chain: 311
 #     li-czero-chain: 49
 #     index-mem-chain: 172
 #     pre-inc-pair: 134
-#     arith-jump-pair: 1827
-#     setup-jump-pair: 1150
+#     arith-jump-pair: 1847
+#     setup-jump-pair: 1132
 #     arg-call-pair: 0

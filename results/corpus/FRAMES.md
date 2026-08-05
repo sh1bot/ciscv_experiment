@@ -208,18 +208,11 @@ like on this workbench.
    | `addw` / `subw` | same, RV64 word forms | |
    | `min` / `max` | both order statistics | one comparison decides both |
    | `minu` / `maxu` | unsigned forms | |
-   | `add` / `slt` | **sum and carry-out** | see below — does not share the shape |
 
-   **Add-with-carry is the odd one and the most interesting.**  Spelled
-   `add rda, rs1, rs2 ; slt rdb, rda, rs2`, it is how RISC-V synthesises a
-   carry-out, and it does NOT fit the same-source shape: the `slt` reads
-   `rda`, the sum, so the two are a dependent chain rather than two reads of
-   one argument list.  It belongs with these because it is the same
-   invitation in spirit — one adder pass already computes the carry and
-   throws it away, which is exactly `macro-op-pair`'s argument.  Encoding it
-   costs a chain frame's shape (rda is both A's destination and B's source),
-   not this one's.  Multi-word arithmetic is where it appears: bignum,
-   64-bit adds on RV32, overflow checks.
+   **Add-with-carry was set aside here and then BUILT into `macro-op-pair`
+   instead** (2026-08-04) — see that frame.  It never fitted this shape: the
+   `sltu` reads the sum, so it is a dependence, not two reads of one argument
+   list.  It fitted macro-op-pair's ROW, which is what mattered.
 
    **First census (2026-08-04, textual, nine corpora, both halves
    register-register and dests distinct).**  Adjacent pairs reading the same

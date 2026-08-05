@@ -1588,3 +1588,55 @@ class TestLoadCallChain:
         from scheduler.imm_contracts import accepts_pcrel_lo
         assert accepts_pcrel_lo("load-call-chain")
         assert not accepts_pcrel_lo("load-base-branch-pair")
+
+
+class TestMacroOpCarry:
+    """`add rda, rs1, rs2 ; sltu rdb, rda, rs1-or-rs2` — the sum and its
+    carry-out, riding macro-op-pair's row."""
+
+    @staticmethod
+    def _pair(sum_reg=10, carry_reg=11, x=12, y=13, comparand=13,
+              add="add", live=True):
+        a = make_insn(add, rd=sum_reg, rs1=x, rs2=y)
+        b = make_insn("sltu", rd=carry_reg, rs1=sum_reg, rs2=comparand)
+        b.live_out = {sum_reg} if live else set()
+        return a, b
+
+    def test_carry_against_second_addend(self):
+        assert can_pair(*self._pair(comparand=13)) is None
+
+    def test_carry_against_first_addend(self):
+        """Either addend gives the same carry, so both spellings pair."""
+        assert can_pair(*self._pair(comparand=12)) is None
+
+    def test_addw_carry(self):
+        assert can_pair(*self._pair(add="addw")) is None
+
+    def test_dead_sum_still_pairs(self):
+        """A discarded sum is still encodable here: alu-alu-chain cannot take
+        (add, sltu) -- sltu is in none of its B sets -- so refusing it would
+        only make solos, and the idle rda field costs no codepoints."""
+        assert can_pair(*self._pair(live=False)) is None
+
+    def test_comparand_not_an_addend_no_pair(self):
+        assert can_pair(*self._pair(comparand=14)) is not None
+
+    def test_compare_not_of_this_sum_no_pair(self):
+        """sltu reading the addends, not the sum, is a different idiom."""
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sltu", rd=11, rs1=12, rs2=13)
+        b.live_out = {10}
+        assert can_pair(a, b) is not None
+
+    def test_carry_overwriting_the_sum_no_pair(self):
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sltu", rd=10, rs1=10, rs2=13)
+        b.live_out = {10}
+        assert can_pair(a, b) is not None
+
+    def test_reversed_order_no_pair(self):
+        """The carry cannot precede the sum it tests."""
+        a = make_insn("sltu", rd=11, rs1=10, rs2=13)
+        b = make_insn("add", rd=10, rs1=12, rs2=13)
+        b.live_out = {10}
+        assert can_pair(a, b) is not None

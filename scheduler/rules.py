@@ -13,6 +13,7 @@ from functools import wraps
 from isa.instruction import Instruction
 from isa.xlen import DEFAULT as _XLEN_DEFAULT, is_xlen_width
 from scheduler.imm_contracts import width_of as _yaml_width
+from scheduler.imm_contracts import narrow_field_of as _yaml_narrow_field
 from scheduler.imm_contracts import rd_column_slots as _rd_slots
 from scheduler.imm_contracts import link_regs_for as _yaml_link_regs
 from scheduler.imm_contracts import accepts_pcrel_lo as _yaml_pcrel_lo
@@ -900,6 +901,11 @@ _DUAL_TUPLES: dict = {
     ("divu", "remu"):     "arith2",
     ("divw", "remw"):     "arith2",
     ("divuw", "remuw"):   "arith2",
+    # Carry-out.  NOT the same-source shape: B reads A's SUM, so this half of
+    # the family is strictly ordered and is a dependence rather than a
+    # independence.  `_dual_arith2` branches on it.
+    ("add", "sltu"):      "arith2",
+    ("addw", "sltu"):     "arith2",
     # (post-increment mem+addi / mem+shNadd tuples live in _POST_INC_TUPLES)
     # (adjacent load/store pairs are handled by the dedicated mem-base-pair rule)
     # independent single-output pairs — no shared operands required
@@ -999,17 +1005,43 @@ def dual_family(role: str):
     return deco
 
 
-@dual_family("arith2")
-def _dual_arith2(a: Instruction, b: Instruction) -> None:
-    """Two R-type ops sharing rs1 and rs2 positionally (sum/diff, min/max, ...).
+_CARRY_TUPLES = frozenset({("add", "sltu"), ("addw", "sltu")})
 
-    The pair is a fusion hint: both results of one computation are wanted, so an
-    implementation can produce them in a single pass.  Low corpus yield is a
-    fact about today's compilers, not about the frame."""
+
+@exclusive_rd
+def _dual_arith2(a: Instruction, b: Instruction) -> None:
+    """One computation, both its results -- so an implementation can produce
+    them in a single pass.  Two shapes, and they are structurally opposite:
+
+    SAME-SOURCE (mulh/mul, div/rem): the two ops read the same operands and
+    neither feeds the other.  Order-insensitive, independence required.
+
+    CARRY-OUT (`add rda, rs1, rs2 ; sltu rdb, rda, rs1-or-rs2`): B reads A's
+    SUM.  Strictly ordered, and a dependence is required rather than refused.
+    Either addend may be the comparand -- for unsigned addition the sum is
+    less than one addend exactly when it is less than the other -- so which
+    one B names is a DON'T CARE and needs no field.  That is what lets this
+    ride the existing row: rda, rs1a, rs2a, rdb are already drawn."""
+    if (a.mnemonic, b.mnemonic) in _CARRY_TUPLES:
+        if None in (a.rd, a.rs1, a.rs2, b.rs1, b.rs2):
+            raise NotPair("MALFORMED: missing register operand")
+        if b.rs1 != a.rd:
+            raise NotPair("not-the-carry-of-this-sum")
+        if b.rs2 not in (a.rs1, a.rs2):
+            raise NotPair("comparand-is-not-an-addend")
+        # A dead sum is NOT excluded.  It would be the chain shape -- compute a
+        # value, test it, discard it -- but `alu-alu-chain` cannot encode
+        # (add, sltu): `sltu` appears only in its A sets, never a B set.  So
+        # there is no cheaper frame to leave them to, and refusing them just
+        # makes solos.  The idle rda field costs nothing; idle operand bits
+        # are not codepoints.
+        return
+    first, second, reversed_order = _canonical_dual(a, b, _role_tuples("arith2"))
     if None in (a.rs1, a.rs2, b.rs1, b.rs2):
         raise NotPair("MALFORMED: missing register operand")
     if a.rs1 != b.rs1 or a.rs2 != b.rs2:
         raise NotPair("source-operand-mismatch")
+    _reject_dependence(a, b, reversed_order)
 
 
 def post_inc_family(role: str):
@@ -1053,30 +1085,37 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
 
 
 _DUAL_ADDI4SPN_BITS = _w("dual-setup-pair", "a", "addi4spn")
-_DUAL_LI_BITS = _w("dual-setup-pair", "a", "li")
-# The un-extended field width: mv declares nothing, so its width IS the field.
-_DUAL_FIELD_BITS = _w("dual-setup-pair", "a", "mv")
+_DUAL_LI_ARG_BITS = _w("dual-setup-pair", "a", "li")
+# The any-rd band is the NARROWEST imm row's field (5): the widest-row
+# fallback `_w` uses for bare ops would read the 7-bit a0-a7 split rows and
+# silently widen a band whose extra bits only exist under that restriction.
+_DUAL_FIELD_BITS = _yaml_narrow_field("dual-setup-pair", "a")
+_ARG_REGS = frozenset(range(10, 18))   # a0-a7: the 3-bit rd column that
+# arg-call-pair row 2 and dual-setup-pair's wide-li rows draw.
 
 
 @dual_family("dual_setup_pair")
 def _dual_indep(a: Instruction, b: Instruction) -> None:
     """Two fully independent small pseudo-ops (li / mv / addi4spn)."""
-    li_lim = 1 << (_DUAL_LI_BITS - 1)
+    nlim = 1 << (_DUAL_FIELD_BITS - 1)
+    arg_lim = 1 << (_DUAL_LI_ARG_BITS - 1)
     for insn in (a, b):
         if not _is_li_mv_addi4spn(insn):
             raise NotPair("is-not-li_mv_addi4spn")
         if insn.is_addi4spn and not insn.uimm_fits(
                 _DUAL_ADDI4SPN_BITS, 2, nonzero='remap'):
             raise NotPair(f"addi4spn immediate {insn.imm} out of range")
-        # li's extra bit above the drawn field rides one opcode repeat.
+        # li's two bands: the bare field with any rd, or the split-rd rows
+        # (7 drawn bits plus one opcode repeat) with an a0-a7 destination.
         if insn.is_li and (insn.imm is None
-                           or not (-li_lim <= insn.imm < li_lim)):
+                           or not (-nlim <= insn.imm < nlim
+                                   or (insn.rd in _ARG_REGS
+                                       and -arg_lim <= insn.imm < arg_lim))):
             raise NotPair("li-big-imm")
-    # Only immb carries the extra bit, so at most one of the two may exceed the
-    # narrow field.  Which SLOT it lands in does not matter: this frame requires
-    # mutual independence, so the encoder may swap the pair to put the wide
-    # operand in immb.
-    nlim = 1 << (_DUAL_FIELD_BITS - 1)
+    # Only immb carries the extra bits, so at most one of the two may exceed
+    # the narrow field.  Which SLOT it lands in does not matter: this frame
+    # requires mutual independence, so the encoder may swap the pair to put
+    # the wide operand in immb.
     wide = sum(1 for i in (a, b)
                if i.is_li and i.imm is not None and not (-nlim <= i.imm < nlim))
     if wide > 1:
@@ -1699,8 +1738,13 @@ _ARG_CALL_LI_BITS = _w("arg-call-pair", "a", "li")           # 7, rd3 row
 _ARG_CALL_SPN_BITS = _w("arg-call-pair", "a", "addi4spn")    # 7, rd3 row
 _ARG_CALL_LOAD_BITS = _w("arg-call-pair", "a", "lw")         # 7, scaled, rd3
 _ARG_CALL_STORE_BITS = _w("arg-call-pair", "a", "sw")        # 5, scaled, rs5
-_ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # 5
-_ARG_REGS = frozenset(range(10, 18))          # a0-a7: the 3-bit rd column
+_ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # reads 7: the
+# bare-op fallback takes the WIDEST imma row (the rd3 split row).  Whether
+# addi_rsd really has the 7-bit row is unverified -- an earlier copy of this
+# constant said 5.  Pre-existing, kept as-is until re-measured (TODO A8):
+# narrowing it here changes arg-call-pair's accepted range.
+# (_ARG_REGS -- the a0-a7 window this frame's 3-bit rd column draws -- is
+# defined beside dual-setup-pair, which shares it.)
 
 
 def _fits_u(v, bits, scale=1):

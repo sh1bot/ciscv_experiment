@@ -1,36 +1,36 @@
 # godot (RV64)
 # --- file totals ---
-#   instructions: 90171  packets: 74193  pairs: 15978  solos: 58215
-#   pair rate:    21.5%  (31956/90171 instructions paired)
+#   instructions: 90171  packets: 74137  pairs: 16034  solos: 58103
+#   pair rate:    21.6%  (32068/90171 instructions paired)
 #   RVC-eligible: 49.8%  (44950/90171 instructions)
 #   nops: 1 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 1517
+#     rsd-alu-pair: 1472
 #     alu-alu-chain: 151
 #     load-alu-chain: 847
 #     addi-store-chain: 71
-#     alu-store-chain: 62
+#     alu-store-chain: 63
 #     load-sp-branch-pair: 989
 #     load-base-branch-pair: 703
 #     load0-load10-chain: 196
 #     load5-load5-chain: 43
-#     mem-sp-pair: 2549
+#     mem-sp-pair: 2542
 #     mem-base-pair: 167
 #     load-store-chain: 88
 #     addi-store-off-chain: 0
 #     load-call-chain: 4
-#     macro-op-pair: 0
-#     post-inc-pair: 334
-#     dual-setup-pair: 2645
+#     macro-op-pair: 36
+#     post-inc-pair: 335
+#     dual-setup-pair: 2722
 #     li-branch-chain: 346
 #     inc-branch-pair: 58
 #     bit-test-branch-chain: 57
 #     prologue-pair: 587
-#     epilogue-pair: 298
-#     czero-or-chain: 70
-#     li-czero-chain: 7
+#     epilogue-pair: 297
+#     czero-or-chain: 71
+#     li-czero-chain: 4
 #     index-mem-chain: 28
 #     pre-inc-pair: 89
-#     arith-jump-pair: 491
-#     setup-jump-pair: 578
-#     arg-call-pair: 3003
+#     arith-jump-pair: 495
+#     setup-jump-pair: 571
+#     arg-call-pair: 3002

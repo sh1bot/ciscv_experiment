@@ -11,55 +11,55 @@ RV32
 
 frame                               cp    hits   reach    excl  excl/cp  hidden
 ------------------------------------------------------------------------------
-mem-sp-pair                          2   54004   54004   10605   5302.5       0
-prologue-pair                        2    7650    7650    7650   3825.0       0
-czero-or-chain                       2    4270    4441    4270   2135.0     171
-dual-setup-pair                     17   30093   33431   30093   1770.2    3338
-epilogue-pair                        2    4072    4072    3019   1509.5       0
-post-inc-pair                        4    5755    5755    5755   1438.8       0
-mem-base-pair                       16   14180   57590   14180    886.2   43410
-setup-jump-pair                     15   11702   19319   11698    779.9    7617
+mem-sp-pair                          2   53998   53998   10605   5302.5       0
+prologue-pair                        2    7653    7653    7653   3826.5       0
+dual-setup-pair                     11   32038   35912   32038   2912.5    3874
+czero-or-chain                       2    4269    4442    4269   2134.5     173
+epilogue-pair                        2    4070    4070    3019   1509.5       0
+post-inc-pair                        4    5752    5752    5752   1438.0       0
+mem-base-pair                       16   14166   57570   14166    885.4   43404
+setup-jump-pair                     15   11578   19304   11573    771.5    7726
 load-base-branch-pair               14   10712   11945   10712    765.1    1233
 load-call-chain                      4    2784    2784    2713    678.2       0
 load0-load10-chain                   7    2730    2730    2726    389.4       0
 bit-test-branch-chain               24    6794    6794    6794    283.1       0
-addi-store-chain                     4    1755    1755     968    242.0       0
+addi-store-chain                     4    1754    1754     967    241.8       0
 load5-load5-chain                    7    1392    1392    1385    197.9       0
 load-store-chain                    16    2713    2713    2713    169.6       0
-pre-inc-pair                         8    1332    1332    1332    166.5       0
+pre-inc-pair                         8    1334    1334    1334    166.8       0
 index-mem-chain                      8    1253    1253    1253    156.6       0
-li-branch-chain                     48    6642    6642    6642    138.4       0
-li-czero-chain                       2     275     275     275    137.5       0
+li-czero-chain                       2     279     279     279    139.5       0
+li-branch-chain                     48    6477    6477    6477    134.9       0
 load-alu-chain                      64    6438    6438    6438    100.6       0
-inc-branch-pair                     16    1238    1238    1238     77.4       0
-arith-jump-pair                     64   12118   13171    4572     71.4    1053
-alu-alu-chain                      128    8031    8628    8031     62.7     597
+inc-branch-pair                     16    1224    1224    1224     76.5       0
+arith-jump-pair                     64   12279   13330    4624     72.2    1051
+macro-op-pair                        9     632     632     632     70.2       0
+alu-store-chain                     32    3603    4383    2055     64.2     780
+alu-alu-chain                      128    7792    8413    7792     60.9     621
 load-sp-branch-pair                  6    1595    1595     362     60.3       0
-rsd-alu-pair                       256   19008   19008   14902     58.2       0
-alu-store-chain                     32    3574    4353    1542     48.2     779
-arg-call-pair                       16     584     603     584     36.5      19
-macro-op-pair                        7     236     236     236     33.7       0
-addi-store-off-chain                16     237    2835     237     14.8    2598
+rsd-alu-pair                       256   18008   18008   13340     52.1       0
+arg-call-pair                       16     583     603     583     36.4      20
+addi-store-off-chain                 8     229    2313     229     28.6    2084
 ------------------------------------------------------------------------------
-TOTAL                              807  223167          162925    201.9
+TOTAL                              795  224129          163707    205.9
 
 how many frames could encode each pair:
-  1 frame :   162925   73.0%   <- only this frame can
-  2 frames:    59669   26.7%
-  3 frames:      573    0.3%
-  60242 pairs (27.0%) are encodable by more than one frame.
+  1 frame :   163707   73.0%   <- only this frame can
+  2 frames:    59878   26.7%
+  3 frames:      544    0.2%
+  60422 pairs (27.0%) are encodable by more than one frame.
 
 who shadows whom — of the pairs each frame WON, which other frames
 would also have taken them (first-wins hides this):
-  mem-sp-pair                      mem-base-pair 43399
-  rsd-alu-pair                     dual-setup-pair 3338, alu-alu-chain 597, czero-or-chain 171
-  arith-jump-pair                  setup-jump-pair 7546, arg-call-pair 15
-  setup-jump-pair                  arg-call-pair 4
-  epilogue-pair                    arith-jump-pair 1053
-  alu-store-chain                  addi-store-off-chain 2032
+  mem-sp-pair                      mem-base-pair 43393
+  rsd-alu-pair                     dual-setup-pair 3874, alu-alu-chain 621, czero-or-chain 173
+  arith-jump-pair                  setup-jump-pair 7655, arg-call-pair 15
+  setup-jump-pair                  arg-call-pair 5
+  epilogue-pair                    arith-jump-pair 1051
+  alu-store-chain                  addi-store-off-chain 1548
   load-call-chain                  setup-jump-pair 71
   load0-load10-chain               mem-base-pair 4
-  addi-store-chain                 alu-store-chain 779, addi-store-off-chain 566
+  addi-store-chain                 alu-store-chain 780, addi-store-off-chain 536
   load-sp-branch-pair              load-base-branch-pair 1233
   load5-load5-chain                mem-base-pair 7
 
@@ -69,57 +69,57 @@ RV64
 
 frame                               cp    hits   reach    excl  excl/cp  hidden
 ------------------------------------------------------------------------------
-prologue-pair                        2    9250    9250    9250   4625.0       0
-dual-setup-pair                     17   44646   49658   44646   2626.2    5012
-czero-or-chain                       2    4527    4723    4527   2263.5     196
-post-inc-pair                        4    8458    8458    8458   2114.5       0
-epilogue-pair                        2    4827    4827    4149   2074.5       0
-setup-jump-pair                     15   19888   32218   19880   1325.3   12330
-load-base-branch-pair               14   18150   20968   18150   1296.4    2818
-mem-sp-pair                          2   54521   54521    1840    920.0       0
-mem-base-pair                       16   12448   65143   12448    778.0   52695
+prologue-pair                        2    9280    9280    9280   4640.0       0
+dual-setup-pair                     11   48136   53967   48136   4376.0    5831
+czero-or-chain                       2    4526    4725    4526   2263.0     199
+post-inc-pair                        4    8457    8457    8457   2114.2       0
+epilogue-pair                        2    4823    4823    4146   2073.0       0
+setup-jump-pair                     15   19614   32225   19606   1307.1   12611
+load-base-branch-pair               14   18151   20969   18151   1296.5    2818
+mem-sp-pair                          2   54514   54514    1840    920.0       0
+mem-base-pair                       16   12444   65132   12444    777.8   52688
 load-call-chain                      4    3027    3027    2925    731.2       0
 load0-load10-chain                   7    4061    4061    4059    579.9       0
 load5-load5-chain                    7    2647    2647    2635    376.4       0
 bit-test-branch-chain               24    7718    7718    7718    321.6       0
-addi-store-chain                     4    1880    1880    1055    263.8       0
+addi-store-chain                     4    1881    1881    1053    263.2       0
 load-store-chain                    16    3703    3703    3703    231.4       0
-arg-call-pair                       16    3395    3418    3395    212.2      23
-index-mem-chain                      8    1682    1682    1682    210.2       0
-pre-inc-pair                         8    1654    1654    1654    206.8       0
-li-czero-chain                       2     382     382     382    191.0       0
-li-branch-chain                     48    8852    8852    8852    184.4       0
-load-alu-chain                      64    9917    9917    9917    155.0       0
+arg-call-pair                       16    3393    3416    3393    212.1      23
+index-mem-chain                      8    1684    1684    1684    210.5       0
+pre-inc-pair                         8    1657    1657    1657    207.1       0
+li-czero-chain                       2     383     383     383    191.5       0
+li-branch-chain                     48    8621    8621    8621    179.6       0
+load-alu-chain                      64    9918    9918    9918    155.0       0
 load-sp-branch-pair                  6    3693    3693     875    145.8       0
-arith-jump-pair                     64   19346   20024    7118    111.2     678
-inc-branch-pair                     16    1739    1739    1739    108.7       0
-rsd-alu-pair                       256   27332   27332   21401     83.6       0
-alu-alu-chain                      128    8526    9249    8526     66.6     723
-alu-store-chain                     32    3192    4008    1629     50.9     816
-addi-store-off-chain                16     443    2549     443     27.7    2106
-macro-op-pair                        7      24      24      24      3.4       0
+arith-jump-pair                     64   19691   20368    7182    112.2     677
+inc-branch-pair                     16    1743    1743    1743    108.9       0
+rsd-alu-pair                       256   25312   25312   18558     72.5       0
+alu-store-chain                     32    3209    4030    2129     66.5     821
+alu-alu-chain                      128    8512    9236    8512     66.5     724
+addi-store-off-chain                 8     426    1898     426     53.2    1472
+macro-op-pair                        9      93      93      93     10.3       0
 ------------------------------------------------------------------------------
-TOTAL                              807  289928          213080    264.0
+TOTAL                              795  291317          213853    269.0
 
 how many frames could encode each pair:
-  1 frame :   213080   73.5%   <- only this frame can
-  2 frames:    76299   26.3%
-  3 frames:      549    0.2%
-  76848 pairs (26.5%) are encodable by more than one frame.
+  1 frame :   213853   73.4%   <- only this frame can
+  2 frames:    77064   26.5%
+  3 frames:      400    0.1%
+  77464 pairs (26.6%) are encodable by more than one frame.
 
 who shadows whom — of the pairs each frame WON, which other frames
 would also have taken them (first-wins hides this):
-  mem-sp-pair                      mem-base-pair 52681
-  rsd-alu-pair                     dual-setup-pair 5012, alu-alu-chain 723, czero-or-chain 196
+  mem-sp-pair                      mem-base-pair 52674
+  rsd-alu-pair                     dual-setup-pair 5831, alu-alu-chain 724, czero-or-chain 199
+  arith-jump-pair                  setup-jump-pair 12509, arg-call-pair 15
   setup-jump-pair                  arg-call-pair 8
-  arith-jump-pair                  setup-jump-pair 12228, arg-call-pair 15
-  epilogue-pair                    arith-jump-pair 678
+  epilogue-pair                    arith-jump-pair 677
   load0-load10-chain               mem-base-pair 2
   load-sp-branch-pair              load-base-branch-pair 2818
-  alu-store-chain                  addi-store-off-chain 1563
+  alu-store-chain                  addi-store-off-chain 1080
   load-call-chain                  setup-jump-pair 102
   load5-load5-chain                mem-base-pair 12
-  addi-store-chain                 alu-store-chain 816, addi-store-off-chain 543
+  addi-store-chain                 alu-store-chain 821, addi-store-off-chain 392
 
 ==============================================================================
 RV32 + RV64
@@ -127,54 +127,54 @@ RV32 + RV64
 
 frame                               cp    hits   reach    excl  excl/cp  hidden
 ------------------------------------------------------------------------------
-prologue-pair                        2   16900   16900   16900   8450.0       0
-mem-sp-pair                          2  108525  108525   12445   6222.5       0
-czero-or-chain                       2    8797    9164    8797   4398.5     367
-dual-setup-pair                     17   74739   83089   74739   4396.4    8350
-epilogue-pair                        2    8899    8899    7168   3584.0       0
-post-inc-pair                        4   14213   14213   14213   3553.2       0
-setup-jump-pair                     15   31590   51537   31578   2105.2   19947
-load-base-branch-pair               14   28862   32913   28862   2061.6    4051
-mem-base-pair                       16   26628  122733   26628   1664.2   96105
+prologue-pair                        2   16933   16933   16933   8466.5       0
+dual-setup-pair                     11   80174   89879   80174   7288.5    9705
+mem-sp-pair                          2  108512  108512   12445   6222.5       0
+czero-or-chain                       2    8795    9167    8795   4397.5     372
+epilogue-pair                        2    8893    8893    7165   3582.5       0
+post-inc-pair                        4   14209   14209   14209   3552.2       0
+setup-jump-pair                     15   31192   51529   31179   2078.6   20337
+load-base-branch-pair               14   28863   32914   28863   2061.6    4051
+mem-base-pair                       16   26610  122702   26610   1663.1   96092
 load-call-chain                      4    5811    5811    5638   1409.5       0
 load0-load10-chain                   7    6791    6791    6785    969.3       0
 bit-test-branch-chain               24   14512   14512   14512    604.7       0
 load5-load5-chain                    7    4039    4039    4020    574.3       0
-addi-store-chain                     4    3635    3635    2023    505.8       0
+addi-store-chain                     4    3635    3635    2020    505.0       0
 load-store-chain                    16    6416    6416    6416    401.0       0
-pre-inc-pair                         8    2986    2986    2986    373.2       0
-index-mem-chain                      8    2935    2935    2935    366.9       0
-li-czero-chain                       2     657     657     657    328.5       0
-li-branch-chain                     48   15494   15494   15494    322.8       0
-load-alu-chain                      64   16355   16355   16355    255.5       0
-arg-call-pair                       16    3979    4021    3979    248.7      42
+pre-inc-pair                         8    2991    2991    2991    373.9       0
+index-mem-chain                      8    2937    2937    2937    367.1       0
+li-czero-chain                       2     662     662     662    331.0       0
+li-branch-chain                     48   15098   15098   15098    314.5       0
+load-alu-chain                      64   16356   16356   16356    255.6       0
+arg-call-pair                       16    3976    4019    3976    248.5      43
 load-sp-branch-pair                  6    5288    5288    1237    206.2       0
-inc-branch-pair                     16    2977    2977    2977    186.1       0
-arith-jump-pair                     64   31464   33195   11690    182.7    1731
-rsd-alu-pair                       256   46340   46340   36303    141.8       0
-alu-alu-chain                      128   16557   17877   16557    129.4    1320
-alu-store-chain                     32    6766    8361    3171     99.1    1595
-addi-store-off-chain                16     680    5384     680     42.5    4704
-macro-op-pair                        7     260     260     260     37.1       0
+inc-branch-pair                     16    2967    2967    2967    185.4       0
+arith-jump-pair                     64   31970   33698   11806    184.5    1728
+alu-store-chain                     32    6812    8413    4184    130.8    1601
+alu-alu-chain                      128   16304   17649   16304    127.4    1345
+rsd-alu-pair                       256   43320   43320   31898    124.6       0
+addi-store-off-chain                 8     655    4211     655     81.9    3556
+macro-op-pair                        9     725     725     725     80.6       0
 ------------------------------------------------------------------------------
-TOTAL                              807  513095          376005    465.9
+TOTAL                              795  515446          377560    474.9
 
 how many frames could encode each pair:
-  1 frame :   376005   73.3%   <- only this frame can
-  2 frames:   135968   26.5%
-  3 frames:     1122    0.2%
-  137090 pairs (26.7%) are encodable by more than one frame.
+  1 frame :   377560   73.2%   <- only this frame can
+  2 frames:   136942   26.6%
+  3 frames:      944    0.2%
+  137886 pairs (26.8%) are encodable by more than one frame.
 
 who shadows whom — of the pairs each frame WON, which other frames
 would also have taken them (first-wins hides this):
-  mem-sp-pair                      mem-base-pair 96080
-  rsd-alu-pair                     dual-setup-pair 8350, alu-alu-chain 1320, czero-or-chain 367
-  setup-jump-pair                  arg-call-pair 12
-  arith-jump-pair                  setup-jump-pair 19774, arg-call-pair 30
-  epilogue-pair                    arith-jump-pair 1731
+  mem-sp-pair                      mem-base-pair 96067
+  rsd-alu-pair                     dual-setup-pair 9705, alu-alu-chain 1345, czero-or-chain 372
+  arith-jump-pair                  setup-jump-pair 20164, arg-call-pair 30
+  setup-jump-pair                  arg-call-pair 13
+  epilogue-pair                    arith-jump-pair 1728
+  alu-store-chain                  addi-store-off-chain 2628
   load0-load10-chain               mem-base-pair 6
-  alu-store-chain                  addi-store-off-chain 3595
   load-call-chain                  setup-jump-pair 173
   load-sp-branch-pair              load-base-branch-pair 4051
   load5-load5-chain                mem-base-pair 19
-  addi-store-chain                 alu-store-chain 1595, addi-store-off-chain 1109
+  addi-store-chain                 alu-store-chain 1601, addi-store-off-chain 928

@@ -7,120 +7,120 @@
 RV32  (testcase0, musl-rv32, musl-os-rv32, musl-gcc-rv32, sqlite-rv32, cpp-rv32)
 frame                                  hits    cp   hits/cp   share
 -------------------------------------------------------------------
-mem-sp-pair                           54004     2   27002.0   24.2%
-prologue-pair                          7650     2    3825.0    3.4%
-czero-or-chain                         4270     2    2135.0    1.9%
-epilogue-pair                          4072     2    2036.0    1.8%
-dual-setup-pair                       30093    17    1770.2   13.5%
-post-inc-pair                          5755     4    1438.8    2.6%
-mem-base-pair                         14180    16     886.2    6.4%
-setup-jump-pair                       11702    15     780.1    5.2%
+mem-sp-pair                           53998     2   26999.0   24.1%
+prologue-pair                          7653     2    3826.5    3.4%
+dual-setup-pair                       32038    11    2912.5   14.3%
+czero-or-chain                         4269     2    2134.5    1.9%
+epilogue-pair                          4070     2    2035.0    1.8%
+post-inc-pair                          5752     4    1438.0    2.6%
+mem-base-pair                         14166    16     885.4    6.3%
+setup-jump-pair                       11578    15     771.9    5.2%
 load-base-branch-pair                 10712    14     765.1    4.8%
 load-call-chain                        2784     4     696.0    1.2%
-addi-store-chain                       1755     4     438.8    0.8%
+addi-store-chain                       1754     4     438.5    0.8%
 load0-load10-chain                     2730     7     390.0    1.2%
 bit-test-branch-chain                  6794    24     283.1    3.0%
 load-sp-branch-pair                    1595     6     265.8    0.7%
 load5-load5-chain                      1392     7     198.9    0.6%
-arith-jump-pair                       12118    64     189.3    5.4%
+arith-jump-pair                       12279    64     191.9    5.5%
 load-store-chain                       2713    16     169.6    1.2%
-pre-inc-pair                           1332     8     166.5    0.6%
+pre-inc-pair                           1334     8     166.8    0.6%
 index-mem-chain                        1253     8     156.6    0.6%
-li-branch-chain                        6642    48     138.4    3.0%
-li-czero-chain                          275     2     137.5    0.1%
-alu-store-chain                        3574    32     111.7    1.6%
+li-czero-chain                          279     2     139.5    0.1%
+li-branch-chain                        6477    48     134.9    2.9%
+alu-store-chain                        3603    32     112.6    1.6%
 load-alu-chain                         6438    64     100.6    2.9%
-inc-branch-pair                        1238    16      77.4    0.6%
-rsd-alu-pair                          19008   256      74.2    8.5%
-alu-alu-chain                          8031   128      62.7    3.6%
-arg-call-pair                           584    16      36.5    0.3%
-macro-op-pair                           236     7      33.7    0.1%
-addi-store-off-chain                    237    16      14.8    0.1%
+inc-branch-pair                        1224    16      76.5    0.5%
+rsd-alu-pair                          18008   256      70.3    8.0%
+macro-op-pair                           632     9      70.2    0.3%
+alu-alu-chain                          7792   128      60.9    3.5%
+arg-call-pair                           583    16      36.4    0.3%
+addi-store-off-chain                    229     8      28.6    0.1%
 -------------------------------------------------------------------
-TOTAL                                223167   807     276.5
+TOTAL                                224129   795     281.9
 
 RV64  (godot, musl-rv64, musl-os-rv64, musl-gcc-rv64, sqlite-rv64, sqlitem-rv64, sqlite-gcc-rv64, cpp-rv64)
 frame                                  hits    cp   hits/cp   share
 -------------------------------------------------------------------
-mem-sp-pair                           54521     2   27260.5   18.8%
-prologue-pair                          9250     2    4625.0    3.2%
-dual-setup-pair                       44646    17    2626.2   15.4%
-epilogue-pair                          4827     2    2413.5    1.7%
-czero-or-chain                         4527     2    2263.5    1.6%
-post-inc-pair                          8458     4    2114.5    2.9%
-setup-jump-pair                       19888    15    1325.9    6.9%
-load-base-branch-pair                 18150    14    1296.4    6.3%
-mem-base-pair                         12448    16     778.0    4.3%
+mem-sp-pair                           54514     2   27257.0   18.7%
+prologue-pair                          9280     2    4640.0    3.2%
+dual-setup-pair                       48136    11    4376.0   16.5%
+epilogue-pair                          4823     2    2411.5    1.7%
+czero-or-chain                         4526     2    2263.0    1.6%
+post-inc-pair                          8457     4    2114.2    2.9%
+setup-jump-pair                       19614    15    1307.6    6.7%
+load-base-branch-pair                 18151    14    1296.5    6.2%
+mem-base-pair                         12444    16     777.8    4.3%
 load-call-chain                        3027     4     756.8    1.0%
 load-sp-branch-pair                    3693     6     615.5    1.3%
 load0-load10-chain                     4061     7     580.1    1.4%
-addi-store-chain                       1880     4     470.0    0.6%
+addi-store-chain                       1881     4     470.2    0.6%
 load5-load5-chain                      2647     7     378.1    0.9%
-bit-test-branch-chain                  7718    24     321.6    2.7%
-arith-jump-pair                       19346    64     302.3    6.7%
+bit-test-branch-chain                  7718    24     321.6    2.6%
+arith-jump-pair                       19691    64     307.7    6.8%
 load-store-chain                       3703    16     231.4    1.3%
-arg-call-pair                          3395    16     212.2    1.2%
-index-mem-chain                        1682     8     210.2    0.6%
-pre-inc-pair                           1654     8     206.8    0.6%
-li-czero-chain                          382     2     191.0    0.1%
-li-branch-chain                        8852    48     184.4    3.1%
-load-alu-chain                         9917    64     155.0    3.4%
-inc-branch-pair                        1739    16     108.7    0.6%
-rsd-alu-pair                          27332   256     106.8    9.4%
-alu-store-chain                        3192    32      99.8    1.1%
-alu-alu-chain                          8526   128      66.6    2.9%
-addi-store-off-chain                    443    16      27.7    0.2%
-macro-op-pair                            24     7       3.4    0.0%
+arg-call-pair                          3393    16     212.1    1.2%
+index-mem-chain                        1684     8     210.5    0.6%
+pre-inc-pair                           1657     8     207.1    0.6%
+li-czero-chain                          383     2     191.5    0.1%
+li-branch-chain                        8621    48     179.6    3.0%
+load-alu-chain                         9918    64     155.0    3.4%
+inc-branch-pair                        1743    16     108.9    0.6%
+alu-store-chain                        3209    32     100.3    1.1%
+rsd-alu-pair                          25312   256      98.9    8.7%
+alu-alu-chain                          8512   128      66.5    2.9%
+addi-store-off-chain                    426     8      53.2    0.1%
+macro-op-pair                            93     9      10.3    0.0%
 -------------------------------------------------------------------
-TOTAL                                289928   807     359.3
+TOTAL                                291317   795     366.4
 
 RV32 + RV64  (testcase0, musl-rv32, musl-os-rv32, musl-gcc-rv32, sqlite-rv32, cpp-rv32, godot, musl-rv64, musl-os-rv64, musl-gcc-rv64, sqlite-rv64, sqlitem-rv64, sqlite-gcc-rv64, cpp-rv64)
 frame                                  hits    cp   hits/cp   share
 -------------------------------------------------------------------
-mem-sp-pair                          108525     2   54262.5   21.2%
-prologue-pair                         16900     2    8450.0    3.3%
-epilogue-pair                          8899     2    4449.5    1.7%
-czero-or-chain                         8797     2    4398.5    1.7%
-dual-setup-pair                       74739    17    4396.4   14.6%
-post-inc-pair                         14213     4    3553.2    2.8%
-setup-jump-pair                       31590    15    2106.0    6.2%
-load-base-branch-pair                 28862    14    2061.6    5.6%
-mem-base-pair                         26628    16    1664.2    5.2%
+mem-sp-pair                          108512     2   54256.0   21.1%
+prologue-pair                         16933     2    8466.5    3.3%
+dual-setup-pair                       80174    11    7288.5   15.6%
+epilogue-pair                          8893     2    4446.5    1.7%
+czero-or-chain                         8795     2    4397.5    1.7%
+post-inc-pair                         14209     4    3552.2    2.8%
+setup-jump-pair                       31192    15    2079.5    6.1%
+load-base-branch-pair                 28863    14    2061.6    5.6%
+mem-base-pair                         26610    16    1663.1    5.2%
 load-call-chain                        5811     4    1452.8    1.1%
 load0-load10-chain                     6791     7     970.1    1.3%
 addi-store-chain                       3635     4     908.8    0.7%
 load-sp-branch-pair                    5288     6     881.3    1.0%
 bit-test-branch-chain                 14512    24     604.7    2.8%
 load5-load5-chain                      4039     7     577.0    0.8%
-arith-jump-pair                       31464    64     491.6    6.1%
-load-store-chain                       6416    16     401.0    1.3%
-pre-inc-pair                           2986     8     373.2    0.6%
-index-mem-chain                        2935     8     366.9    0.6%
-li-czero-chain                          657     2     328.5    0.1%
-li-branch-chain                       15494    48     322.8    3.0%
-load-alu-chain                        16355    64     255.5    3.2%
-arg-call-pair                          3979    16     248.7    0.8%
-alu-store-chain                        6766    32     211.4    1.3%
-inc-branch-pair                        2977    16     186.1    0.6%
-rsd-alu-pair                          46340   256     181.0    9.0%
-alu-alu-chain                         16557   128     129.4    3.2%
-addi-store-off-chain                    680    16      42.5    0.1%
-macro-op-pair                           260     7      37.1    0.1%
+arith-jump-pair                       31970    64     499.5    6.2%
+load-store-chain                       6416    16     401.0    1.2%
+pre-inc-pair                           2991     8     373.9    0.6%
+index-mem-chain                        2937     8     367.1    0.6%
+li-czero-chain                          662     2     331.0    0.1%
+li-branch-chain                       15098    48     314.5    2.9%
+load-alu-chain                        16356    64     255.6    3.2%
+arg-call-pair                          3976    16     248.5    0.8%
+alu-store-chain                        6812    32     212.9    1.3%
+inc-branch-pair                        2967    16     185.4    0.6%
+rsd-alu-pair                          43320   256     169.2    8.4%
+alu-alu-chain                         16304   128     127.4    3.2%
+addi-store-off-chain                    655     8      81.9    0.1%
+macro-op-pair                           725     9      80.6    0.1%
 -------------------------------------------------------------------
-TOTAL                                513095   807     635.8
+TOTAL                                515446   795     648.4
 
 corpus sizes (insns / packets / pairs):
-  testcase0            21875    17713    4162
-  musl-rv32           118990    91291   27699
-  musl-os-rv32        109844    84160   25684
-  musl-gcc-rv32       119919    93977   25942
-  sqlite-rv32         192688   147006   45682
-  cpp-rv32            418345   324347   93998
-  godot                90171    74193   15978
-  musl-rv64           102010    79821   22189
-  musl-os-rv64         93259    73001   20258
-  musl-gcc-rv64       103412    82741   20671
-  sqlite-rv64         189602   146766   42836
-  sqlitem-rv64        201823   156468   45355
-  sqlite-gcc-rv64     167354   133517   33837
-  cpp-rv64            409200   320396   88804
+  testcase0            21875    17682    4193
+  musl-rv32           118990    91145   27845
+  musl-os-rv32        109844    84009   25835
+  musl-gcc-rv32       119919    93812   26107
+  sqlite-rv32         192688   146764   45924
+  cpp-rv32            418345   324120   94225
+  godot                90171    74137   16034
+  musl-rv64           102010    79684   22326
+  musl-os-rv64         93259    72835   20424
+  musl-gcc-rv64       103412    82609   20803
+  sqlite-rv64         189602   146520   43082
+  sqlitem-rv64        201823   156218   45605
+  sqlite-gcc-rv64     167354   133353   34001
+  cpp-rv64            409200   320158   89042

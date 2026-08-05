@@ -389,8 +389,26 @@ No general register block is reserved at present. Earlier drafts held out a cont
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│  rs1a   │g│immb[4:0]│  rbase  │ fn3 │imma[4:0]│ opcode5 │1 0│
 
- * `immb` is width-scaled and unsigned; `imma` is signed. The stored
-   value is the chain temporary and is not encoded.
+ * `immb` is width-scaled and unsigned; `imma` is signed -- and that
+   asymmetry is the frame's whole shape. A memory offset carries an
+   access width, so five bits of `immb` reach 4x or 8x further; an `addi`
+   addend is pointer arithmetic and carries none, so its bits are bytes.
+   `load5-load5-chain` gets a symmetric split because BOTH its immediates
+   are scaled offsets; this frame cannot, and scaling A by the store's k
+   would not help -- the addends are 93% ODD, only 28.8% are aligned to
+   their own store's width, and for `sw` (65% of the population) it is 5
+   of 295. The stored value is the chain temporary and is not encoded.
+ * THE WIDTH BELONGS TO B, measured 2026-08-04. The row draws five bits
+   per column, so a sixth costs a doubling. Over 455 scheduled pairs on
+   sqlite-rv32/rv64 and cpp-rv32/rv64: A's addend fits FIVE bits 97% of
+   the time and two bits 95% of the time, while B's scaled offset fits
+   five only 33% of the time and six 100%. So A was paying 8 codepoints
+   for the 2% that need a sixth bit. Dropped to 5+6: 16 codepoints to 8,
+   at a cost of 5 pairs on sqlite-rv32 and 4 on sqlite-rv64. Narrowing B
+   too (5+5, 4cp) costs a further 135 and 130 -- that bit is real.
+ * This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
+   cpp-rv32. A cpp-only reading makes it look like the worst frame in the
+   encoding; it is not.
 
 ## load-call-chain
 
@@ -474,13 +492,26 @@ No general register block is reserved at present. Earlier drafts held out a cont
     alu     rda, rs1a, rs2a
     alu     rdb, rs1a, rs2a
 
+    add     rda, rs1a, rs2a
+    sltu    rdb, rda, rs1a
+
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│   rda   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
- * KEPT DELIBERATELY DESPITE A NEAR-ZERO SCORE. Do not cut this frame on
-   pairing-rate evidence; it is not here to earn pairs.
+ * CARRY-OUT, measured (2026-08-04). cpp-rv32 holds 156 carry-shaped
+   adjacencies, godot 36, everything else under five. The cluster takes
+   the frame from 59 hits to 167 on cpp-rv32, but the corpus total rises
+   by 29. The difference is NOT another frame losing the same pairs --
+   `alu-alu-chain` cannot encode (add, sltu) at all, since `sltu` appears
+   only in its A sets. It is greedy DISPLACEMENT: claiming the `add`
+   denies it to whatever was pairing with it from the left, so alu-alu-
+   chain drops 74 elsewhere in the stream. Report the frame's worth as
+   29, not 108.
+ * THE REST OF THE FRAME IS KEPT DESPITE A NEAR-ZERO SCORE. Do not cut
+   the mul/div clusters on pairing-rate evidence; they are not there to
+   earn pairs.
  * Every cluster is two halves of ONE computation over the same operands:
    the low and high words of a multiply, the quotient and remainder of a
    divide, the sum and difference, the min and the max. Encoding them as
@@ -526,12 +557,52 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      rda, imma
     li      rdb, immb
 
+    mv/li   rda, rs1a/imma
+    li      ardb, immb
+
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│   rda   │g│  rs2b   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
+│h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │immb+rdb │ opcode5 │1 0│
+│h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │immb+rdb │ opcode5 │1 0│
+│h│imma+rda │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
+
+ * THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05). With the
+   width caps relaxed to ten bits, wide `li` destinations are argument
+   registers 86-89% of the time on musl-gcc-rv32 + sqlite-rv64 (at 7 bits
+   404 arg vs 51 other, at 8 bits 938 vs 154) and 85%/65% on cpp-rv32 --
+   the arg-call-pair effect, without the call. The band this replaces, 6
+   bits at any rd, is nearly vacant: keeping it alongside the 8-bit band
+   (re-measured, full scheduler) buys +18 pairs over three corpora for a
+   doubled block. Dropped.
+ * Swept with the real scheduler against the 6-bit-any-rd baseline (musl-
+   gcc-rv32 / sqlite-rv64 / cpp-rv32, corpus TOTALS so displacement is
+   netted): +169 / +429 / +216 pairs. Part of the gain is displacement --
+   rsd-alu-pair gives back up to 110, li-branch-chain up to 50 -- which
+   the totals already count.
+ * `addi4spn` deliberately does NOT get the split: its wide destinations
+   are a coin flip on musl+sqlite (129 arg vs 135 other at 7 bits) and
+   splitting it regressed musl-gcc while paying on cpp (+375/-71
+   relative) -- a C++-marshalling bet, not a win. Its 6-bit band stays as
+   it was.
+ * The a0-a7 restriction is enforced by scheduler/rules.py (`_ARG_REGS`,
+   shared with arg-call-pair); the yaml states it as the 3-bit
+   destination part of each split row, which is how arg-call-pair states
+   it too. An `imm: {bits}` contract is an opcode property and must agree
+   across slots (op_contracts), so both slots declare 8 and both get a
+   split row; the rule caps the pair at ONE wide immediate, matching the
+   one split per row.
+ * PRICED 11 BY THE MODEL, ~19 BY HAND, in a 32-block either way.
+   opcode_codepoints scores each op against the slot's WIDEST row, so
+   with the split rows present (7-bit fields) it sees li at ext 1 and
+   stops charging addi4spn's sixth bit, which in the full-rd rows still
+   rides an opcode repeat -- the same widest-row coarseness arg-call-pair
+   already lives with. A band-by-band hand count (li 5-any + 8-args, spn
+   5 + rider, one spelling per unordered pair) is ~19. Both are inside
+   the block; the gap is a known model artifact, not spare room to spend.
 
 ## rsd-alu-pair
 

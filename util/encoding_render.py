@@ -519,6 +519,28 @@ def imm_field_bits(frame, grid, slot):
     return width
 
 
+def narrow_field_bits(frame, grid, slot):
+    """The immediate field of the NARROWEST row that draws this slot's
+    immediate at all: the un-extended base band an op with no declared
+    contract actually gets.
+
+    `imm_field_bits` takes the widest row — right for pricing what the frame
+    CAN carry, wrong for the base band once a frame mixes full-register rows
+    with split rows: dual-setup-pair's any-rd band is the 5-bit row beside
+    its 7-bit a0-a7 split rows, and reading the 7 there silently widens a
+    band whose extra bits only exist under the register restriction."""
+    names = IMM_NAMES[slot]
+    widths = []
+    for row in frame.get("rows", []):
+        row_width = 0
+        for _f, stem, bits, _raw in row_parts(row, grid):
+            if stem in names:
+                row_width += bits
+        if row_width:
+            widths.append(row_width)
+    return min(widths) if widths else 0
+
+
 def _slot_weight(op_list, base):
     """Codepoints a slot's ops occupy: Σ 2^ext, where ext = the bits of range an
     op's declared width needs above the base (0 for a bare/base-range op, so
