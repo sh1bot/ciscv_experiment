@@ -10,8 +10,8 @@ already past).
 RVC figures are REAL, taken from the `-noalias` disassemblies, not the
 `rvc_eligible` estimator (which is a ceiling — see CLAUDE.md).  Every pair
 counted is encodable as drawn: widths declared and enforced, codepoints paid
-(`encoding_assign` reports zero accounting complaints at 782/1024 reserved,
-242 spare), and `encoding_verify` puts every checkable frame at or near 100%
+(`encoding_assign` reports zero accounting complaints at 798/1024 reserved,
+226 spare), and `encoding_verify` puts every checkable frame at or near 100%
 encodable.  Two declared optimisms remain (ACCOUNTING.md §8), plus the
 declared `measures_also` folds.  Branch/jump displacements are unresolved
 labels in the corpus and are not range-checked.  And `load-call-chain`
