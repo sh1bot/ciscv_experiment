@@ -881,11 +881,9 @@ def _mem_sp_pair(a: Instruction, b: Instruction) -> None:
 
 
 _DUAL_TUPLES: dict = {
-    # arith2 — sum/difference, min/max, mul hi/lo, div/rem (+ unsigned, word)
-    ("add", "sub"):       "arith2",
-    ("addw", "subw"):     "arith2",
-    ("min", "max"):       "arith2",
-    ("minu", "maxu"):     "arith2",
+    # arith2 — ONE unit pass yielding two results: mul hi/lo, div/rem.
+    # sum/difference and min/max were cut: they share arguments but are two
+    # separate computations, which is a different claim about the hardware.
     # High half first, per the M extension's fusion sequence -- see the
     # macro-op-pair notes in encoding.yaml.  The canonical direction is what
     # the encoding blesses; rules.py still accepts either order.

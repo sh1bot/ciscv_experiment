@@ -191,6 +191,74 @@ like on this workbench.
    packet holds exactly two ops, so multi-register forms are reachable only
    as *chains of packets*; the phase-pairing idea (pair long store runs at
    the right parity) is the local answer.  Recorded as out of scope.
+10. **Same-source two-result pairs — SET ASIDE from macro-op-pair, not yet
+   measured.**  Two instructions reading the SAME arguments and wanting both
+   results.  This is a weaker claim than `macro-op-pair`'s: there, one unit
+   pass already forms both results and the second instruction only recovers
+   what was being discarded (the multiplier's high half, the divider's
+   remainder).  Here the two results are two computations that happen to
+   share operands, so fusing them is an ALU-width argument, not a
+   don't-throw-it-away one.  Cut from `macro-op-pair` for that reason.
+
+   The shapes set aside, all `op rda, rs1, rs2 ; op rdb, rs1, rs2`:
+
+   | pair | what it computes | note |
+   |------|------------------|------|
+   | `add` / `sub` | sum and difference | one adder, two output muxes |
+   | `addw` / `subw` | same, RV64 word forms | |
+   | `min` / `max` | both order statistics | one comparison decides both |
+   | `minu` / `maxu` | unsigned forms | |
+   | `add` / `slt` | **sum and carry-out** | see below — does not share the shape |
+
+   **Add-with-carry is the odd one and the most interesting.**  Spelled
+   `add rda, rs1, rs2 ; slt rdb, rda, rs2`, it is how RISC-V synthesises a
+   carry-out, and it does NOT fit the same-source shape: the `slt` reads
+   `rda`, the sum, so the two are a dependent chain rather than two reads of
+   one argument list.  It belongs with these because it is the same
+   invitation in spirit — one adder pass already computes the carry and
+   throws it away, which is exactly `macro-op-pair`'s argument.  Encoding it
+   costs a chain frame's shape (rda is both A's destination and B's source),
+   not this one's.  Multi-word arithmetic is where it appears: bignum,
+   64-bit adds on RV32, overflow checks.
+
+   **First census (2026-08-04, textual, nine corpora, both halves
+   register-register and dests distinct).**  Adjacent pairs reading the same
+   two registers:
+
+   | pair | count | |
+   |------|------:|--|
+   | `add` / `sltu` | 301 | sum, and an unsigned compare of the same operands |
+   | `xor` / `sltu` | 84 | |
+   | `xor` / `slt` | 55 | |
+   | `sub` / `xor` | 26 | |
+   | `czero.nez` / `czero.eqz` | 25 | already `czero-or-chain`'s |
+   | `add` / `sub` | 0 | **the tuple this frame was cut for never occurs** |
+   | `min` / `max` | 0 | likewise |
+
+   So the two shapes actually set aside score ZERO adjacently, and the
+   same-source population that does exist is a different pairing — an
+   arithmetic result beside a comparison of its inputs.  If this frame is
+   ever built it should be fitted to that, not to sum/difference.
+
+   **Add-with-carry is the real population, and it is much larger.**  Census
+   of `op rd, x, y ; slt[u] rc, rd, y` — B reading A's RESULT, which is the
+   carry-out idiom proper:
+
+   | pair | count |
+   |------|------:|
+   | `add` / `sltu` | 431 |
+   | `addw` / `sltu` | 36 |
+   | `add` / `slt` | 26 |
+   | `add.uw` / `sltu` | 5 |
+   | others (`sub`, `sh1add`, `xor`) | 9 |
+   | **total** | **507** |
+
+   507 against zero for the same-source tuples.  It also needs no new frame
+   shape: A's destination feeding B is exactly a CHAIN, except that here the
+   temporary does not die — both results are wanted — so it is a chain frame
+   with rda encoded.  Operands are rda, rs1, rs2 and rdb: four registers, the
+   full 20-bit budget, no immediate.  That is the shape to price first.
+
 9. **Already-covered suggestions, for the record**: load/store pair →
    `mem-base-pair`; writeback addressing → `pre/post-inc`; scaled-index →
    `index-mem-chain`; conditional select → `czero-or-chain`/`li-czero`;

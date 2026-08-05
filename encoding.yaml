@@ -1035,15 +1035,19 @@ doc:
   - frame:
       name: macro-op-pair
       does: "Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them."
-      budget: 16
+      # ONE unit pass, two results.  The multiplier already forms the full
+      # 2*XLEN product and the divider already forms quotient and remainder;
+      # declaring the pair says both are wanted, so neither is discarded.
+      #
+      # sum/difference and min/max were cut from here: they are two separate
+      # computations that merely SHARE arguments, which is a different claim
+      # about the hardware and belongs to its own prospective frame (see
+      # FRAMES.md sec 3, "same-source two-result pairs").
+      budget: 8
       level: 1
       templates:
         - ["alu     rda, rs1a, rs2a", "alu     rdb, rs1a, rs2a"]
       ops:
-        - {a: [add],    b: [sub]}
-        - {a: [addw],   b: [subw]}
-        - {a: [min],    b: [max]}
-        - {a: [minu],   b: [maxu]}
         - {a: [mulh, mulhu, mulhsu], b: [mul]}
         - {a: [div],    b: [rem]}
         - {a: [divu],   b: [remu]}

@@ -196,63 +196,63 @@ class TestDualOpPair:
 
     # --- arith2 ---
 
-    def test_add_sub_same_sources_pairs(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=11, rs1=12, rs2=13)
+    def test_div_rem_same_sources_pairs(self):
+        a = make_insn("div", rd=10, rs1=12, rs2=13)
+        b = make_insn("rem", rd=11, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
-    def test_add_sub_different_sources_no_pair(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=11, rs1=14, rs2=15)
+    def test_div_rem_different_sources_no_pair(self):
+        a = make_insn("div", rd=10, rs1=12, rs2=13)
+        b = make_insn("rem", rd=11, rs1=14, rs2=15)
         assert can_pair(a, b) is not None
 
-    def test_add_sub_swapped_operand_order_no_pair(self):
-        """sub is non-commutative: rs1/rs2 must match positionally."""
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=11, rs1=13, rs2=12)
+    def test_div_rem_swapped_operand_order_no_pair(self):
+        """div is non-commutative: rs1/rs2 must match positionally."""
+        a = make_insn("div", rd=10, rs1=12, rs2=13)
+        b = make_insn("rem", rd=11, rs1=13, rs2=12)
         assert can_pair(a, b) is not None
 
-    def test_add_sub_same_dest_no_pair(self):
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=10, rs1=12, rs2=13)
+    def test_div_rem_same_dest_no_pair(self):
+        a = make_insn("div", rd=10, rs1=12, rs2=13)
+        b = make_insn("rem", rd=10, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_a_clobbers_shared_source_no_pair(self):
-        """A-slot op writing a shared source corrupts B's read.
-
-        min/max chosen so no chain/rsd rule applies — isolates macro-op-pair.
-        """
-        a = make_insn("min", rd=12, rs1=12, rs2=13)   # rd == shared rs1
-        b = make_insn("max", rd=11, rs1=12, rs2=13)
+        """A-slot op writing a shared source corrupts B's read."""
+        a = make_insn("divu", rd=12, rs1=12, rs2=13)   # rd == shared rs1
+        b = make_insn("remu", rd=11, rs1=12, rs2=13)
         assert can_pair(a, b) is not None
 
     def test_b_writes_shared_source_canonical_ok(self):
         """Canonical order: B writing a shared source is a legal WAR."""
-        a = make_insn("add", rd=10, rs1=12, rs2=13)
-        b = make_insn("sub", rd=12, rs1=12, rs2=13)   # rd == shared rs1
+        a = make_insn("div", rd=10, rs1=12, rs2=13)
+        b = make_insn("rem", rd=12, rs1=12, rs2=13)   # rd == shared rs1
         assert can_pair(a, b) is None
 
     def test_reversed_independent_pairs(self):
         """Reverse order accepted when fully independent."""
-        a = make_insn("sub", rd=11, rs1=12, rs2=13)
-        b = make_insn("add", rd=10, rs1=12, rs2=13)
+        a = make_insn("rem", rd=11, rs1=12, rs2=13)
+        b = make_insn("div", rd=10, rs1=12, rs2=13)
         assert can_pair(a, b) is None
 
     def test_reversed_with_conflict_no_pair(self):
         """Reverse order rejected when a dest is a shared source."""
-        a = make_insn("sub", rd=11, rs1=12, rs2=13)
-        b = make_insn("add", rd=12, rs1=12, rs2=13)   # b.rd in a.uses
+        a = make_insn("rem", rd=11, rs1=12, rs2=13)
+        b = make_insn("div", rd=12, rs1=12, rs2=13)   # b.rd in a.uses
         assert can_pair(a, b) is not None
 
-    def test_min_max_pairs(self):
+    def test_add_sub_no_longer_macro_op(self):
+        """Cut deliberately: add/sub share arguments but are two separate
+        computations, not two halves of one unit pass.  They belong to the
+        prospective same-source frame (FRAMES.md sec 3), not here."""
+        a = make_insn("add", rd=10, rs1=12, rs2=13)
+        b = make_insn("sub", rd=11, rs1=12, rs2=13)
+        assert can_pair(a, b) is not None
+
+    def test_min_max_no_longer_macro_op(self):
         a = make_insn("min", rd=10, rs1=12, rs2=13)
         b = make_insn("max", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
-
-    def test_minu_maxu_pairs(self):
-        a = make_insn("minu", rd=10, rs1=12, rs2=13)
-        b = make_insn("maxu", rd=11, rs1=12, rs2=13)
-        assert can_pair(a, b) is None
+        assert can_pair(a, b) is not None
 
     def test_mul_mulh_pairs(self):
         a = make_insn("mul", rd=10, rs1=12, rs2=13)
