@@ -699,6 +699,15 @@ doc:
       does: "Advance a pointer, then access through it (pre-increment)."
       budget: 8
       level: 2
+      # The addi rows' 10-bit width-scaled imma spans the whole 12-bit
+      # pcrel-lo residue (bits + log2(k) >= 12), so the lo half of an
+      # `auipc; addi lo; access 0()` address chain is encodable by
+      # construction -- whatever lo OUR link step computes fits, with the
+      # sign free because the toolchain biases the auipc.  Only the target's
+      # alignment survives relinking, and only it is checked.  Same claim as
+      # load-call-chain's; gated by test_conformance (the declaration is
+      # valid only while the field really spans the residue).
+      accepts_pcrel_lo: true
       templates:
         - ["shXadd  rsda, rs2a, rsda", "load    rdb, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "load    rdb, 0(rsda)"]
@@ -966,11 +975,16 @@ doc:
       # return-address stack).  x5 is not offered -- it never occurs.
       budget: 4
       level: 2
-      # DECLARED OPTIMISM (ACCOUNTING.md sec 8, and FINDINGS).  Admits a load
-      # whose base came from an `auipc`, which every other frame refuses: the
-      # corpus offset is a link-time artifact, but this field is ten bits
-      # scaled by the access width and holds anything the split can produce,
-      # so it is encodable by construction rather than by measurement.
+      # DECLARED RELAXATION (ACCOUNTING.md sec 8, and FINDINGS).  Admits a
+      # load whose base came from an `auipc`, which a NARROW-field frame must
+      # refuse: the corpus offset is a link-time artifact, but this field is
+      # ten bits scaled by the access width -- it spans the whole 12-bit
+      # pcrel-lo residue, so it holds anything the split can produce and is
+      # encodable by construction rather than by measurement.  The target's
+      # alignment is the one fact that survives relinking, and rules.py
+      # checks it; the sign is free (the toolchain biases the auipc), so the
+      # earlier unsigned-vs-biased caveat and the rv64 "0-7% not 8-aligned"
+      # residue are now handled per-site instead of assumed away.
       accepts_pcrel_lo: true
       templates:
         - ["load    tmp, k*imma(rs1a)", "jalr_link_ra tmp"]

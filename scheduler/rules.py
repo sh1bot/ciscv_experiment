@@ -183,6 +183,10 @@ def _chain_alu_imm_in_range(insn: Instruction) -> None:
     andi the 5-bit base range; shifts an unsigned 5-bit amount."""
     bits = _CHAIN_ALU_IMM_BITS.get(insn.mnemonic)
     if bits is not None:
+        if insn.base_from_auipc and insn.mnemonic in ("addi", "addiw"):
+            # The lo half of an auipc address materialisation: the corpus
+            # value is layout junk and this field cannot span the residue.
+            raise NotPair("pcrel-lo-addi")
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-immediate")
@@ -231,6 +235,8 @@ def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS,
     """
     bits = widths.get(insn.mnemonic)
     if bits is not None:
+        if insn.base_from_auipc and insn.mnemonic in ("addi", "addiw"):
+            raise NotPair("pcrel-lo-addi")   # lo half; field cannot span it
         imm = insn.imm
         # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
         lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
@@ -311,7 +317,22 @@ def must_not_chain(func: Callable):
     return check_chain3
 
 
+# An offset whose base register came straight from an `auipc` is the
+# %pcrel_lo half of an address materialisation: the corpus value is
+# (target - pc_of_auipc) mod 4096, a fact about the layout the binary was
+# LINKED for, not a displacement the program chose.  What survives relinking
+# is only the target's ALIGNMENT; the magnitude is recomputed.  So a slot can
+# hold "whatever lo our own link step produces" iff its field spans the whole
+# 12-bit residue — declared bits + log2(scale) >= 12 — and signedness is
+# free, because the toolchain biases the auipc's hi half to land the residual
+# in whatever range the field has.  A frame whose field qualifies declares
+# `accepts_pcrel_lo` (gated by tests/test_conformance.py), skips the
+# magnitude check and tests only alignment: see load-call-chain and
+# pre-inc-pair.  These decorators are for every OTHER slot — a field that
+# cannot span the residue has nothing meaningful to range-check, so the pair
+# is refused instead of measured wrongly.  ACCOUNTING.md sec 8.
 def a_base_not_from_auipc(func: Callable):
+    """A's field cannot span the 12-bit pcrel-lo residue: refuse the pair."""
     @wraps(func)
     def check_a_base_from_auipc(a: Instruction, b: Instruction):
         if a.base_from_auipc:
@@ -321,6 +342,7 @@ def a_base_not_from_auipc(func: Callable):
 
 
 def b_base_not_from_auipc(func: Callable):
+    """B's field cannot span the 12-bit pcrel-lo residue: refuse the pair."""
     @wraps(func)
     def check_b_base_from_auipc(a: Instruction, b: Instruction):
         if b.base_from_auipc:
@@ -464,6 +486,8 @@ def _rsd_slot_imm_ok(insn: Instruction, widths: dict, slot: str) -> None:
         # An unresolved relocation (e.g. `addi rd, rd, %lo(sym)`) is not a
         # constant this frame's field measured; dropping it mis-encodes.
         raise NotPair(f"{slot}-unresolved-immediate")
+    if insn.base_from_auipc and insn.mnemonic in ("addi", "addiw"):
+        raise NotPair("pcrel-lo-addi")       # lo half; field cannot span it
     if insn.imm is None:
         return
     key = "li" if insn.is_li else insn.mnemonic
@@ -1426,11 +1450,15 @@ _PRE_INC_BUMP_BITS = _w("pre-inc-pair", "a", "addi")
 _PRE_INC_OFF_BITS = _w("pre-inc-pair", "b", "lw")
 
 
+_PRE_INC_PCREL = _yaml_pcrel_lo("pre-inc-pair")   # 10-bit scaled imma spans
+# the pcrel residue, so the lo half of an `auipc; addi; access 0()` chain is
+# encodable by construction (see the decorator note above).  B's base cannot
+# be tainted here: it is A's destination, so A's write killed the taint.
+
+
 @a_is_rsd
 @must_chain_base
 @exclusive_rd
-@a_base_not_from_auipc
-@b_base_not_from_auipc
 def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
@@ -1451,6 +1479,14 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
         shift = b.access_shift or 0
         if a.imm is None or not a.imm_multiple(shift):
             raise NotPair("A-stride-not-width-multiple")
+        if a.base_from_auipc:
+            # The lo half of an address materialisation.  Alignment (checked
+            # above) survives relinking; the magnitude does not, and the
+            # 10-bit width-scaled field spans every k-aligned residue, so it
+            # is not range-checked (accepts_pcrel_lo, ACCOUNTING.md sec 8).
+            if not _PRE_INC_PCREL:
+                raise NotPair("A-relocatable-offset")
+            return None
         v = a.imm >> shift if a.imm >= 0 else -((-a.imm) >> shift)
         lim = 1 << (_PRE_INC_BUMP_BITS - 1)
         if not (-lim <= v < lim):
@@ -1702,15 +1738,20 @@ def _load_call_chain(a: Instruction, b: Instruction) -> None:
         # link register the frame has no codepoint for -- see _LOAD_CALL_LINK_REGS.
         raise NotPair("B-link-register-not-encodable")
     if a.base_from_auipc:
-        # No `@a_base_not_from_auipc` here, by declaration: this frame's field
-        # spans the whole pcrel-lo range, so the offset the link step computes
-        # for the PACKED layout fits whatever it turns out to be.  The corpus
-        # number is not that offset -- it belongs to the layout the binary was
-        # linked for -- so it is not checked rather than checked wrongly.  The
-        # frame states the reasoning and the residue; see `accepts_pcrel_lo` in
-        # encoding.yaml and ACCOUNTING.md sec 8.
+        # No `@a_base_not_from_auipc` here, by declaration: this frame's
+        # 10-bit width-scaled field spans the whole 12-bit pcrel-lo residue,
+        # so the offset the link step computes for the PACKED layout fits
+        # whatever it turns out to be (sign included -- the toolchain biases
+        # the auipc).  The corpus MAGNITUDE is not that offset -- it belongs
+        # to the layout the binary was linked for -- so it is not checked
+        # rather than checked wrongly.  The target's ALIGNMENT, by contrast,
+        # is a property of the object and survives relinking, so the scaled
+        # field's alignment requirement IS checked.  See `accepts_pcrel_lo`
+        # in encoding.yaml and ACCOUNTING.md sec 8.
         if not _LOAD_CALL_PCREL_LO:
             raise NotPair("A-relocatable-offset")
+        if a.imm is not None and not a.imm_multiple(a.access_shift or 0):
+            raise NotPair("A-pcrel-target-misaligned")
         return None
     if not a.uimm_fits(_LOAD_CALL_OFF_BITS, a.access_shift or 0):
         raise NotPair("A-big-imm")
@@ -1829,6 +1870,8 @@ def _arg_call_a_ok(a: Instruction) -> bool:
         # so the codepoint is spent on 512 instead of wasting it on 0
         return rd in _ARG_REGS and _fits_u(i - 4, _ARG_CALL_SPN_BITS, 4)
     if m in ("addi", "addiw") and rd == rs1 and rd not in (0, None):
+        if a.base_from_auipc:
+            return False     # lo half of an auipc chain; 7 bits cannot span it
         # Row 2's rd column is SPLIT -- two bits of imma[6:5] and only three of
         # rda -- so this destination is the 3-bit class, exactly as the li /
         # addi4spn / load rows sharing that row already require.  This branch

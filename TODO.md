@@ -95,9 +95,11 @@ Recorded here so they are not lost; each needs a home in the design documents.
 - **Global slot discipline** — A executes before B; control transfers may only
   occupy the B slot; unknown instructions never pair; calls are excluded from
   jump frames.  This is packet execution semantics, not a heuristic.
-- **Relocation and optimism policy** — `%pcrel_lo`/auipc-fed loads never pair;
-  branch and jump displacements are deliberately *not* range-checked.  Same
-  optimism as the RVC-eligibility ceiling.
+- **Relocation and optimism policy** — a `%pcrel_lo`/auipc-fed offset pairs
+  only where the slot's field spans the full 12-bit residue (declared
+  `accepts_pcrel_lo`, magnitude unchecked, alignment checked); narrower
+  slots refuse it.  Branch and jump displacements are deliberately *not*
+  range-checked.  See ACCOUNTING.md §8.
 - **Methodology constants** — the 90/95/99% coverage targets, p95 as the
   immediate-width statistic, the starvation and register-pressure thresholds in
   `encoding_budget.py`.  These define what "fits" means.

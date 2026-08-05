@@ -216,6 +216,48 @@ def test_register_fields_are_five_bits_or_declared_narrow():
                      "declared in NARROW_REGISTER_FIELDS — the owning rule must "
                      "restrict them:\n  " + "\n  ".join(bad))
 
+def test_accepts_pcrel_lo_fields_span_the_residue():
+    """`accepts_pcrel_lo` is valid only while the field really spans it.
+
+    An auipc-fed offset is the %pcrel_lo half of an address materialisation:
+    the corpus magnitude belongs to the OLD layout, and only the target's
+    alignment survives relinking.  A frame may therefore accept such pairs
+    unmeasured exactly when its offset field can hold ANY lo the new link
+    step produces — declared bits + log2(scale) >= 12, the sign being free
+    because the toolchain biases the auipc.  This pins the declaration to
+    that arithmetic: narrow a declared frame's field and the declaration
+    (with rules.py's skip-the-range-check behaviour) becomes a lie this
+    test catches.
+    """
+    import math
+    import yaml as _yaml
+    sys.path.insert(0, os.path.join(ROOT, "util"))
+    from encoding_render import op_name, op_imm
+
+    access = {"lb": 1, "lbu": 1, "lh": 2, "lhu": 2, "lw": 4, "lwu": 4,
+              "ld": 8, "sb": 1, "sh": 2, "sw": 4, "sd": 8}
+    spec = _yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
+    checked = 0
+    for node in spec["doc"]:
+        frame = node.get("frame")
+        if not frame or not frame.get("accepts_pcrel_lo"):
+            continue
+        checked += 1
+        for cluster in frame.get("ops") or []:
+            for entry in cluster.get("a", []):
+                c = op_imm(entry)
+                if not c or not c.get("bits"):
+                    continue    # register-form op: no offset to hold a lo
+                k = c.get("scale") or access.get(op_name(entry), 1)
+                reach = c["bits"] + int(math.log2(k))
+                assert reach >= 12, (
+                    f"{frame['name']} declares accepts_pcrel_lo but "
+                    f"a:{op_name(entry)} reaches only {reach} bits "
+                    f"({c['bits']}b x{k}) — it cannot span the 12-bit "
+                    f"pcrel-lo residue")
+    assert checked >= 2, f"expected load-call-chain and pre-inc-pair, found {checked}"
+
+
 def test_frame_containment_runs():
     """The static overlap report must survive every yaml edit.
 

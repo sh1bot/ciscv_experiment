@@ -360,25 +360,34 @@ comment, and where the yaml declares one it uses a named key
   displacements are odd×2 in the corpus, and an alignment check would have
   measured the frame at zero on the corpus it was built for). The same
   assumption defines the link value `ra = packet + 4` used by the jump frames.
-- **`%pcrel_lo`/auipc-fed memory offsets never pair.** An offset whose base
-  register came straight from an `auipc` is `(target - pc_of_auipc) & 0xfff`,
-  an artifact of the layout that binary was linked for; range-checking it
-  measures the old layout, so every rule that draws a memory offset (and the
-  addi-immediate frames whose A is the lo half of an address materialisation:
-  addi-store-chain, addi-store-off-chain, pre-inc-pair) refuses the tainted
-  base instead — the code is excluded from the numerator rather than counted
-  as encodable. *Except* in a frame that declares `accepts_pcrel_lo`, where
-  such pairs are accepted and their offset is not range-checked at all. Only
-  `load-call-chain` declares it today. That is the same class of claim as the
-  branch displacements above — an unmeasured immediate assumed to fit — and
-  optimistic in the same way. It also assumes an UNBIASED split (RISC-V's
-  +0x800 exists only because its I-type immediate is sign-extended; these
-  fields are unsigned), and on rv64 it hides a width-scaling residue of
-  0–7% (offsets not 8-aligned). Quantified at the frame's yaml note.
-  *Known residual:* an auipc-fed lo-half `addi` reaching a pure ALU frame
-  (rsd-alu-pair, alu-alu-chain, arith-jump-pair) is still accepted when the
-  old layout's lo value happens to fit the 5–7-bit field; bounded by that
-  width, so at most a handful of sites.
+- **`%pcrel_lo`/auipc-fed offsets: refused where the field is narrow,
+  accepted UNMEASURED where it spans the residue.** An offset whose base
+  register came straight from an `auipc` is `(target - pc_of_auipc) mod
+  4096` — a fact about the layout that binary was linked for, not a
+  displacement the program chose. Two facts decide what a rule may do with
+  it. (1) The *magnitude* does not survive relinking, so range-checking the
+  corpus value measures the old layout: a slot whose field CANNOT span the
+  full 12-bit residue refuses the tainted base outright (the code is
+  excluded from the numerator rather than counted as encodable). This
+  includes the lo-half `addi` reaching the ALU-immediate frames
+  (rsd-alu-pair, alu-alu-chain, arith-jump-pair, arg-call-pair's addi_rsd
+  row, addi-store-chain, addi-store-off-chain) — their 5–7-bit fields can
+  never hold "whatever lo the new layout produces". (2) A slot whose field
+  DOES span the residue — declared bits + log2(scale) ≥ 12 — accepts the
+  pair and skips the magnitude check entirely: any lo the new link step
+  computes fits by construction. Signedness imposes nothing, because the
+  toolchain biases the auipc's hi half to land the residual in whatever
+  range the field has (RISC-V's own +0x800 bias, generalised). The one fact
+  that DOES survive relinking is the target's *alignment* — a property of
+  the object — so a scaled field's alignment requirement is still checked
+  against the corpus value; the rv64 "0–7% not 8-aligned" residue is
+  thereby excluded per-site rather than assumed away. Frames on the accept
+  path declare `accepts_pcrel_lo` in the yaml (`load-call-chain`,
+  `pre-inc-pair`'s addi rows), and `tests/test_conformance.py` pins each
+  declaration to the field arithmetic that justifies it. The accepted
+  pairs remain a *relaxation* in the §8 sense — the packed layout is
+  assumed to exist and link — but not an unmeasured-immediate gamble: the
+  field provably holds every value the claim needs.
 - **`measures_also` mnemonics are billed to the frame without a codepoint.**
   Declared per-frame in the yaml and honoured by `rules_conform`. The live
   cases: `addiw` counted as the full-width `inc`/`dec`/`addi`

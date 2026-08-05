@@ -1581,12 +1581,23 @@ class TestLoadCallChain:
         assert _rule_reason("load-call-chain", a, b) is None
 
     def test_relocatable_offset_is_not_range_checked(self):
-        """The corpus value is an artifact, so it is not checked at all —
-        an offset far outside the field still pairs on this path."""
-        a = make_insn("lw", rd=31, rs1=31, imm=0x7ffff)
+        """The corpus MAGNITUDE is an artifact, so it is not checked — an
+        offset far outside the field still pairs on this path.  (It must
+        still be width-aligned: alignment is a property of the target and
+        survives relinking, unlike the magnitude.)"""
+        a = make_insn("lw", rd=31, rs1=31, imm=0x7fffc)
         b = make_insn("jalr", rd=1, rs1=31, imm=0)
         a.base_from_auipc = True
         assert _rule_reason("load-call-chain", a, b) is None
+
+    def test_relocatable_misaligned_target_no_pair(self):
+        """Target alignment survives relinking, so it IS checked: a pcrel
+        word load of an unaligned target cannot use the scaled field under
+        any layout."""
+        a = make_insn("lw", rd=31, rs1=31, imm=0x7ffff)
+        b = make_insn("jalr", rd=1, rs1=31, imm=0)
+        a.base_from_auipc = True
+        assert _rule_reason("load-call-chain", a, b) is not None
 
     def test_ordinary_load_still_range_checked(self):
         """The declaration is scoped to auipc-fed loads: a real displacement
