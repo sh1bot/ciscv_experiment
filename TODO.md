@@ -221,19 +221,12 @@ Open items only; the closed ones (backward-pass dependence safety, pcrel
 guards on every memory slot, epilogue's phantom jalr offset, prologue's
 undeclared ra-only restriction, pre-inc's shXadd operand direction, the
 bit-test and arith-jump template ghosts) were fixed in the review commit.
+The bare-`jalr` rd under-specification in the jump frames was closed on
+main: `jr_any` was added as the non-linking spelling, arith-jump-pair and
+setup-jump-pair declare [jalr_link_ra, jr_any] (setup-jump rebudgeted
+16 -> 32), epilogue-pair gets `jr_any` only, and `_guard_link_regs`
+enforces closed slots.
 
-- **Bare `jalr` as a B op under-specifies rd** (epilogue-pair,
-  arith-jump-pair, setup-jump-pair).  Every other transfer op pins its link
-  register in `pseudo_ops` (`jalr_link_ra`, `jr_t1`, `ret`); bare `jalr`
-  pins nothing, and these frames draw no rd field, so WHICH spellings own a
-  codepoint is a reading of the op list rather than a statement in it.
-  rules.py accepts rd ∈ {x0, x1} (the indirect call rides on
-  `link = packet + 4`).  arith-jump-pair has room for that reading — its
-  fourth b op (`jal`, currently a direct call no rule can ever match) can be
-  renamed `jalr_link_ra` at identical cost.  setup-jump-pair does NOT: its
-  16-block holds 15, and adding the call form to both indirect clusters
-  needs 5 more.  Decide: name the linking ops explicitly and rebudget
-  setup-jump, or restrict its rule to rd = x0 and remeasure.
 - **dual-setup-pair fails the yaml's own budget sanity rule** by the model's
   count (11 not in (16, 32]); the hand count ~19 is in range.  The
   widest-row coarseness of `opcode_codepoints` is the known cause (A8's

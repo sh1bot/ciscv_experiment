@@ -1535,9 +1535,11 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
     not a valid packet -- is_control_transfer also keeps ret/jalr out of A.
 
     A: addi sp, sp, +N  — width-scaled uimm×16, nonzero
-    B: ret or jr/jalr rd∈{0,1} with a ZERO offset — the row draws only the
-       target register (`rs1b`); a nonzero jalr offset has no field to live
-       in, so it cannot ride here.
+    B: ret or jr with a ZERO offset — the row draws only the target register
+       (`rs1b`); a nonzero jalr offset has no field to live in, so it cannot
+       ride here.  The yaml declares only non-linking forms (jr_any, ret) —
+       an epilogue never links — and _guard_link_regs enforces that closed
+       slot, so the (0, 1) below is a backstop, not the policy.
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
