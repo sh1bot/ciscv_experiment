@@ -56,9 +56,6 @@
 # is allocated.
 
 grid:
-  columns:     [h, funct5, g, rs2, rs1, funct3, rd]
-  display:     [1, 9,      1, 9,   9,   5,      9]
-  bits:        [1, 5,      1, 5,   5,   3,      5]   # + opcode5(5) + marker(2) = 32
   # The named fields and their machine-word bit positions.  A row is a mapping
   # over the OPERAND-BEARING fields only: any field a row leaves unset is free
   # for opcode assignment, and `g`, `h`, `funct3`, `opcode5` and `marker` are

@@ -54,6 +54,26 @@ def field_width(grid, field):
     return hi - lo + 1
 
 
+# The opcode-owned tail fields: never operand columns, always rendered last.
+TAIL_FIELDS = ("opcode5", "marker")
+
+
+def grid_columns(grid):
+    """Operand-column order, derived from the fields' bit positions: highest
+    bit first, tail fields excluded.  `fields` is the single source; storing
+    the order separately let it drift."""
+    named = [(fd["bits"][0], name) for name, fd in grid["fields"].items()
+             if name not in TAIL_FIELDS]
+    return [name for _hi, name in sorted(named, reverse=True)]
+
+
+def display_widths(grid):
+    """ASCII-art box widths for the operand columns plus the tail: every field
+    displays at 2*bits - 1 (each bit a character, one space between)."""
+    return ([2 * field_width(grid, f) - 1 for f in grid_columns(grid)]
+            + [2 * field_width(grid, f) - 1 for f in TAIL_FIELDS])
+
+
 def row_parts(row, grid):
     """Every operand piece of a mapping-form row, in column order.
 
@@ -62,7 +82,7 @@ def row_parts(row, grid):
     which is what makes a split field priceable without billing the register
     beside it for the immediate's column.
     """
-    for field in grid["columns"]:
+    for field in grid_columns(grid):
         v = row.get(field)
         if v is None:
             continue
@@ -106,14 +126,14 @@ def _display_value(v):
 
 def render_row(row, grid, colwidths, tag=None):
     rendered = []
-    for pos, field in enumerate(grid["columns"]):
+    for pos, field in enumerate(grid_columns(grid)):
         v = row.get(field)
         if v is None:
             text = _UNSET_LABEL.get(field, "free")
         else:
             text = _display_value(v)
         rendered.append(_center(text, _spanned(colwidths, pos, 1)))
-    pos = len(grid["columns"])
+    pos = len(grid_columns(grid))
     for token in TAIL_CELLS:
         rendered.append(_center(token, _spanned(colwidths, pos, 1)))
         pos += 1
@@ -129,7 +149,7 @@ BANNER = "<!-- Generated from encoding.yaml by util/encoding_render.py — do no
 def render(spec) -> str:
     # column display widths: the seven variable columns, then opcode5(5 bits ->
     # 9) and the marker(2 bits -> 3), all following width = 2*bits - 1.
-    widths = list(spec["grid"]["display"]) + [9, 3]
+    widths = display_widths(spec["grid"])
     header = header_lines(widths)
     out: list[str] = [BANNER, ""]
     for node in spec["doc"]:

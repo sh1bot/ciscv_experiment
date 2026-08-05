@@ -148,15 +148,10 @@ def validate(spec):
             covered += list(range(b[1], b[0] + 1))
         if fields and sorted(covered) != list(range(32)):
             errs.append("grid: fields do not tile bits 0..31 exactly")
-    cols = grid.get("columns") or []
-    bits = grid.get("bits") or []
-    disp = grid.get("display") or []
-    if not (len(cols) == len(bits) == len(disp)):
-        errs.append(f"grid: columns({len(cols)})/bits({len(bits)})/"
-                    f"display({len(disp)}) lengths disagree")
-    if sum(bits) + 5 + 2 != 32:
-        errs.append(f"grid: bits sum to {sum(bits)} + opcode5(5) + marker(2) "
-                    f"= {sum(bits) + 7}, not 32")
+    for legacy in ("columns", "bits", "display"):
+        if legacy in grid:
+            errs.append(f"grid: `{legacy}` is derived from `fields` now -- "
+                        f"delete it, it can only drift")
 
     # No frame name may CONTAIN another.  Frame names are the identity strings
     # shared by the yaml, rules.py, the tests and every measurement record, so

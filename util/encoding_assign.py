@@ -71,6 +71,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from encoding_render import (_center, _spanned, header_lines,
+                             grid_columns, display_widths,
                              opcode_demand, opcode_codepoints, op_name,
                              op_bits, op_imm, _ext, imm_field_bits, shared_imm,
                              cluster_pairs, row_operands, row_parts,
@@ -98,7 +99,6 @@ MARKER = "1 0"
 # h bit column 0.  They are opcode bits; the renderer substitutes the selector
 # word's actual bit character where a row names them.
 COL_H, COL_G = 0, 2
-GRID_COLUMNS = ["h", "funct5", "g", "rs2", "rs1", "funct3", "rd"]
 _GRID = None                     # set by load(); row helpers need field widths
 
 # --- RISC-V A-slot format classification (nice-to-have #1) -----------------
@@ -448,7 +448,7 @@ def _tokens(row, w, sentinel=None):
     fn3 = " ".join(w[5:8])
     g_char, h_char = w[8], w[9]
     out = []
-    for field in GRID_COLUMNS:
+    for field in grid_columns(_GRID):
         v = row.get(field)
         if field == "funct3":
             out.append((fn3, field, ()))
@@ -839,7 +839,7 @@ def _slot_yaml(e):
 def emit_yaml(frames, info):
     """The ciscv-proto.yml data file: every frame, its layout, its opcode
     tables and the bit-level meaning of every op-select bit."""
-    widths = list(info["grid"]["display"]) + [9, 3]
+    widths = display_widths(info["grid"])
     out = [BANNER, PREAMBLE.rstrip("\n"), ""]
     out.append("selector:")
     out.append(f"  word: [opcode5, funct3, g, h]        # {WBITS} bits, MSB first")
@@ -947,7 +947,7 @@ def print_tables(f):
 
 
 def report(frames, info):
-    widths = list(info["grid"]["display"]) + [9, 3]
+    widths = display_widths(info["grid"])
     header = header_lines(widths)
     reserved, order = info["reserved"], info["blocks"]
 
