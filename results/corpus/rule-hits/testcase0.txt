@@ -1,7 +1,7 @@
 # testcase0 (RV32)
 # --- file totals ---
-#   instructions: 21875  packets: 17716  pairs: 4159  solos: 13557
-#   pair rate:    23.5%  (8318/21875 instructions paired)
+#   instructions: 21875  packets: 17715  pairs: 4160  solos: 13555
+#   pair rate:    23.5%  (8320/21875 instructions paired)
 #   RVC-eligible: 40.2%  (8798/21875 instructions)
 #   nops: 1 (excluded from the counts)
 #   rule hits:
@@ -19,7 +19,7 @@
 #     load-store-chain: 15
 #     addi-store-off-chain: 0
 #     load-call-chain: 0
-#     macro-op-pair: 8
+#     macro-op-pair: 9
 #     post-inc-pair: 52
 #     dual-setup-pair: 406
 #     li-branch-chain: 92

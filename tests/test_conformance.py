@@ -149,3 +149,14 @@ def test_width_naming_frames_match_their_declared_widths():
             f"{frame['name']} draws imma={got_a} immb={got_b}, but its name "
             f"claims {want_a} and {want_b}. Rename the frame or fix the rows.")
     assert checked >= 2, f"expected the two chain frames, found {checked}"
+
+
+def test_frame_containment_runs():
+    """The static overlap report must survive every yaml edit.
+
+    It reads clusters, rows and field widths together, so it breaks on schema
+    changes that the renderer alone would not notice.
+    """
+    r = _run("util/frame_containment.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "SOLE ENCODER" in r.stdout

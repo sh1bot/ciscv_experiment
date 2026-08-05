@@ -1,12 +1,12 @@
 # cpp-rv64 (RV64)
 # --- file totals ---
-#   instructions: 409200  packets: 322270  pairs: 86930  solos: 235340
-#   pair rate:    27.0%  (173860/409200 instructions paired)
+#   instructions: 409200  packets: 322268  pairs: 86932  solos: 235336
+#   pair rate:    27.0%  (173864/409200 instructions paired)
 #   RVC-eligible: 59.6%  (243730/409200 instructions)
 #   nops: 2487 (excluded from the counts)
 #   rule hits:
 #     rsd-alu-pair: 3326
-#     alu-alu-chain: 2428
+#     alu-alu-chain: 2427
 #     load-alu-chain: 1906
 #     addi-store-chain: 665
 #     alu-store-chain: 1290
@@ -19,7 +19,7 @@
 #     load-store-chain: 1082
 #     addi-store-off-chain: 31
 #     load-call-chain: 2533
-#     macro-op-pair: 0
+#     macro-op-pair: 3
 #     post-inc-pair: 2732
 #     dual-setup-pair: 12744
 #     li-branch-chain: 2665

@@ -5,8 +5,8 @@
 #   RVC-eligible: 55.8%  (52062/93259 instructions)
 #   nops: 30 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 2083
-#     alu-alu-chain: 748
+#     rsd-alu-pair: 2081
+#     alu-alu-chain: 747
 #     load-alu-chain: 407
 #     addi-store-chain: 89
 #     alu-store-chain: 254
@@ -19,7 +19,7 @@
 #     load-store-chain: 128
 #     addi-store-off-chain: 2
 #     load-call-chain: 30
-#     macro-op-pair: 0
+#     macro-op-pair: 3
 #     post-inc-pair: 856
 #     dual-setup-pair: 4084
 #     li-branch-chain: 686

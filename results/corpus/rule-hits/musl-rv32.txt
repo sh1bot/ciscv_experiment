@@ -1,27 +1,27 @@
 # musl-rv32 (RV32)
 # --- file totals ---
-#   instructions: 118990  packets: 91510  pairs: 27480  solos: 64030
-#   pair rate:    30.0%  (54960/118990 instructions paired)
+#   instructions: 118990  packets: 91485  pairs: 27505  solos: 63980
+#   pair rate:    30.1%  (55010/118990 instructions paired)
 #   RVC-eligible: 50.8%  (60492/118990 instructions)
 #   nops: 36 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 2400
-#     alu-alu-chain: 1375
+#     rsd-alu-pair: 2403
+#     alu-alu-chain: 1332
 #     load-alu-chain: 656
 #     addi-store-chain: 134
-#     alu-store-chain: 357
+#     alu-store-chain: 358
 #     load-sp-branch-pair: 132
 #     load-base-branch-pair: 733
 #     load0-load10-chain: 16
 #     load5-load5-chain: 36
-#     mem-sp-pair: 9048
+#     mem-sp-pair: 9046
 #     mem-base-pair: 1629
 #     load-store-chain: 330
 #     addi-store-off-chain: 4
 #     load-call-chain: 38
-#     macro-op-pair: 34
+#     macro-op-pair: 98
 #     post-inc-pair: 643
-#     dual-setup-pair: 3170
+#     dual-setup-pair: 3171
 #     li-branch-chain: 916
 #     inc-branch-pair: 139
 #     bit-test-branch-chain: 256
@@ -31,6 +31,6 @@
 #     li-czero-chain: 64
 #     index-mem-chain: 174
 #     pre-inc-pair: 151
-#     arith-jump-pair: 1890
+#     arith-jump-pair: 1891
 #     setup-jump-pair: 1107
 #     arg-call-pair: 0
