@@ -50,10 +50,17 @@ grid:
   # tests/test_conformance.py so a row edit cannot move one silently.
   # (Templates bind operand SEMANTICS to the columns, so re-ordering a
   # template's operands moves fields just as surely as editing a row.)
+  # `g` and `h` sit at bits [31:30] -- RISC-V's imm[11:10] (I-type) and
+  # funct7[6:5] -- so [31:25] is a contiguous h|g|funct5 opcode region
+  # occupying exactly funct7, and every 10-bit packet immediate is a
+  # TRUNCATED RISC-V immediate at the standard positions: funct5+rs2 =
+  # [29:20] = I-type imm[9:0], and funct5+rd = imm[9:5]|[4:0] = S-type.
+  # (Branch displacements share S-type's field boundaries but are linear,
+  # not B-type bit-scrambled.)
   fields:
     h:       {bits: [31, 31]}
-    funct5:  {bits: [30, 26]}
-    g:       {bits: [25, 25]}
+    g:       {bits: [30, 30]}
+    funct5:  {bits: [29, 25]}
     rs2:     {bits: [24, 20]}
     rs1:     {bits: [19, 15]}
     funct3:  {bits: [14, 12]}
@@ -475,7 +482,7 @@ doc:
       ops:
         - {a: [{op: addi, imm: {bits: 10, signed: true}}], b: [sb, sh, sw, sd]}
       rows:
-        - {funct5: rs1a, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rbase}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: rbase}
       notes:
         - >-
           The data width comes from the op list (sb/sh/sw/sd), as in the
@@ -527,7 +534,7 @@ doc:
       ops:
         - {a: [lx], b: *loads}
       rows:
-        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
       notes:
         - >-
           The offset-bearing sibling of load0-load10-chain, on the pattern of
@@ -634,7 +641,7 @@ doc:
       ops:
         - {a: [lw, ld, lbu], b: [beqz, bnez]}
       rows:
-        - {funct5: rda, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: "immb[4:0]"}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rda, rd: "immb[4:0]"}
       notes:
         - >-
           `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
@@ -694,7 +701,7 @@ doc:
       ops:
         - {a: [{op: li, imm: {bits: 10, signed: true}}], b: [czero.eqz, czero.nez]}
       rows:
-        - {funct5: rs2b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rdb}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs2b, rd: rdb}
 
   - frame:
       name: index-mem-chain
@@ -718,8 +725,8 @@ doc:
         - {a: [sh2add], b: [lw, sw]}
         - {a: [sh3add], b: [ld, sd]}
       rows:
-        - {funct5: rs2a, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
-        - {funct5: rs2a, rs2: rs2b, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rs1a, rd: rdb}
+        - {funct5: rs2b, rs2: rs2a, rs1: rs1a, rd: "immb[4:0]"}
 
   - frame:
       name: pre-inc-pair
@@ -748,8 +755,8 @@ doc:
       rows:
         - {funct5: rs2b, rs2: rsda, rs1: rs1a, rd: "immb[4:0]"}
         - {funct5: "immb[4:0]", rs2: rsda, rs1: rs1a, rd: rdb}
-        - {funct5: rs2b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rsda}
-        - {funct5: rdb, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rsda}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rsda, rd: rs2b}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rsda, rd: rdb}
       notes:
         - >-
           The addi rows access AT the bumped pointer: at genuine (non-
@@ -843,8 +850,8 @@ doc:
         - {a: {op: sx, rs1: 2, rs2: 10, imm: 0},
            b: {op: sx, rs1: 2, rs2: 11, imm: 4}, lockstep: true}
       rows:
-        - {funct5: rda, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: rdb}
-        - {funct5: rs2b, rs2: rs2a, rs1: "imm[9:5]", rd: "imm[4:0]"}
+        - {funct5: "imm[9:5]", rs2: "imm[4:0]", rs1: rda, rd: rdb}
+        - {funct5: "imm[9:5]", rs2: rs2a, rs1: rs2b, rd: "imm[4:0]"}
       notes:
         - >-
           both opcodes in a pair must be identical operations
@@ -935,7 +942,7 @@ doc:
         - {a: {op: ld, rd: 31, rs1: 12, imm: 0},
            b: {op: sd, rs1: 13, rs2: 31, imm: 0}}
       rows:
-        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rs1b}
+        - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
       notes:
         - >-
           Both offsets are width-scaled and unsigned; the loaded value is
@@ -958,7 +965,7 @@ doc:
         - {a: {op: addi, rd: 31, rs1: 12, imm: 8},
            b: {op: sw, rs1: 13, rs2: 31, imm: 4}}
       rows:
-        - {funct5: rs1a, rs2: "immb[4:0]", rs1: rbase, rd: "imma[4:0]"}
+        - {funct5: rbase, rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
       notes:
         - >-
           `immb` is width-scaled and unsigned; `imma` is signed -- and that
@@ -1094,26 +1101,27 @@ doc:
         - {a: {op: addi, rd: 10, rs1: 8, imm: 0},
            b: {op: jalr, rd: 0, rs1: 6, imm: 16}}
       rows:
-        - {funct5: rs1a, rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
-        - funct5: "imma[4:0]"
-          rs2: "immb[4:0]"
-          rs1: "immb[9:5]"
-          rd:
+        - {funct5: "immb[9:5]", rs2: rda, rs1: rs1a, rd: "immb[4:0]"}
+        - funct5: "immb[9:5]"
+          rs2: "imma[4:0]"
+          rs1:
             - {bits: 2, value: "imma[6:5]"}
             - {bits: 3, value: rda}
-        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rs2a}
+          rd: "immb[4:0]"
+        - {funct5: "immb[9:5]", rs2: rs2a, rs1: "imma[4:0]", rd: "immb[4:0]"}
       notes:
         - >-
           Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the
           three ops that want a wide immediate and an ARGUMENT destination,
-          splitting the rd column three-two so `imma` reaches seven bits;
+          splitting the rs1 column three-two so `imma` reaches seven bits;
           row 3 holds the stores, whose source register needs all five bits
-          and whose stack offsets are small.
+          and whose stack offsets are small.  The call displacement rides
+          funct5+rd in every row -- the S-type immediate positions.
         - >-
-          rd 3 bits costs almost nothing here and buys two: `li` at rd3+imm5
-          catches 925 of the 933 that an unrestricted rd catches on cpp-
-          rv32, because these are argument setups by construction.  3+7
-          beats 5+5 by 68% on cpp `li` and 18% on cpp `addi4spn`.
+          A 3-bit rda costs almost nothing here and buys two: `li` at
+          rda3+imm5 catches 925 of the 933 that an unrestricted rda catches
+          on cpp-rv32, because these are argument setups by construction.
+          3+7 beats 5+5 by 68% on cpp `li` and 18% on cpp `addi4spn`.
         - >-
           Load and store offsets scale by the ACCESS width, as `c.lwsp` and
           `c.sdsp` do: spill slots are aligned to the access, so `k*imm`
@@ -1126,8 +1134,8 @@ doc:
           7-bit field) and buys 0..508 instead of 0..127.  On rv64 the
           scaled form is the one the fit prefers outright.
         - >-
-          The rd column is a register in row 1 only, so this frame neither
-          hosts nor is hosted.
+          The rd column carries the displacement in every row, so this
+          frame neither hosts nor is hosted.
   - frame:
       name: macro-op-pair
       does: "Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them."
@@ -1247,7 +1255,7 @@ doc:
       rows:
         - {funct5: rda, rs2: rs2b, rs1: rs1a, rd: rdb}
         - {funct5: rda, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
-        - {funct5: rda, rs2: "immb[4:0]", rs1: "imma[4:0]", rd: rdb}
+        - {funct5: rda, rs2: "imma[4:0]", rs1: "immb[4:0]", rd: rdb}
         - funct5: rda
           rs2: "immb[4:0]"
           rs1: rs1a
@@ -1255,16 +1263,16 @@ doc:
             - {bits: 2, value: "immb[6:5]"}
             - {bits: 3, value: rdb}
         - funct5: rda
-          rs2: "immb[4:0]"
-          rs1: "imma[4:0]"
+          rs2: "imma[4:0]"
+          rs1: "immb[4:0]"
           rd:
             - {bits: 2, value: "immb[6:5]"}
             - {bits: 3, value: rdb}
         - funct5:
             - {bits: 2, value: "imma[6:5]"}
             - {bits: 3, value: rda}
-          rs2: "immb[4:0]"
-          rs1: "imma[4:0]"
+          rs2: "imma[4:0]"
+          rs1: "immb[4:0]"
           rd: rdb
       notes:
         - >-
@@ -1365,7 +1373,7 @@ doc:
       ops:
         - {a: [addi], b: [sw, sd]}
       rows:
-        - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
+        - {funct5: "imm[9:5]", rs2: "imm[4:0]", rs1: rs1b, rd: "unused"}
       notes:
         - >-
           `rs1b` is a drawn 5-bit field: ANY register may be the one stored
@@ -1389,7 +1397,7 @@ doc:
         # frame its 2-codepoint block.
         - {a: [addi], b: [jr_any, ret]}
       rows:
-        - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
+        - {funct5: "imm[9:5]", rs2: "imm[4:0]", rs1: rs1b, rd: "unused"}
       notes:
         - >-
           The row draws only the target register: the rs2+rs1 columns carry
@@ -1437,9 +1445,9 @@ doc:
         - {a: [li], b: [j]}
       rows:
         - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: rda}
-        - {funct5: rs1b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rda}
-        - {funct5: rs1a, rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
-        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1b, rd: rda}
+        - {funct5: "immb[9:5]", rs2: rda, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rda, rd: "immb[4:0]"}
       notes:
         - >-
           `j` covers `jal x0`; a jal with a real destination is a call and
@@ -1447,7 +1455,8 @@ doc:
         - >-
           Direct `j` (78-92% of this frame's packets) takes rows 3-4: `rs1b`
           is dropped -- a direct jump has no register operand -- and `immb`
-          gets the rs2+rs1 span, a 10-bit displacement in PACKET units.
+          takes funct5+rd, a 10-bit displacement in PACKET units at the
+          branch-immediate positions every control frame shares.
           Packets are 4-byte aligned, so the low bit RVC must carry is dead
           and a displacement costs 0.54x its RVC bits. 10 bits covers 84.6%
           of direct `j` on sqlite and 97-98% on musl.

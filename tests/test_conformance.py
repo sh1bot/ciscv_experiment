@@ -157,7 +157,7 @@ def test_width_naming_frames_match_their_declared_widths():
 
 # Registers a frame deliberately draws in fewer than five bits, with the class
 # the rule must restrict them to.  A narrow register field is legitimate, but it
-# is a CONSTRAINT the rule owes: arg-call-pair splits its rd column into two
+# is a CONSTRAINT the rule owes: arg-call-pair splits its rs1 column into two
 # bits of imma[6:5] and three of rda, so rda is a0-a7 and every op sharing that
 # row must say so.  One did not (`addi_rsd`) -- latent, since its corpus pairs
 # all land in the class anyway.  Anything not listed here gets the full five.
@@ -269,27 +269,15 @@ STANDARD_COLUMNS = {"rs1a": "rs1", "rsda": "rs1", "rbase": "rs1",
                     "rs2a": "rs2", "rdb": "rd", "rsdb": "rd"}
 OPERAND_POSITION_EXCEPTIONS = {
     # (frame, stem, column-it-actually-occupies): why
-    ("addi-store-chain", "rs1a", "funct5"):
-        "imma[9:5] takes rs1; rbase takes rd",
     ("addi-store-chain", "rbase", "rd"):
-        "the 10-bit imma spans rs2+rs1",
-    ("addi-store-off-chain", "rs1a", "funct5"):
-        "B's rbase keeps the standard rs1 base position",
-    ("arg-call-pair", "rs1a", "funct5"):
-        "the 10-bit call displacement spans rs2+rs1",
-    ("arg-call-pair", "rs2a", "rd"):
-        "store data displaced: immb keeps rs2",
-    ("setup-jump-pair", "rs1a", "funct5"):
-        "the direct-j displacement spans rs2+rs1",
-    ("index-mem-chain", "rs2a", "funct5"):
-        "B's offset/data keeps rs2",
+        "the 10-bit imma owns funct5+rs2 and rs1a keeps rs1; B's base "
+        "(offset structurally zero) parks in the remaining column",
+    ("addi-store-off-chain", "rbase", "funct5"):
+        "rs1a keeps rs1 and B's store immediate owns rd (S-type); the "
+        "base takes the overflow column",
     ("pre-inc-pair", "rsda", "rs2"):
         "shXadd walk rows: rsda IS Zba's rs2 (the added pointer) — its "
         "standard port; B's base is A's forwarded result and reads no port",
-    ("pre-inc-pair", "rsda", "rd"):
-        "addi rows: imma[9:5] takes rs1; rd is at least the RSD dest slot",
-    ("pre-inc-pair", "rdb", "funct5"):
-        "addi load row: rd carries rsda",
 }
 
 

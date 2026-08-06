@@ -1582,8 +1582,9 @@ _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
                                  # (a ONE-ROW narrowing — imm_contracts is
                                  # per-op and cannot express it)
 # A DIRECT jump needs a displacement, and encoding.yaml pays for it out of the
-# A slot: rows 3-4 give immb the rs2+rs1 span, leaving A only the funct5 column.
-# So li narrows to 5 bits and a load has no offset field left at all.  (The
+# A slot: rows 3-4 give immb the funct5+rd span (the shared branch-immediate
+# position), leaving A one register column.  So li narrows to 5 bits and a
+# load has no offset field left at all.  (The
 # displacement itself cannot be checked here — corpus jump operands are
 # unresolved labels, so a pairwise rule has nothing to measure.)  Rows 6-7 draw
 # the opposite trade: full-width A, 7-bit displacement.  Both are encodable, so
@@ -1837,11 +1838,11 @@ _ARG_CALL_SPN_BITS = _w("arg-call-pair", "a", "addi4spn")    # 7, rd3 row
 _ARG_CALL_LOAD_BITS = _w("arg-call-pair", "a", "lw")         # 7, scaled, rd3
 _ARG_CALL_STORE_BITS = _w("arg-call-pair", "a", "sw")        # 5, scaled, rs5
 _ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # reads 7: the
-# bare-op fallback takes the WIDEST imma row (the rd3 split row).  Whether
+# bare-op fallback takes the WIDEST imma row (the rda3 split row).  Whether
 # addi_rsd really has the 7-bit row is unverified -- an earlier copy of this
 # constant said 5.  Pre-existing, kept as-is until re-measured (TODO A8):
 # narrowing it here changes arg-call-pair's accepted range.
-# (_ARG_REGS -- the a0-a7 window this frame's 3-bit rd column draws -- is
+# (_ARG_REGS -- the a0-a7 window this frame's 3-bit rda field draws -- is
 # defined beside dual-setup-pair, which shares it.)
 
 
@@ -1881,8 +1882,8 @@ def _arg_call_a_ok(a: Instruction) -> bool:
     if m in ("addi", "addiw") and rd == rs1 and rd not in (0, None):
         if a.base_from_auipc:
             return False     # lo half of an auipc chain; 7 bits cannot span it
-        # Row 2's rd column is SPLIT -- two bits of imma[6:5] and only three of
-        # rda -- so this destination is the 3-bit class, exactly as the li /
+        # Row 2's rs1 column is SPLIT -- two bits of imma[6:5] and only three
+        # of rda -- so this destination is the 3-bit class, exactly as the li /
         # addi4spn / load rows sharing that row already require.  This branch
         # was the one op on that row not saying so.  Latent, not live: all 49
         # addi_rsd pairs in the corpus already land in a0-a7, so adding the

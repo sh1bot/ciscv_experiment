@@ -27,10 +27,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   opcode5 (5-bit opcode) and the 2-bit packet marker "10", shown as bits.
 TAIL_CELLS = ["opcode5", "1 0"]
 
-# Header labels for the seven variable columns + the merged opcode field
-# (opcode = opcode5 + marker). funct3's label is shown as "fn3" because a
-# 3-bit box (2*3-1 = 5 cols) can't hold "funct3".
-HEADER_LABELS = ["h", "funct5", "g", "rs2", "rs1", "fn3", "rd", "opcode"]
+# Header label overrides: funct3 shows as "fn3" because a 3-bit box
+# (2*3-1 = 5 cols) can't hold "funct3"; opcode5+marker merge into "opcode".
+# Column ORDER is derived from the grid's bit positions (header_labels), so
+# moving a field in the yaml moves its header with it.
+_HEADER_OVERRIDES = {"funct3": "fn3"}
+
+
+def header_labels(grid):
+    return ([_HEADER_OVERRIDES.get(f, f) for f in grid_columns(grid)]
+            + ["opcode"])
 
 
 def _center(text, w):
@@ -101,12 +107,16 @@ def _spanned(widths, pos, span):
     return sum(widths[pos:pos + span]) + (span - 1)
 
 
-def header_lines(colwidths):
+def header_lines(colwidths, grid=None):
     """The boxed 3-line header, sized from the column display widths.
-    opcode5 and the marker are merged into a single 'opcode' box."""
+    opcode5 and the marker are merged into a single 'opcode' box.  Labels
+    follow the grid's own column order when `grid` is given; the legacy
+    fixed order is kept only for callers that pass widths alone."""
+    labels = (header_labels(grid) if grid is not None
+              else ["h", "g", "funct5", "rs2", "rs1", "fn3", "rd", "opcode"])
     hw = list(colwidths[:7]) + [_spanned(colwidths, 7, 2)]   # merge opcode5+marker
     top = "┌" + "┬".join("─" * w for w in hw) + "┐"
-    mid = "│" + "│".join(_center(l, w) for l, w in zip(HEADER_LABELS, hw)) + "│"
+    mid = "│" + "│".join(_center(l, w) for l, w in zip(labels, hw)) + "│"
     bot = "└" + "┴".join("─" * w for w in hw) + "┘"
     return [top, mid, bot]
 
@@ -150,7 +160,7 @@ def render(spec) -> str:
     # column display widths: the seven variable columns, then opcode5(5 bits ->
     # 9) and the marker(2 bits -> 3), all following width = 2*bits - 1.
     widths = display_widths(spec["grid"])
-    header = header_lines(widths)
+    header = header_lines(widths, spec["grid"])
     out: list[str] = [BANNER, ""]
     for node in spec["doc"]:
         if "reserved" in node:

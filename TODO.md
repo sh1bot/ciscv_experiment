@@ -241,11 +241,11 @@ enforces closed slots.
   rules.py rejects x0/x2 "wherever a row draws a register" in the rd
   column; `imm_contracts.rd_column_slots` (deliberately) covers only
   DESTINATIONS, so a source there — addi-store-chain's `rbase`,
-  arg-call-pair row 3's `rs2a` — may still be x0/x2 (`sw zero, k(sp)` is
-  real traffic).  Harmless while those frames host no guests, since the
-  sentinel is only decoded inside a host's block, but the note and the
-  hosting precondition ("a REGISTER in every row") should say which
-  registers count.
+  pre-inc-pair's `rs2b` on its addi store row — may still be x0/x2
+  (`sw zero, 0(sp)` is real traffic).  Harmless while those frames host no
+  guests, since the sentinel is only decoded inside a host's block, but the
+  note and the hosting precondition ("a REGISTER in every row") should say
+  which registers count.
 
 ---
 

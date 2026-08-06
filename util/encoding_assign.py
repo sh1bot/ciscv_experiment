@@ -851,7 +851,7 @@ def emit_yaml(frames, info):
                "        # reserved rd patterns; a hosted frame names one")
     out.append("")
     out.append("header: |")
-    for line in header_lines(widths):
+    for line in header_lines(widths, info["grid"]):
         out.append("  " + line)
     out.append("")
     opsets = info["opsets"]
@@ -948,7 +948,7 @@ def print_tables(f):
 
 def report(frames, info):
     widths = display_widths(info["grid"])
-    header = header_lines(widths)
+    header = header_lines(widths, info["grid"])
     reserved, order = info["reserved"], info["blocks"]
 
     if info["complaints"]:
