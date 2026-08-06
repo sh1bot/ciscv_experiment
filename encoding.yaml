@@ -34,6 +34,22 @@ grid:
   # pattern from the reserved pool (the x0/x2 sentinels, A1.11).  A field split
   # between two operands states its sub-parts explicitly as {bits, value}
   # entries, most-significant first, summing to the field's width.
+  #
+  # OPERAND-POSITION DISCIPLINE.  The columns are the standard RISC-V operand
+  # positions, and rows keep operands in them: A-slot register SOURCES read
+  # from their standard ports (rs1-family operands -- rs1a/rsda/a base -- in
+  # the rs1 column, rs2a and store data in rs2, immediate low bits where
+  # I-type/S-type put them), the rd column belongs to a destination, and
+  # funct5 is the OVERFLOW column (B's second source, or a displaced
+  # destination when both slots have one).  This is the operand half of the
+  # decoder-alignment objective (A1.10 covers the opcode half): a decoder can
+  # route the common frames through the standard read ports.  Displacing an
+  # operand from its standard column is a DESIGN DECISION, not a layout
+  # convenience -- it happens only where a wide immediate or the partner
+  # slot's operand claims the column, and every such exception is pinned in
+  # tests/test_conformance.py so a row edit cannot move one silently.
+  # (Templates bind operand SEMANTICS to the columns, so re-ordering a
+  # template's operands moves fields just as surely as editing a row.)
   fields:
     h:       {bits: [31, 31]}
     funct5:  {bits: [30, 26]}
@@ -720,9 +736,9 @@ doc:
       # valid only while the field really spans the residue).
       accepts_pcrel_lo: true
       templates:
-        - ["shXadd  rsda, rs2a, rsda", "load    rdb, k*immb(rsda)"]
+        - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "load    rdb, 0(rsda)"]
-        - ["shXadd  rsda, rs2a, rsda", "store   rs2b, k*immb(rsda)"]
+        - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "store   rs2b, 0(rsda)"]
       ops:            # addi split by width so each declares its true scale
         - {a: [{op: addi, imm: {bits: 10, signed: true, scale: 8}}], b: [ld, sd]}
@@ -747,18 +763,20 @@ doc:
           The shXadd rows keep the 5-bit scaled immb: their stride is the
           register, so the offset field still earns its column.
         - >-
-          `rsda` is the ADDED operand (Zba rs2): the template form is
-          `shXadd rsda, rs2a, rsda` -- the pointer advanced by the scaled
-          stride rs2a, which is what "advance a pointer" means.  The other
-          RSD spelling, `shXadd a, a, x` (rd = rs1) scales the pointer
-          itself; one row cannot decode both, so rules.py admits only the
-          template's form.  rules.py used to accept BOTH spellings -- an
-          over-promise, since only one decodes -- and the split was
-          measured (2026-08-05) before pinning this one: scheduled
-          pre-inc pairs rd=rs2-only 67 / rd=rs1-only 79 on musl-rv32, but
-          156 / 69 on sqlite-rv64, and the rs2 convention wins the corpus
-          TOTAL on both (+7 and +88 over rs1) -- displaced rs1-form sites
-          pair elsewhere, displaced rs2-form sites do not.
+          `rsda` is the SHIFTED operand (Zba rs1): the template form is
+          `shXadd rsda, rsda, rs2a`, and the shared `rsda` field sits in the
+          rs1 COLUMN, which is its standard position for BOTH slots -- A's
+          Zba rs1 and B's load/store base read the same port.  The other RSD
+          spelling, `shXadd p, i, p` (rd = rs2, the pointer advanced by a
+          scaled stride), cannot ride here: it needs `rsda` readable at Zba's
+          rs2 position while B's base still needs it at rs1, and one field
+          cannot sit in two columns.  One row decodes one spelling, so
+          rules.py admits only the template's form -- it used to accept both,
+          an over-promise.  Measured 2026-08-06: excluding the pointer-walk
+          spelling costs 88 corpus pairs on sqlite-rv64 and 8 on musl-rv32
+          (pre-inc itself 210 -> 123 and 80 -> 92 with the addi rows'
+          pcrel chains) -- the price of the operand-position discipline
+          (see the grid note), paid deliberately.
   - frame:
       name: post-inc-pair
       does: "Access through a pointer, then advance it (post-increment)."

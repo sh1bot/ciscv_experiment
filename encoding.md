@@ -279,13 +279,13 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 *Advance a pointer, then access through it (pre-increment).*
 
-    shXadd  rsda, rs2a, rsda
+    shXadd  rsda, rsda, rs2a
     load    rdb, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
     load    rdb, 0(rsda)
 
-    shXadd  rsda, rs2a, rsda
+    shXadd  rsda, rsda, rs2a
     store   rs2b, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
@@ -308,17 +308,19 @@ No general register block is reserved at present. Earlier drafts held out a cont
    ceiling, not full coverage.
  * The shXadd rows keep the 5-bit scaled immb: their stride is the
    register, so the offset field still earns its column.
- * `rsda` is the ADDED operand (Zba rs2): the template form is `shXadd
-   rsda, rs2a, rsda` -- the pointer advanced by the scaled stride rs2a,
-   which is what "advance a pointer" means. The other RSD spelling,
-   `shXadd a, a, x` (rd = rs1) scales the pointer itself; one row cannot
-   decode both, so rules.py admits only the template's form. rules.py
-   used to accept BOTH spellings -- an over-promise, since only one
-   decodes -- and the split was measured (2026-08-05) before pinning this
-   one: scheduled pre-inc pairs rd=rs2-only 67 / rd=rs1-only 79 on musl-
-   rv32, but 156 / 69 on sqlite-rv64, and the rs2 convention wins the
-   corpus TOTAL on both (+7 and +88 over rs1) -- displaced rs1-form sites
-   pair elsewhere, displaced rs2-form sites do not.
+ * `rsda` is the SHIFTED operand (Zba rs1): the template form is `shXadd
+   rsda, rsda, rs2a`, and the shared `rsda` field sits in the rs1 COLUMN,
+   which is its standard position for BOTH slots -- A's Zba rs1 and B's
+   load/store base read the same port. The other RSD spelling, `shXadd p,
+   i, p` (rd = rs2, the pointer advanced by a scaled stride), cannot ride
+   here: it needs `rsda` readable at Zba's rs2 position while B's base
+   still needs it at rs1, and one field cannot sit in two columns. One
+   row decodes one spelling, so rules.py admits only the template's form
+   -- it used to accept both, an over-promise. Measured 2026-08-06:
+   excluding the pointer-walk spelling costs 88 corpus pairs on sqlite-
+   rv64 and 8 on musl-rv32 (pre-inc itself 210 -> 123 and 80 -> 92 with
+   the addi rows' pcrel chains) -- the price of the operand-position
+   discipline (see the grid note), paid deliberately.
 
 ## post-inc-pair
 

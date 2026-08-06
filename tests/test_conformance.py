@@ -258,6 +258,74 @@ def test_accepts_pcrel_lo_fields_span_the_residue():
     assert checked >= 2, f"expected load-call-chain and pre-inc-pair, found {checked}"
 
 
+# The operand-position discipline (encoding.yaml grid note): these stems have
+# a STANDARD column, and every row keeps them there unless the displacement is
+# declared here.  A-slot sources and both slots' destinations are pinned; B's
+# sources are not (funct5 is the overflow column by convention).  Each entry
+# is a deliberate trade — a wide immediate or the partner slot's operand
+# claiming the standard column — and the test is two-sided, so a stale entry
+# fails just like a missing one.
+STANDARD_COLUMNS = {"rs1a": "rs1", "rsda": "rs1", "rbase": "rs1",
+                    "rs2a": "rs2", "rdb": "rd", "rsdb": "rd"}
+OPERAND_POSITION_EXCEPTIONS = {
+    # (frame, stem, column-it-actually-occupies): why
+    ("addi-store-chain", "rs1a", "funct5"):
+        "imma[9:5] takes rs1; rbase takes rd",
+    ("addi-store-chain", "rbase", "rd"):
+        "the 10-bit imma spans rs2+rs1",
+    ("addi-store-off-chain", "rs1a", "funct5"):
+        "B's rbase keeps the standard rs1 base position",
+    ("arg-call-pair", "rs1a", "funct5"):
+        "the 10-bit call displacement spans rs2+rs1",
+    ("arg-call-pair", "rs2a", "rd"):
+        "store data displaced: immb keeps rs2",
+    ("setup-jump-pair", "rs1a", "funct5"):
+        "the direct-j displacement spans rs2+rs1",
+    ("index-mem-chain", "rs2a", "funct5"):
+        "B's offset/data keeps rs2",
+    ("pre-inc-pair", "rsda", "rd"):
+        "addi rows: imma[9:5] takes rs1; rd is at least the RSD dest slot",
+    ("pre-inc-pair", "rdb", "funct5"):
+        "addi load row: rd carries rsda",
+}
+
+
+def test_operand_positions_standard_or_declared():
+    """Rows keep operands at their standard RISC-V positions, or say why not.
+
+    The grid note states the discipline; this pins it.  A row (or template
+    re-ordering, which re-binds operand semantics to columns) that moves a
+    pinned stem out of its standard column must add a justified entry above —
+    the pre-inc-pair shXadd operand flip went in and out of the tree before
+    anything watched this.
+    """
+    import yaml as _yaml
+    sys.path.insert(0, os.path.join(ROOT, "util"))
+    from encoding_render import row_parts
+
+    spec = _yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
+    grid = spec["grid"]
+    observed = set()
+    for node in spec["doc"]:
+        frame = node.get("frame")
+        if not frame:
+            continue
+        for row in frame.get("rows") or []:
+            for field, stem, _bits, _raw in row_parts(row, grid):
+                std = STANDARD_COLUMNS.get(stem)
+                if std is not None and field != std:
+                    observed.add((frame["name"], stem, field))
+    declared = set(OPERAND_POSITION_EXCEPTIONS)
+    undeclared = observed - declared
+    stale = declared - observed
+    assert not undeclared, (
+        "operands displaced from their standard column without a declared "
+        "exception:\n  " + "\n  ".join(map(str, sorted(undeclared))))
+    assert not stale, (
+        "declared operand-position exceptions no longer present (clean up "
+        "the table):\n  " + "\n  ".join(map(str, sorted(stale))))
+
+
 def test_row_contracts_hold_and_the_lint_has_teeth():
     """No op may declare width its own rows cannot draw (A8 row contract).
 

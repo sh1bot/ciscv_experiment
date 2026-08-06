@@ -439,7 +439,7 @@ class TestDualOpPair:
 
     def test_shadd_store_reversed_is_pre_inc(self):
         """Reversed (shadd, store) is a pre-increment, not this frame."""
-        a = make_insn("sh3add", rd=12, rs1=13, rs2=12)   # a2 += a3*8
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)   # a2 = a2*8 + a3
         b = make_insn("sd", rs1=12, rs2=13, imm=0)
         assert can_pair(a, b) is None
         assert _rule_reason("pre-inc-pair", a, b) is None
@@ -689,13 +689,13 @@ class TestPreIncPair:
 
     def test_sh2add_lw_rsd_pairs(self):
         """sh2add in RSD form updates pointer; lw loads from zero offset."""
-        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)  # a2 += a3*4
+        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)  # a2 = a2*4 + a3
         b = make_insn("lw", rd=10, rs1=12, imm=0)
         assert can_pair(a, b) is None
 
     def test_shadd_load_pairs(self):
-        """sh3add advances the pointer by a scaled stride; the qword load reads it."""
-        a = make_insn("sh3add", rd=12, rs1=13, rs2=12)
+        """sh3add in RSD form scales an index in place; the qword load reads it."""
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
         b = make_insn("ld", rd=10, rs1=12, imm=0)
         assert _rule_reason("pre-inc-pair", a, b) is None
 
@@ -716,15 +716,17 @@ class TestPreIncPair:
 
     def test_shadd_width_must_match_scale(self):
         """sh2add scales by 4, so it pairs with word ops, not qword ones."""
-        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)
+        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
         assert _rule_reason("pre-inc-pair", a, make_insn("lw", rd=10, rs1=12, imm=0)) is None
         assert _rule_reason("pre-inc-pair", a, make_insn("ld", rd=10, rs1=12, imm=0)) is not None
 
-    def test_shadd_horner_form_no_pair(self):
-        """`shXadd a, a, x` (rd == rs1) scales the POINTER — the Horner
-        accumulator shape, not the template's `shXadd rsda, rs2a, rsda`
-        pointer walk.  One row cannot decode both operand orders."""
-        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
+    def test_shadd_pointer_walk_form_no_pair(self):
+        """`shXadd p, i, p` (rd == rs2, the scaled pointer walk) is not this
+        frame's shape: the shared rsda field sits in the rs1 column — the
+        standard read position for A's Zba rs1 and B's base alike — and the
+        walk spelling would need it at Zba's rs2 instead.  One row cannot
+        decode both operand orders (encoding.yaml pre-inc-pair note)."""
+        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)
         b = make_insn("lw", rd=10, rs1=12, imm=0)
         assert _rule_reason("pre-inc-pair", a, b) is not None
 
@@ -762,7 +764,7 @@ class TestPreIncPair:
 
     def test_shxadd_keeps_offset_field(self):
         """shXadd rows still draw the 5-bit scaled immb offset."""
-        a = make_insn("sh3add", rd=12, rs1=14, rs2=12)
+        a = make_insn("sh3add", rd=12, rs1=12, rs2=14)
         b = make_insn("ld", rd=10, rs1=12, imm=248)      # 31*8, fits 5b
         assert _rule_reason("pre-inc-pair", a, b) is None
         b = make_insn("ld", rd=10, rs1=12, imm=256)      # 32*8, over 5b
