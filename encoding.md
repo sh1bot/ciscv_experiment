@@ -692,7 +692,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Function epilogue: release the stack frame and return.*
 
     addi    sp, 16*imm
-    jr      rs1b
+    jr_any  rs1b
 
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
@@ -709,10 +709,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *A last in-place computation, then a control transfer.*
 
     alu     rsda, rsda, rs2a/imma
-    jr/jalr rs1b
+    jr_any/jalr_link_ra rs1b
 
     li     rsda, imma
-    jr/jalr rs1b
+    jr_any/jalr_link_ra rs1b
 
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
@@ -725,13 +725,13 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Set up an argument or return value, then transfer control.*
 
     mv      rda, rs1a
-    jr      rs1b
+    jr_any/jalr_link_ra rs1b
 
     load    rda, k*imma(rs1a)
-    jr      rs1b
+    jr_any/jalr_link_ra rs1b
 
     li      rda, imma
-    jr      rs1b
+    jr_any/jalr_link_ra rs1b
 
     mv      rda, rs1a
     j       4*immb

@@ -1394,7 +1394,7 @@ doc:
       budget: 2
       level: 2
       templates:
-        - ["addi    sp, 16*imm", "jr      rs1b"]
+        - ["addi    sp, 16*imm", "jr_any  rs1b"]
       ops:
         # NO linking spelling.  An epilogue tears the frame down and transfers
         # away; a `jalr ra` here would return into the frame it just freed, so
@@ -1421,8 +1421,8 @@ doc:
       # 16 x 4) and `mv rsda, rs2a` is neither RSD nor li, so rules.py does
       # not match it either.  `li` rides addi's codepoints (rs1 = x0).
       templates:
-        - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
-        - ["li     rsda, imma", "jr/jalr rs1b"]
+        - ["alu     rsda, rsda, rs2a/imma", "jr_any/jalr_link_ra rs1b"]
+        - ["li     rsda, imma", "jr_any/jalr_link_ra rs1b"]
       ops:
         - {a: *rsd_alu_j, b: [ret, jalr_link_ra, jr_any, j]}
       rows:
@@ -1439,9 +1439,9 @@ doc:
       budget: 32
       level: 2
       templates:
-        - ["mv      rda, rs1a", "jr      rs1b"]
-        - ["load    rda, k*imma(rs1a)", "jr      rs1b"]
-        - ["li      rda, imma", "jr      rs1b"]
+        - ["mv      rda, rs1a", "jr_any/jalr_link_ra rs1b"]
+        - ["load    rda, k*imma(rs1a)", "jr_any/jalr_link_ra rs1b"]
+        - ["li      rda, imma", "jr_any/jalr_link_ra rs1b"]
         - ["mv      rda, rs1a", "j       4*immb"]
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
