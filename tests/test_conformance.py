@@ -283,6 +283,9 @@ OPERAND_POSITION_EXCEPTIONS = {
         "the direct-j displacement spans rs2+rs1",
     ("index-mem-chain", "rs2a", "funct5"):
         "B's offset/data keeps rs2",
+    ("pre-inc-pair", "rsda", "rs2"):
+        "shXadd walk rows: rsda IS Zba's rs2 (the added pointer) — its "
+        "standard port; B's base is A's forwarded result and reads no port",
     ("pre-inc-pair", "rsda", "rd"):
         "addi rows: imma[9:5] takes rs1; rd is at least the RSD dest slot",
     ("pre-inc-pair", "rdb", "funct5"):

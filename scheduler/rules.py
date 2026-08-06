@@ -1422,12 +1422,13 @@ def _index_mem_chain(a: Instruction, b: Instruction) -> None:
 # pre-inc-pair
 # ---------------------------------------------------------------------------
 # A is in RSD form: A writes its result back to its own source register — a
-# pre-increment.  rd == rs1 for both op families (`addi rsda, rsda, k*imma`,
-# `shXadd rsda, rsda, rs2a`): rsda is the rs1-column field, the standard read
-# position it shares with B's base.  The rd == rs2 shXadd spelling (`shXadd
-# p, i, p`, the scaled pointer walk) is not this frame's shape — see the yaml
-# note.  B reads A's rd as its rs1 — the updated pointer.  For the addi rows,
-# B's offset must be zero.
+# pre-increment.  For addi that is rd == rs1 (`addi rsda, rsda, k*imma`); for
+# shXadd it is rd == rs2 (`shXadd rsda, rs1a, rsda`, the scaled pointer walk,
+# drawn at the standard Zba ports — the shifted stride in the rs1 column, the
+# pointer at rs2).  The rd == rs1 shXadd spelling scales in place and is not
+# this frame's shape — see the yaml note.  B accesses through A's rd — the
+# updated pointer, A's forwarded result.  For the addi rows, B's offset must
+# be zero.
 #
 # Canonical order only: B depends on A's result, so the pair cannot be
 # reversed.  A's rd must not be destroyed by B (B.rd != A.rd) since
@@ -1465,15 +1466,14 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
         raise NotPair("bad-tuple")
-    if a.mnemonic != "addi" and a.rd != a.rs1:
-        # The row writes `shXadd rsda, rsda, rs2a` — rsda is the SHIFTED
-        # operand (Zba rs1), sitting in the rs1 COLUMN: the standard read
-        # position for A's Zba rs1 AND for B's base, which share the field
-        # (the operand-position discipline, encoding.yaml grid note).
-        # is_rsd also admits rd == rs2 (`shXadd p, i, p`, the scaled pointer
-        # walk), but that spelling needs rsda at Zba's rs2 position while
-        # B's base still needs it at rs1; one field cannot sit in two
-        # columns, so only the template's form is encodable.
+    if a.mnemonic != "addi" and a.rd != a.rs2:
+        # The row writes `shXadd rsda, rs1a, rsda` — the scaled POINTER
+        # WALK, rd == rs2, drawn at the standard Zba read ports: the shifted
+        # stride in the rs1 column, the pointer at rs2 (B's base is A's
+        # forwarded result and needs no port — encoding.yaml pre-inc note).
+        # is_rsd also admits rd == rs1 (`shXadd a, a, x`, scaling in place),
+        # but one row decodes one operand binding, so only the template's
+        # form is encodable.
         raise NotPair("A-shXadd-not-template-form")
     if a.mnemonic == "addi":
         # The addi rows access AT the bumped pointer (offset structurally

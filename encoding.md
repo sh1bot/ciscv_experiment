@@ -279,13 +279,13 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 *Advance a pointer, then access through it (pre-increment).*
 
-    shXadd  rsda, rsda, rs2a
+    shXadd  rsda, rs1a, rsda
     load    rdb, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
     load    rdb, 0(rsda)
 
-    shXadd  rsda, rsda, rs2a
+    shXadd  rsda, rs1a, rsda
     store   rs2b, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
@@ -294,8 +294,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│  rs2a   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
-│h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│  rs2b   │g│  rsda   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│immb[4:0]│g│  rsda   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│  rs2b   │g│imma[4:0]│imma[9:5]│ fn3 │  rsda   │ opcode5 │1 0│
 │h│   rdb   │g│imma[4:0]│imma[9:5]│ fn3 │  rsda   │ opcode5 │1 0│
 
@@ -308,19 +308,18 @@ No general register block is reserved at present. Earlier drafts held out a cont
    ceiling, not full coverage.
  * The shXadd rows keep the 5-bit scaled immb: their stride is the
    register, so the offset field still earns its column.
- * `rsda` is the SHIFTED operand (Zba rs1): the template form is `shXadd
-   rsda, rsda, rs2a`, and the shared `rsda` field sits in the rs1 COLUMN,
-   which is its standard position for BOTH slots -- A's Zba rs1 and B's
-   load/store base read the same port. The other RSD spelling, `shXadd p,
-   i, p` (rd = rs2, the pointer advanced by a scaled stride), cannot ride
-   here: it needs `rsda` readable at Zba's rs2 position while B's base
-   still needs it at rs1, and one field cannot sit in two columns. One
-   row decodes one spelling, so rules.py admits only the template's form
-   -- it used to accept both, an over-promise. Measured 2026-08-06:
-   excluding the pointer-walk spelling costs 88 corpus pairs on sqlite-
-   rv64 and 8 on musl-rv32 (pre-inc itself 210 -> 123 and 80 -> 92 with
-   the addi rows' pcrel chains) -- the price of the operand-position
-   discipline (see the grid note), paid deliberately.
+ * The shXadd form is the scaled POINTER WALK, `shXadd rsda, rs1a, rsda`
+   (Zba: rd = rs2 + (rs1 << X)) -- the pointer advanced by a scaled
+   stride, which is what "advance a pointer" means and the form the
+   corpus emits (its in-place-scaling sibling `shXadd a, a, x` measured
+   69 scheduled pairs on sqlite-rv64 against this form's 210; one row
+   decodes one operand binding, so rules.py admits only this one). The
+   row is drawn at the STANDARD Zba read ports: the shifted stride `rs1a`
+   in the rs1 column, the pointer `rsda` in rs2 -- Zba's rs2 position. B
+   needs no port for its base at all: a pre-increment accesses through
+   the UPDATED pointer, which is A's result, forwarded inside the packet
+   -- so nothing competes with A for the columns and the operand-position
+   discipline holds without a trade.
 
 ## post-inc-pair
 
