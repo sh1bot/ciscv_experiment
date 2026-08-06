@@ -67,7 +67,9 @@ def test_proto_yaml_emits():
     for f in frames:
         assert f["layout"].strip(), f["name"]
         # the layout's op-select bits and the tables' index must agree in width
-        o_bits = f["select"].count("o")
+        # ('p' in a frame's `select`; a cluster's re-letters the same bits by
+        # role, so 'p' means the pairs table there and is counted separately)
+        o_bits = f["select"].count("p")
         assert f["block"] == 1 << o_bits, f["name"]
         used = sum(c["n"] for c in f["opcodes"])
         assert used <= f["block"], f["name"]
@@ -80,6 +82,61 @@ def test_proto_yaml_emits():
             else:
                 for slot in ("a", "b"):
                     assert sum(e["n"] for e in c[slot]) <= 1 << c["select"].count(slot)
+
+
+def test_layout_art_stays_on_the_bit_grid():
+    """Every box line of every frame's layout is the same width, and every box
+    boundary sits on a bit boundary.
+
+    A layout box is one FIELD, not one grid column: adjoining columns are
+    fused (`imma[9:5]` + `imma[4:0]` draws as `imma[9:0]`) and a column split
+    between two operands is divided (`imb│rdb`). Both only ever move a
+    boundary, never the bits either side of it, so the drawing keeps its
+    width and its character positions -- which is what a tool reading the art
+    by column depends on. In display coordinates a bit occupies every odd
+    position, so a separator at an odd one means a box has overflowed or a
+    boundary has landed mid-bit.
+    """
+    import yaml
+
+    r = _run("util/encoding_assign.py")
+    assert r.returncode == 0, r.stderr
+    for f in yaml.safe_load(r.stdout)["frames"]:
+        art = [ln[:ln.rindex("│") + 1] for ln in f["layout"].splitlines()
+               if ln.startswith("│")]
+        assert art, f["name"]
+        widths = {len(ln) for ln in art}
+        assert len(widths) == 1, (f["name"], sorted(widths))
+        for ln in art:
+            odd = [i for i, c in enumerate(ln) if c == "│" and i % 2]
+            assert not odd, (f["name"], odd, ln)
+            assert ln[0] == "│" and ln[-1] == "│", (f["name"], ln)
+
+
+def test_layout_explains_every_shortened_name():
+    """A box too narrow for its operand's name draws a shortened one, and
+    every shortening a frame uses is spelled out in its `where` footnote --
+    otherwise the drawing names a field the reader cannot resolve."""
+    sys.path.insert(0, os.path.join(ROOT, "util"))
+    import encoding_assign as ea
+    from encoding_render import display_widths
+
+    frames, info = ea.load()
+    widths = display_widths(info["grid"])
+    seen = 0
+    for f in frames:
+        notes = dict(n.split(" = ", 1) for n in ea.frame_notes(f, widths))
+        footnote = [ln for ln in ea.frame_body_lines(f, widths)
+                    if ln.strip().startswith("where ")]
+        assert bool(notes) == bool(footnote), f["name"]
+        w = ea.word_chars(f)
+        for row in f["spec"]["rows"]:
+            for text, width, _stems, full in ea.cells(ea._tokens(row, w), widths):
+                assert len(text) <= width, (f["name"], text, width)
+                if full is not None:
+                    assert notes.get(text) == full, (f["name"], text, full)
+                    seen += 1
+    assert seen, "no frame draws a shortened name -- test no longer covers it"
 
 
 def test_immediate_contracts_derive():

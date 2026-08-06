@@ -41,11 +41,18 @@ index splits into a fixed A-index field, a B-index field and (for a frame whose
 rows draw ONE shared immediate) the immediate's extension bits. A cluster that
 states a diagonal (`same_op`/`same_width`) is indexed by the PAIR instead, so
 the combinations it forbids have no encoding at all. Every table is rounded up
-to a power of two, so every 'o' in a layout is a plain bit-field bit — no divide
+to a power of two, so every 'p' in a layout is a plain bit-field bit — no divide
 anywhere in the decode path — and the rounding holes are the frame's room to
 grow. `--check-tables` asserts the padded tables still fit each block, that the
 enumeration costs exactly what the pricing model charges, and that every
 codepoint decodes back to one frame and one op pair.
+
+In a layout the op-select bits are drawn as 'p', and a box is one FIELD rather
+than one grid column: columns holding ADJOINING bits of the same thing fuse
+(`imma[9:5] | imma[4:0]` becomes one `imma[9:0]`, h | g becomes `p p` the way
+funct3 already draws `p p p`) and a column split between two operands divides
+(`imb│rdb`, footnoted under the layout). Both keep the drawing's width and
+every boundary on a bit boundary — see `cells`.
 
 For each frame the tool prints its bare form, then walks the frame's asm
 templates and, for each, reprints the matching encoding row TWICE — once for the
@@ -71,11 +78,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from encoding_render import (_center, _spanned, header_lines,
-                             grid_columns, display_widths,
+                             grid_columns, display_widths, field_width,
                              opcode_demand, opcode_codepoints, op_name,
                              op_bits, op_imm, _ext, imm_field_bits, shared_imm,
                              cluster_pairs, row_operands, row_parts,
-                             lint_frame, rd_column_role, _display_value,
+                             lint_frame, rd_column_role,
                              _OPERAND, _IMPLICIT)
 
 # Sentinel bit patterns reserved in the rd column (encoding.yaml `reserved`):
@@ -89,6 +96,10 @@ SENTINEL_REGS = {0: "x0", 2: "x2"}      # rd's value -> the pattern it names
 
 WBITS = 10                      # opcode5(5)+funct3(3)+g(1)+h(1)
 MARKER = "1 0"
+# What one op-select bit draws as in a layout.  Deliberately NOT 'o': it stands
+# shoulder to shoulder with the constant '0'/'1' identifier bits, and 'o' and
+# '0' are the same shape in a monospace grid.
+OPSEL_CHAR = "p"
 # A frame can only carry an immediate bit in g or h if its selector word STOPS
 # above that bit -- identifier + op-select must leave it free.  These are the
 # depths that requires.  Every frame currently sits at depth 10/10, so nothing
@@ -422,7 +433,10 @@ def decode(frames, word, rd=None):
 
 def word_chars(frame):
     """The 10 selector bits MSB->LSB as display chars:
-       '0'/'1' identifier, 'o' op-select, '.' free/unused."""
+       '0'/'1' identifier, 'p' op-select, '.' free/unused.
+
+    'p', not 'o': these sit beside the constant '0'/'1' identifier bits in
+    every drawing, and an 'o' there is a zero at a glance."""
     idl, opsel = frame["id_len"], frame["opsel"]
     w = []
     for pos in range(WBITS - 1, -1, -1):          # bit 9 (MSB) .. 0
@@ -430,7 +444,7 @@ def word_chars(frame):
         if depth <= idl:
             w.append(str((frame["id_val"] >> (idl - depth)) & 1))
         elif depth <= idl + opsel:
-            w.append("o")
+            w.append(OPSEL_CHAR)
         else:
             w.append(".")
     return w
@@ -441,31 +455,143 @@ def frame_rows(spec):
     return [(r, r.get("tag")) for r in spec["rows"]]
 
 
+def _part(text, bits):
+    """One drawn piece of a column: (text, bits, stems)."""
+    return (text, bits, (text.split("[")[0],))
+
+
 def _tokens(row, w, sentinel=None):
-    """Per grid-column token: (display_text, field, stems) with the selector
-    bits injected — funct3 as its 3 bits, g/h as their bit — and, for a guest
-    frame, the allocated sentinel pattern where the row says `unused`."""
+    """Per grid-column token: (parts, field), with the selector bits injected —
+    funct3 as its 3 bits, g/h as their bit — and, for a guest frame, the
+    allocated sentinel pattern where the row says `unused`.
+
+    `parts` is a list because a field SPLIT between two operands draws as the
+    two operands it holds, each sized to its own bits, rather than as one box
+    with both names crammed in. The sub-widths add back to the column's own
+    (Σ 2·bits-1, plus one separator each), so splitting a column never moves
+    anything else on the line."""
     fn3 = " ".join(w[5:8])
     g_char, h_char = w[8], w[9]
     out = []
     for field in grid_columns(_GRID):
         v = row.get(field)
+        bits = field_width(_GRID, field)
         if field == "funct3":
-            out.append((fn3, field, ()))
+            out.append(([(fn3, bits, ())], field))
         elif field == "g":
-            out.append((g_char, field, ()))
+            out.append(([(g_char, bits, ())], field))
         elif field == "h":
-            out.append((h_char, field, ()))
+            out.append(([(h_char, bits, ())], field))
         elif v is None:
-            out.append(("free", field, ()))
+            out.append(([("free", bits, ())], field))
         elif v == "unused":
             pat = SENTINEL_PATTERNS.get(sentinel) or ". . . . ."
-            out.append((pat, field, ()))
+            out.append(([(pat, bits, ())], field))
         elif isinstance(v, list):
-            stems = tuple(str(p["value"]).split("[")[0] for p in v)
-            out.append((_display_value(v), field, stems))
+            out.append(([_part(str(p["value"]), int(p["bits"])) for p in v],
+                        field))
         else:
-            out.append((str(v), field, (str(v).split("[")[0],)))
+            out.append(([_part(str(v), bits)], field))
+    return out
+
+
+# --- one box per FIELD -----------------------------------------------------
+# The grid's columns tile the word contiguously (h[31], g[30], funct5[29:25],
+# ... marker[1:0]), so two ADJACENT columns always hold adjacent bits.  Where
+# they also hold two halves of one thing, the column boundary between them is
+# an artefact of the grid rather than of the encoding, and drawing it invites
+# the reader to count two fields where there is one.  Split columns are the
+# mirror image: one column, two operands, and no boundary drawn between them.
+#
+# So a box is a FIELD, not a column: adjoining columns fuse, split columns
+# divide.  Both only ever move a boundary ONTO a real bit boundary; every
+# character position on the line, and the line's width, are untouched.
+_RANGE = re.compile(r"^(\w+)\[(\d+):(\d+)\]$")
+
+# Columns the renderer fills from the selector word rather than from an
+# operand.  funct3 already draws as one three-bit box; h and g are the same
+# kind of thing, split only because the grid names them separately.
+_BIT_COLUMNS = {"h", "g", "funct3"}
+
+
+def fuse(left, right):
+    """The one cell `left` and `right` make when they draw adjoining bits of
+    the same thing, or None when they do not.
+
+    Two cases fuse. Sub-ranges of ONE field whose bits meet — `imma[9:5]`
+    beside `imma[4:0]` IS `imma[9:0]`. And two opcode-bit columns, which spell
+    one wider bit box.
+
+    A SPLIT column never fuses with its neighbour, and must not: its parts
+    interleave with that neighbour's, so the two pieces the drawing puts side
+    by side are not adjoining bits of anything (dual-setup-pair draws
+    `imma[6:5]` in the top of rs1, three bits of rda below it, and `imma[4:0]`
+    in the column to the LEFT — a fused box would claim a contiguity the
+    encoding does not have)."""
+    (lparts, lfield), (rparts, rfield) = left, right
+    if len(lparts) != 1 or len(rparts) != 1:
+        return None
+    (ltext, lbits, lstems), (rtext, rbits, rstems) = lparts[0], rparts[0]
+    joined = None
+    if lfield in _BIT_COLUMNS and rfield in _BIT_COLUMNS:
+        joined = f"{ltext} {rtext}"
+    else:
+        lm, rm = _RANGE.match(ltext), _RANGE.match(rtext)
+        if lm and rm and lm[1] == rm[1] and int(lm[3]) == int(rm[2]) + 1:
+            joined = f"{lm[1]}[{lm[2]}:{rm[3]}]"
+    if joined is None:
+        return None
+    return ([(joined, lbits + rbits, lstems + rstems)], lfield)
+
+
+def fuse_tokens(tokens):
+    """`tokens` with every run of adjoining fields merged, as
+    (parts, field, span) — `span` being the grid columns the cell covers.
+
+    Fusion depends on the ROW alone, never on which slot is being drawn, so a
+    frame's plain form and its per-slot copies all break at the same column
+    boundaries and stay aligned with one another."""
+    out = []
+    for token in tokens:
+        merged = fuse(out[-1][:2], token) if out else None
+        if merged:
+            out[-1] = merged + (out[-1][2] + 1,)
+        else:
+            out.append(token + (1,))
+    return out
+
+
+def shorten(text, width):
+    """(text_that_fits, was_it_shortened). A box narrower than the name it
+    holds drops the bit range first, then squeezes the stem by taking its
+    leading characters plus its LAST one — `immb` reads `imb`, which still
+    tells it from `imma`. Every shortening is footnoted (`frame_notes`), and
+    nothing is ever allowed to overflow: an overflowing cell would push the
+    rest of the line sideways and break the drawing."""
+    if len(text) <= width:
+        return text, False
+    stem = text.split("[")[0]
+    if len(stem) <= width:
+        return stem, True
+    return (stem[:max(1, width - 1)] + stem[-1])[:width], True
+
+
+def cells(tokens, colwidths):
+    """The boxes of one encoding line: (text, width, stems, full) each, where
+    `full` is the unshortened name when the box could not hold it.
+
+    A fused field is one box spanning several columns; a split column is
+    several boxes, each 2·bits-1 wide. Since those sub-widths plus their
+    separators add back to the column's own width, the line is the same length
+    either way — only where the boundaries fall changes."""
+    out, pos = [], 0
+    for parts, _field, span in fuse_tokens(tokens):
+        width = _spanned(colwidths, pos, span)
+        for text, bits, stems in parts:
+            w = width if len(parts) == 1 else 2 * bits - 1
+            fit, cut = shorten(text, w)
+            out.append((fit, w, stems, text if cut else None))
+        pos += span
     return out
 
 
@@ -474,8 +600,7 @@ def render_line(tokens, o5, colwidths, keep=None):
     field is shown; when None every field shows (the plain form). Opcode bits,
     sentinel patterns and free fields always show; erased cells render blank."""
     rendered = []
-    for pos, (text, field, stems) in enumerate(tokens):
-        width = _spanned(colwidths, pos, 1)
+    for text, width, stems, _full in cells(tokens, colwidths):
         if keep is None or not stems:
             show = True                            # opcode bits / sentinel / free
         else:
@@ -486,6 +611,26 @@ def render_line(tokens, o5, colwidths, keep=None):
         rendered.append(_center(token, _spanned(colwidths, pos, 1)))
         pos += 1
     return "│" + "│".join(rendered) + "│"
+
+
+def frame_notes(frame, colwidths):
+    """`short = full` for every name a box was too narrow to spell out, in the
+    order the frame's rows first draw them.
+
+    Only a split column's sub-box can be too narrow — it is sized to its own
+    bits rather than to the column — so this is normally empty.
+
+    Two names shortening to the SAME text would make the footnote a lie; that
+    is what test_layout_explains_every_shortened_name gates."""
+    w = word_chars(frame)
+    seen = {}
+    for row in frame["spec"]["rows"]:
+        for text, _width, _stems, full in cells(_tokens(row, w,
+                                                        frame.get("sentinel")),
+                                                colwidths):
+            if full:
+                seen.setdefault(text, full)
+    return [f"{short} = {full}" for short, full in seen.items()]
 
 
 # --- template <-> row matching --------------------------------------------
@@ -568,6 +713,10 @@ def frame_body_lines(frame, colwidths):
             out.append(f"{b}   {specialize(b_line, rops)}")
     while out and not out[-1].strip():
         out.pop()
+    notes = frame_notes(frame, colwidths)
+    if notes:
+        out.append("")
+        out.append("    where " + ",  ".join(notes))
     return out
 
 
@@ -735,9 +884,20 @@ PREAMBLE = """\
 # 32-bit packet.  `layout` is the frame's bit layout, with the frame identifier
 # filled in as constants and only the op-select bits left as letters.
 #
+# A layout box is one FIELD, not one grid column.  Two columns holding
+# adjoining bits of the same thing are drawn FUSED, so an immediate spread
+# across funct5 and rs2 reads as the single `imma[9:0]` it is and the h and g
+# opcode bits share one box the way funct3's three already do; a column split
+# between two operands is DIVIDED at the bit where they meet (`imb│rdb`), and
+# any name the narrower box cannot spell is shortened and then given in a
+# `where` line at the foot of the layout.  Both only move a boundary onto a
+# real bit boundary: the drawing keeps its width and its character positions,
+# and the `header` above stays per-column, so one box may span several of its
+# cells or several boxes share one.
+#
 # READING THE OP-SELECT BITS
 #
-# Every 'o' in a layout is one bit of that frame's op-select index, taken MSB
+# Every 'p' in a layout is one bit of that frame's op-select index, taken MSB
 # first in the order  opcode5[4:0], funct3[2:0], g, h.  That is NOT the drawing's
 # left-to-right order: read the `opcode` box first (dropping its trailing `1 0`
 # packet marker), then `fn3` in the middle, then the `g` column, then `h` at the
@@ -746,14 +906,15 @@ PREAMBLE = """\
 # sentinel selects the frame and contributes no index bit.
 #
 # `select` on a frame spells the whole 10-bit selector word: '0'/'1' are the
-# identifier, 'o' the op-select bits, '.' a bit the frame does not reach.
-# `block` is how many op-select indices the frame has — 2^(number of 'o's).
+# identifier, 'p' the op-select bits, '.' a bit the frame does not reach.
+# `block` is how many op-select indices the frame has — 2^(number of 'p's).
 #
 # RESOLVING AN INDEX TO A PAIR OF OPCODES
 #
 # `opcodes` is a list of clusters, disjoint in both the index and the pairs they
 # allow.  Each has its own aligned sub-block of the index and spells it out in
-# `select`:
+# `select` — the SAME bits the layout draws as 'p', re-lettered by the job each
+# one does inside this cluster:
 #
 #     constant bits select the cluster
 #     'a' bits index the cluster's `a` table       (the first instruction)
@@ -960,7 +1121,7 @@ def report(frames, info):
     print("# Assigned opcode bit-patterns (variable-length prefix code)\n")
     print(f"Selector word = opcode5(5):funct3(3):g:h = {WBITS} bits, "
           f"{1<<WBITS} codepoints, read MSB->LSB.")
-    print("'0'/'1' = frame identifier (constant), 'o' = op-select, "
+    print("'0'/'1' = frame identifier (constant), 'p' = op-select, "
           "'.' = free/unused.\n")
     print(f"Reserved {reserved}/{1<<WBITS} codepoints across {order} frames "
           f"({100*reserved/(1<<WBITS):.0f}%), each frame a fixed block sized to its\n"
@@ -983,7 +1144,10 @@ def report(frames, info):
               f"{', '.join(info['unhosted'])}\n")
     print("Each frame prints its form, then per template the encoding twice — the\n"
           "A instruction then the B — with the fields that slot does NOT use erased.\n"
-          "A field kept in both copies is shared by both instructions.\n")
+          "A field kept in both copies is shared by both instructions.  A box is one\n"
+          "FIELD, not one column: columns holding adjoining bits of one thing are\n"
+          "drawn fused, a column split between two operands is drawn divided, and any\n"
+          "name a box is too narrow to spell is given in a `where` line below it.\n")
     print("Then its op tables: which op-select index selects which pair of opcodes.\n"
           "Constant bits pick the ops cluster, 'a'/'b' index that cluster's two op\n"
           "tables, 'i' carries a shared immediate's high bits.  An op spanning\n"
