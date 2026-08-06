@@ -141,18 +141,23 @@ Every numeric width in `rules.py` now derives from the yaml at import
 including the scaled and coupled-immediate shapes it could never reach.
 What remains, deliberately:
 
-- **Row-level narrowings are not per-op facts**, and this is a live HAZARD,
-  not merely a documented literal.  `imm_field_bits` takes the WIDEST row, so
-  a frame whose rows differ in shape is priced against its most generous one.
-  Concretely: `setup-jump-pair` draws `imma[4:0|9:5]` on its `li` row, so
-  pricing reports a 6-bit LOAD offset as free — while its load row also fields
-  `rda`, `rs1a` and `rs1b` and is full at 20 bits, where six offset bits would
-  need 21.  Nothing declares that today, but nothing prevents it either, and
-  the accounting would authorise an unencodable widening exactly as the g/h
-  machinery once did.  (Its direct-j row separately narrows `li` to 5 bits and
+- **Row-level narrowings are not per-op facts** — the hazard is now FENCED
+  (2026-08-06): `row_contract_complaints` (encoding_render, wired into
+  `lint_frame` and so into the codepoint-accounting commit gate) computes,
+  per declared-width op, the widest row able to hold that op's operands —
+  learned from the frame's own template lines, placeholder heads included —
+  and complains when `imm_field_bits`' widest-row pricing assumes more.  The
+  documented example (a 6-bit LOAD offset in `setup-jump-pair`, whose load
+  row also fields `rda`, `rs1a` and `rs1b` and is full at 20 bits while its
+  `li` row draws imma 10) is pinned as a must-catch in
+  tests/test_conformance.py.  Still open, deliberately: the PRICER itself
+  stays widest-row — safe now only because the lint refuses any declaration
+  it would misprice — and bits riding register-restricted split rows
+  (dual-setup's a0-a7 bands) are still under-counted by the model, which is
+  the A12 budget-rule item.  Ops no template line spells (dual-setup's
+  `addi4spn`) cannot be judged and are skipped, as in the correspondence
+  lint.  (setup-jump's direct-j row separately narrows `li` to 5 bits and
   drops the load offset; the SP-relative chain rows dissolved with A9.)
-  Fix: attach contracts to ROWS, or have `lint_frame` reject an op whose
-  declared width exceeds the narrowest row able to hold that op's operands.
 - **`bit-test-branch-chain a:andi` is unverifiable by interval compare**:
   its accepted set is powers of two and masks, not a range.  Covered by
   `tests/test_pairing.py` boundary tests instead.

@@ -258,6 +258,39 @@ def test_accepts_pcrel_lo_fields_span_the_residue():
     assert checked >= 2, f"expected load-call-chain and pre-inc-pair, found {checked}"
 
 
+def test_row_contracts_hold_and_the_lint_has_teeth():
+    """No op may declare width its own rows cannot draw (A8 row contract).
+
+    `imm_field_bits` prices every op against a frame's WIDEST row; that is
+    only honest for ops that can actually sit on it.  `row_contract_complaints`
+    computes, per declared-width op, the widest row able to hold that op's
+    operands (learned from the frame's template lines, placeholders included)
+    and complains when pricing assumes more.  Gated two ways: the current yaml
+    must be clean, and the lint must still catch the documented hazard — a
+    6-bit load offset in setup-jump-pair, whose load row is full at 20 bits
+    (imma 5) while its li row draws imma 10, so the widest-row pricing would
+    call the sixth bit free (TODO A8).
+    """
+    import copy
+    import yaml as _yaml
+    sys.path.insert(0, os.path.join(ROOT, "util"))
+    from encoding_render import lint_frame, row_contract_complaints
+
+    spec = _yaml.safe_load(open(os.path.join(ROOT, "encoding.yaml")))
+    grid = spec["grid"]
+    frames = [n["frame"] for n in spec["doc"] if "frame" in n]
+    bad = [c for f in frames for c in lint_frame(f, grid)]
+    assert not bad, "row-contract violations:\n  " + "\n  ".join(bad)
+
+    sj = copy.deepcopy(next(f for f in frames if f["name"] == "setup-jump-pair"))
+    sj["ops"][0]["a"] = ["mv", "lbu",
+                        {"op": "lw", "imm": {"bits": 6, "signed": False}}, "ld"]
+    caught = row_contract_complaints(sj, grid)
+    assert caught and "a:lw" in caught[0], (
+        "the lint no longer catches TODO A8's documented hazard — a widened "
+        "load offset priced against setup-jump-pair's li row")
+
+
 def test_frame_containment_runs():
     """The static overlap report must survive every yaml edit.
 

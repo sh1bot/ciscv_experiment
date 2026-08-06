@@ -327,7 +327,8 @@ def lint(spec):
                 for u in unencodable:
                     print(f"        {u}")
         else:
-            print(f"✓ {f['name']}  ({len(pairs)} pair(s), {len(rows)} row(s))")
+            print(f"✓ {f['name']}  ({len(pairs)} pair(s), "
+                  f"{len(f.get('rows') or [])} row(s))")
         for msg in on_opcode_list:
             print(f"    · wide immediate on the opcode list: {msg}")
     print(f"\n{problems} frame(s) with correspondence problems.")
@@ -490,6 +491,25 @@ def rd_column_role(frame, grid):
     return None
 
 
+def row_imm_bits(frame, row, grid, slot):
+    """One row's immediate field width for one slot: the bits of imma/immb
+    (or the shared `imm`) that THIS row draws, split cells summed.  Validates
+    the field name — an unrecognised imm name is an error, not a wider field
+    (that is how a 7-bit `immc` once cost nothing)."""
+    names = IMM_NAMES[slot]
+    row_width = 0     # a field may be SPLIT across columns (imma[9:5] in
+    for _f, stem, bits, _raw in row_parts(row, grid):   # one, [4:0] in another)
+        if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
+            raise ValueError(
+                f"{frame.get('name')}: row names immediate field "
+                f"'{stem}', which the pricing model does not recognise "
+                f"(expected one of {sorted(ALL_IMM_NAMES)}). An "
+                f"unrecognised name is never charged for its width.")
+        if stem in names:
+            row_width += bits
+    return row_width
+
+
 def imm_field_bits(frame, grid, slot):
     """The immediate FIELD width a slot's rows draw: the register columns the
     field occupies, and nothing else. Five bits from one column, ten from two.
@@ -501,22 +521,12 @@ def imm_field_bits(frame, grid, slot):
     that by taking multiple opcode-list entries — an op declaring `imm: {bits: N}` occupies
     2^(N - field) entries, which `_slot_weight` charges. There is no other
     widening mechanism. `g` and `h` are opcode bits and not writable by a row,
-    and a field name the model does not know is an error, not a wider field."""
-    names = IMM_NAMES[slot]
-    width = 0
-    for row in frame.get("rows", []):
-        row_width = 0     # a field may be SPLIT across columns (imma[9:5] in
-        for _f, stem, bits, raw in row_parts(row, grid):   # one, [4:0] in another)
-            if stem.startswith("imm") and stem not in ALL_IMM_NAMES:
-                raise ValueError(
-                    f"{frame.get('name')}: row names immediate field "
-                    f"'{stem}', which the pricing model does not recognise "
-                    f"(expected one of {sorted(ALL_IMM_NAMES)}). An "
-                    f"unrecognised name is never charged for its width.")
-            if stem in names:
-                row_width += bits
-        width = max(width, row_width)
-    return width
+    and a field name the model does not know is an error, not a wider field.
+
+    Widest-row pricing is only honest for ops that can actually USE the widest
+    row; `row_contract_complaints` is the check that they can."""
+    return max((row_imm_bits(frame, row, grid, slot)
+                for row in frame.get("rows", [])), default=0)
 
 
 def narrow_field_bits(frame, grid, slot):
@@ -541,6 +551,119 @@ def narrow_field_bits(frame, grid, slot):
     return min(widths) if widths else 0
 
 
+# --- the A8 row-contract lint ----------------------------------------------
+# imm_field_bits prices every op against the frame's WIDEST row, and that is
+# only honest when the op can actually sit on that row.  A frame whose rows
+# differ in shape — setup-jump-pair fields rda+rs1a+rs1b on its load row (full
+# at 20 bits, imma 5) but drops rs1a on its li row (imma 10) — could declare a
+# 6-bit load offset and the accounting would price it as FREE, authorising a
+# widening no row can hold, exactly as the g/h machinery once did.  The lint
+# below computes, per declared-width op, the widest row able to hold that op's
+# operands (learned from the frame's own template lines), and complains when
+# pricing assumes more.
+
+# Ops a generic template head stands for.  A placeholder line spells the
+# SHAPE of a whole op class; the lint only ever uses this to find candidate
+# shapes, so an over-broad mapping can hide a complaint but never invent one.
+_PLACEHOLDER_OPS = {
+    "load":  frozenset({"lb", "lbu", "lh", "lhu", "lw", "lwu", "ld", "lx"}),
+    "store": frozenset({"sb", "sh", "sw", "sd", "sx"}),
+    "shXadd": frozenset({"sh1add", "sh2add", "sh3add"}),
+    "bXX": frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu",
+                      "bltu_r", "bge_r", "bgeu_r"}),
+    "czero.X": frozenset({"czero.eqz", "czero.nez"}),
+}
+# "alu" is the catch-all placeholder: looked up for any op, since which
+# mnemonics count as ALU is the frame's own business.
+_CATCHALL_HEADS = ("alu",)
+
+
+def _op_template_heads(name):
+    """Template heads that may spell `name`: itself, any placeholder class
+    containing it, and the catch-all heads."""
+    heads = [name]
+    heads += [ph for ph, cls in _PLACEHOLDER_OPS.items() if name in cls]
+    heads += list(_CATCHALL_HEADS)
+    return heads
+
+
+def template_op_forms(frame):
+    """{slot: {head: [operand-field frozensets]}} — every operand SHAPE a
+    template line offers each op head.
+
+    Unlike template_op_fields (which unions fields across lines), operand
+    alternatives that do not align with the head alternatives FORK into
+    separate forms: "alu rsda, rsda, rs2a/imma" is one head with two forms,
+    {rsda, rs2a} and {rsda, imma}.  A union would demand both fields of one
+    row and misjudge which rows can hold the op."""
+    from itertools import product
+    out = {"a": {}, "b": {}}
+    for pair in frame.get("templates", []):
+        if len(pair) != 2:
+            continue
+        for slot, line in (("a", pair[0]), ("b", pair[1])):
+            mnem, _, rest = line.strip().partition(" ")
+            alts = mnem.split("/")
+            operands = [o.strip() for o in rest.split(",")] if rest.strip() else []
+            for i, op in enumerate(alts):
+                per_operand = []
+                for operand in operands:
+                    choices = operand.split("/")
+                    # aligned alternatives follow the op index; unaligned fork
+                    per_operand.append([choices[i]]
+                                       if len(choices) == len(alts) else choices)
+                for combo in (product(*per_operand) if per_operand else [()]):
+                    fields = frozenset(
+                        f for tok in combo for f in _OPERAND.findall(tok)) - _IMPLICIT
+                    forms = out[slot].setdefault(op, [])
+                    if fields not in forms:
+                        forms.append(fields)
+    return out
+
+
+def row_contract_complaints(frame, grid):
+    """Ops whose declared width is priced against a row they cannot use.
+
+    For each op declaring `imm: {bits: N}`, the widest row able to hold one of
+    the op's template shapes bounds its real field M; pricing charges
+    2^max(0, N - K) against the frame-wide widest row K.  When M < min(N, K)
+    the true extension exceeds the priced one — the yaml is authorising range
+    the op has no row to draw — and that is the complaint.  Ops no template
+    line spells (directly or via a placeholder class) cannot be judged and are
+    skipped, as the correspondence lint already does."""
+    rows = frame.get("rows") or []
+    if not rows:
+        return []
+    out = []
+    forms = template_op_forms(frame)
+    row_ops = [row_operands(r, grid) for r in rows]
+    for slot in ("a", "b"):
+        try:
+            widths = [row_imm_bits(frame, r, grid, slot) for r in rows]
+        except ValueError:
+            continue                    # lint_frame already reports that
+        K = max(widths, default=0)
+        for c in frame.get("ops") or []:
+            for e in c.get(slot, []):
+                bits = op_bits(e)
+                if not bits:
+                    continue
+                op_forms = [f for h in _op_template_heads(op_name(e))
+                            for f in forms[slot].get(h, [])]
+                if not op_forms:
+                    continue            # not spelled by any template line
+                M = max((w for r, w in zip(row_ops, widths)
+                         if any(f <= r for f in op_forms)), default=0)
+                if M < min(bits, K):
+                    out.append(
+                        f"{frame.get('name')}: {slot}:{op_name(e)} declares "
+                        f"{bits}b, priced against the {K}b widest row, but the "
+                        f"widest row able to hold its operands draws only "
+                        f"{M}b — the declaration authorises range no row can "
+                        f"carry (A8 row contract)")
+    return out
+
+
 def _slot_weight(op_list, base):
     """Codepoints a slot's ops occupy: Σ 2^ext, where ext = the bits of range an
     op's declared width needs above the base (0 for a bare/base-range op, so
@@ -556,9 +679,11 @@ def lint_frame(frame, grid):
     """Complaints about a frame whose codepoint demand cannot be trusted.
 
     With the single-rule model — a field is its register columns, wider range
-    is bought by opcode duplication — the only violations left are structural,
-    and `imm_field_bits` raises on both: an immediate parked in `g`/`h`, and a
-    field name the model does not recognise. This collects them per slot.
+    is bought by opcode duplication — the violations left are structural:
+    an immediate parked in `g`/`h` or under a field name the model does not
+    recognise (`imm_field_bits` raises on both), and a declared op width
+    priced against a row the op cannot use (`row_contract_complaints`, the
+    A8 row-contract check). This collects them per slot.
 
     Returns a list of strings; empty means nothing detectable is wrong."""
     out = []
@@ -567,6 +692,7 @@ def lint_frame(frame, grid):
             imm_field_bits(frame, grid, slot)
         except ValueError as e:
             out.append(str(e))
+    out += row_contract_complaints(frame, grid)
     return out
 
 
