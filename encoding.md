@@ -445,10 +445,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Load a function pointer and call through it (virtual dispatch).*
 
     load    tmp, k*imma(rs1a)
-    jalr_link_ra tmp
+    jalr_link_ra ra, 0(tmp)
 
     load    tmp, k*imma(rs1a)
-    jalr_link_t1 tmp
+    jalr_link_t1 t1, 0(tmp)
 
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
@@ -470,22 +470,22 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Set up an argument, then call through a hard-coded base register.*
 
     mv      rda, rs1a
-    jalr_ra 4*immb
+    jalr_ra ra, 4*immb(ra)
 
     li      rda, imma
-    jalr_ra 4*immb
+    jalr_ra ra, 4*immb(ra)
 
     addi4spn rda, 4*imma
-    jalr_ra 4*immb
+    jalr_ra ra, 4*immb(ra)
 
-    load    rda, k*imma(x2)
-    jalr_ra 4*immb
+    load    rda, k*imma(sp)
+    jalr_ra ra, 4*immb(ra)
 
-    store   rs2a, k*imma(x2)
-    jalr_ra 4*immb
+    store   rs2a, k*imma(sp)
+    jalr_ra ra, 4*immb(ra)
 
     addi_rsd rda, imma
-    jr_t1   4*immb
+    jr_t1   4*immb(t1)
 
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │

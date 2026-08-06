@@ -132,6 +132,13 @@ pseudo_ops:
     base: jal
     encode: {rd: x0}
     match:  [{op: jal, rd: x0}, {op: j}]
+  # NAMING for the jalr family: a bare register suffix pins EVERY register
+  # the op touches -- `jalr_ra` is `jalr ra, imm(ra)`, link AND base both ra;
+  # `jr_t1` is `jr imm(t1)`, base t1 and no link.  A `_link_` infix pins only
+  # the LINK and leaves the base free (`jalr_link_ra`, `jalr_link_t1`), and
+  # `jr_any` pins only rd = x0.  The `encode` mapping is always the
+  # authoritative machine-readable statement; templates spell the operands
+  # out in full so nothing need be inferred from the name.
   jalr_ra:
     base: jalr
     encode: {rd: x1, rs1: x1}            # jalr ra, imm(ra) -- a far CALL
@@ -1022,8 +1029,8 @@ doc:
       # residue are now handled per-site instead of assumed away.
       accepts_pcrel_lo: true
       templates:
-        - ["load    tmp, k*imma(rs1a)", "jalr_link_ra tmp"]
-        - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 tmp"]
+        - ["load    tmp, k*imma(rs1a)", "jalr_link_ra ra, 0(tmp)"]
+        - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 t1, 0(tmp)"]
       ops:
         - {a: [{op: lw, imm: {bits: 10, signed: false}},
                {op: ld, imm: {bits: 10, signed: false}}],
@@ -1065,12 +1072,12 @@ doc:
       budget: 16
       level: 2
       templates:
-        - ["mv      rda, rs1a",         "jalr_ra 4*immb"]
-        - ["li      rda, imma",         "jalr_ra 4*immb"]
-        - ["addi4spn rda, 4*imma",      "jalr_ra 4*immb"]
-        - ["load    rda, k*imma(x2)",   "jalr_ra 4*immb"]
-        - ["store   rs2a, k*imma(x2)",  "jalr_ra 4*immb"]
-        - ["addi_rsd rda, imma",        "jr_t1   4*immb"]
+        - ["mv      rda, rs1a",         "jalr_ra ra, 4*immb(ra)"]
+        - ["li      rda, imma",         "jalr_ra ra, 4*immb(ra)"]
+        - ["addi4spn rda, 4*imma",      "jalr_ra ra, 4*immb(ra)"]
+        - ["load    rda, k*imma(sp)",   "jalr_ra ra, 4*immb(ra)"]
+        - ["store   rs2a, k*imma(sp)",  "jalr_ra ra, 4*immb(ra)"]
+        - ["addi_rsd rda, imma",        "jr_t1   4*immb(t1)"]
       ops:
         - a: [mv, {op: li, imm: {bits: 7}}, {op: addi4spn, imm: {bits: 7, scale: 4, signed: false}},
               {op: lw, imm: {bits: 7, signed: false}},
