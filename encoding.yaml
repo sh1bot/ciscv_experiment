@@ -1243,42 +1243,49 @@ doc:
       # B one too, so if A takes an immediate, B must.
       #
       # `li` comes in two bands: the bare 5-bit field with a full rd, and an
-      # 8-bit band on the split-rd rows -- seven drawn bits (rs2 plus the top
-      # two of the rd column) and one opcode repeat, with the DESTINATION
-      # RESTRICTED TO a0-a7, the same three-two rd-column split as
-      # arg-call-pair row 2.  The wide band lives in immb ONLY, where the old
-      # 6-bit rider lived: at most one of the pair may be wide, and mutual
-      # independence lets the encoder swap the wide one into B.  In the ops
-      # lists that asymmetry is spelled as bare `li` in A (the base field)
-      # against `li_8s` in B, and it costs one canonical-order exception:
-      # (addi4spn, wide li) is spelled spn-first, because the wide li cannot
-      # sit in A.
+      # 8-bit band on the SPLIT-rda rows -- seven drawn bits and one opcode
+      # repeat, with the DESTINATION RESTRICTED TO a0-a7.  This is
+      # arg-call-pair's trick, and it is spelled the same way: narrow that
+      # frame's A destination to three bits and spend the two freed bits on
+      # imma.  The band is A-SIDE for the same reason arg-call's is -- the
+      # operand-position discipline puts an A immediate at funct5+rs2 (the
+      # truncated I-type position), and rda is the operand that already
+      # takes funct5 when free, so the two bits come out of the column the
+      # immediate is growing into.  A B-side band would have to park immb
+      # across rs1 and the top of rd, which is no position the discipline
+      # names.
+      #
+      # Only imma widens, so at most one of the pair may be wide, and mutual
+      # independence lets the encoder put the wide one in A.  In the ops
+      # lists that asymmetry is `li_8s` in A against bare `li` in B, and it
+      # costs one canonical-order exception: (wide li, mv) is spelled
+      # li-first, because the wide li cannot sit in B.
       budget: 32
       level: 1
       templates:
         - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
         - ["li      rda, imma", "li      rdb, immb"]
-        - ["mv/li   rda, rs1a/imma", "li      ardb, immb"]
+        - ["li      arda, imma", "mv/li   rdb, rs1b/immb"]
       ops:
-        - {a: [mv],  b: [mv, *li_8s, *addi4spn_u6]}
-        - {a: [li], b: [*li_8s, *addi4spn_u6]}
-        - {a: [*addi4spn_u6],  b: [*li_8s, *addi4spn_u6]}
+        - {a: [mv],  b: [mv, li, *addi4spn_u6]}
+        - {a: [*li_8s], b: [mv, li, *addi4spn_u6]}
+        - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
         - {funct5: rda, rs2: rs2b, rs1: rs1a, rd: rdb}
         - {funct5: rda, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
         - {funct5: rda, rs2: "imma[4:0]", rs1: "immb[4:0]", rd: rdb}
-        - funct5: rda
-          rs2: "immb[4:0]"
-          rs1: rs1a
-          rd:
-            - {bits: 2, value: "immb[6:5]"}
-            - {bits: 3, value: rdb}
-        - funct5: rda
+        - funct5:
+            - {bits: 2, value: "imma[6:5]"}
+            - {bits: 3, value: rda}
+          rs2: "imma[4:0]"
+          rs1: rs1b
+          rd: rdb
+        - funct5:
+            - {bits: 2, value: "imma[6:5]"}
+            - {bits: 3, value: rda}
           rs2: "imma[4:0]"
           rs1: "immb[4:0]"
-          rd:
-            - {bits: 2, value: "immb[6:5]"}
-            - {bits: 3, value: rdb}
+          rd: rdb
       notes:
         - >-
           THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05).  With the
@@ -1310,13 +1317,24 @@ doc:
           (`_ARG_REGS`, shared with arg-call-pair); the yaml states it as
           the 3-bit destination part of the split rows, which is how
           arg-call-pair states it too.  ONE wide variant on purpose: an
-          earlier draft mirrored the split into funct5 so the wide li could
-          sit in slot A as well, purely to appease per-slot pricing -- a row
-          shape nothing else uses, for pairs the immb rows already encode
-          via the swap.  The asymmetric ops spelling (bare li in A,
-          li_8s in B) prices each slot as it actually is, and the rule
-          stays slot-agnostic: rules.py accepts the wide op in either
-          stream position and the ENCODER puts it in B.
+          intermediate draft carried the split in BOTH slots so per-slot
+          pricing would see one declared width, which bought nothing --
+          either slot alone covers every pair, because the frame is
+          order-free and the encoder places the wide operand.  The
+          asymmetric ops spelling (li_8s in A, bare li in B) prices each
+          slot as it actually is; rules.py stays slot-agnostic, accepting
+          the wide op in either stream position.
+        - >-
+          A-SIDE, NOT B-SIDE, and the two are not interchangeable in shape
+          even though they are in capture.  A wide imma sits at
+          funct5+rs2, the truncated I-type position the discipline gives
+          every A immediate, and the two bits it needs come out of funct5
+          -- the column rda already occupies when free, so the split is
+          local to one column.  A B-side band has nowhere comparable: immb
+          would straddle rs1 and the top of rd.  Each side also costs
+          exactly one canonical-order inversion (A-side spells (wide li,
+          mv) li-first; a B-side band would spell (addi4spn, wide li)
+          spn-first), so that is not a discriminator.
         - >-
           PRICED 13 BY THE MODEL, ~19 BY HAND, in the same 32-block.
           opcode_codepoints scores each op against the slot's WIDEST row, so

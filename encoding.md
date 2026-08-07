@@ -588,8 +588,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      rda, imma
     li      rdb, immb
 
-    mv/li   rda, rs1a/imma
-    li      ardb, immb
+    li      arda, imma
+    mv/li   rdb, rs1b/immb
 
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
@@ -597,8 +597,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│g│   rda   │  rs2b   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│g│   rda   │immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 │h│g│   rda   │imma[4:0]│immb[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
-│h│g│   rda   │immb[4:0]│  rs1a   │ fn3 │immb+rdb │ opcode5 │1 0│
-│h│g│   rda   │imma[4:0]│immb[4:0]│ fn3 │immb+rdb │ opcode5 │1 0│
+│h│g│imma+rda │imma[4:0]│  rs1b   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│imma+rda │imma[4:0]│immb[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
 
  * THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05). With the
    width caps relaxed to ten bits, wide `li` destinations are argument
@@ -624,13 +624,22 @@ No general register block is reserved at present. Earlier drafts held out a cont
  * The a0-a7 restriction is enforced by scheduler/rules.py (`_ARG_REGS`,
    shared with arg-call-pair); the yaml states it as the 3-bit
    destination part of the split rows, which is how arg-call-pair states
-   it too. ONE wide variant on purpose: an earlier draft mirrored the
-   split into funct5 so the wide li could sit in slot A as well, purely
-   to appease per-slot pricing -- a row shape nothing else uses, for
-   pairs the immb rows already encode via the swap. The asymmetric ops
-   spelling (bare li in A, li_8s in B) prices each slot as it actually
-   is, and the rule stays slot-agnostic: rules.py accepts the wide op in
-   either stream position and the ENCODER puts it in B.
+   it too. ONE wide variant on purpose: an intermediate draft carried the
+   split in BOTH slots so per-slot pricing would see one declared width,
+   which bought nothing -- either slot alone covers every pair, because
+   the frame is order-free and the encoder places the wide operand. The
+   asymmetric ops spelling (li_8s in A, bare li in B) prices each slot as
+   it actually is; rules.py stays slot-agnostic, accepting the wide op in
+   either stream position.
+ * A-SIDE, NOT B-SIDE, and the two are not interchangeable in shape even
+   though they are in capture. A wide imma sits at funct5+rs2, the
+   truncated I-type position the discipline gives every A immediate, and
+   the two bits it needs come out of funct5 -- the column rda already
+   occupies when free, so the split is local to one column. A B-side band
+   has nowhere comparable: immb would straddle rs1 and the top of rd.
+   Each side also costs exactly one canonical-order inversion (A-side
+   spells (wide li, mv) li-first; a B-side band would spell (addi4spn,
+   wide li) spn-first), so that is not a discriminator.
  * PRICED 13 BY THE MODEL, ~19 BY HAND, in the same 32-block.
    opcode_codepoints scores each op against the slot's WIDEST row, so
    slot B's split rows (7-bit field) hide addi4spn's sixth bit there,

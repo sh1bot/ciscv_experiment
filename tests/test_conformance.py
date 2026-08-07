@@ -149,9 +149,9 @@ def test_immediate_contracts_derive():
     assert not missing, f"rules with no frame contract: {missing}"
     # Spot values this session got wrong in both directions at some point.
     assert width_of("li-branch-chain", "a", "li") == 8
-    assert width_of("dual-setup-pair", "b", "li") == 8
-    # A-side li is BARE: the wide band is B-only, so a's falls to its field.
-    assert width_of("dual-setup-pair", "a", "li") == 5
+    assert width_of("dual-setup-pair", "a", "li") == 8
+    # B-side li is BARE: the wide band is A-only, so b's falls to its field.
+    assert width_of("dual-setup-pair", "b", "li") == 5
     assert width_of("mem-base-pair", "a", "lw") == 6
     # The any-rd band beside the a0-a7 split rows: the widest-row fallback
     # read 7 here and silently widened the band the day the split rows landed.
