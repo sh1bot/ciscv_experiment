@@ -1079,7 +1079,10 @@ def _post_inc_addi(a: Instruction, b: Instruction) -> None:
 
 
 _DUAL_ADDI4SPN_BITS = _w("dual-setup-pair", "a", "addi4spn")
-_DUAL_LI_ARG_BITS = _w("dual-setup-pair", "a", "li")
+# The wide band is declared on the B side only (the split rows widen immb);
+# the check below is still slot-agnostic -- the encoder swaps the wide op
+# into B, as it did for the 6-bit rider this band replaced.
+_DUAL_LI_ARG_BITS = _w("dual-setup-pair", "b", "li")
 # The any-rd band is the NARROWEST imm row's field (5): the widest-row
 # fallback `_w` uses for bare ops would read the 7-bit a0-a7 split rows and
 # silently widen a band whose extra bits only exist under that restriction.

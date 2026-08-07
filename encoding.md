@@ -550,7 +550,6 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
 │h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │immb+rdb │ opcode5 │1 0│
 │h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │immb+rdb │ opcode5 │1 0│
-│h│imma+rda │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
 
  * THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05). With the
    width caps relaxed to ten bits, wide `li` destinations are argument
@@ -572,19 +571,23 @@ No general register block is reserved at present. Earlier drafts held out a cont
    it was.
  * The a0-a7 restriction is enforced by scheduler/rules.py (`_ARG_REGS`,
    shared with arg-call-pair); the yaml states it as the 3-bit
-   destination part of each split row, which is how arg-call-pair states
-   it too. An `imm: {bits}` contract is an opcode property and must agree
-   across slots (op_contracts), so both slots declare 8 and both get a
-   split row; the rule caps the pair at ONE wide immediate, matching the
-   one split per row.
- * PRICED 11 BY THE MODEL, ~19 BY HAND, in a 32-block either way.
+   destination part of the split rows, which is how arg-call-pair states
+   it too. ONE wide variant on purpose: an earlier draft mirrored the
+   split into funct5 so the wide li could sit in slot A as well, purely
+   to appease per-slot pricing -- a row shape nothing else uses, for
+   pairs the immb rows already encode via the swap. The asymmetric ops
+   spelling (bare li in A, li_8s in B) prices each slot as it actually
+   is, and the rule stays slot-agnostic: rules.py accepts the wide op in
+   either stream position and the ENCODER puts it in B.
+ * PRICED 13 BY THE MODEL, ~19 BY HAND, in the same 32-block.
    opcode_codepoints scores each op against the slot's WIDEST row, so
-   with the split rows present (7-bit fields) it sees li at ext 1 and
-   stops charging addi4spn's sixth bit, which in the full-rd rows still
-   rides an opcode repeat -- the same widest-row coarseness arg-call-pair
-   already lives with. A band-by-band hand count (li 5-any + 8-args, spn
-   5 + rider, one spelling per unordered pair) is ~19. Both are inside
-   the block; the gap is a known model artifact, not spare room to spend.
+   slot B's split rows (7-bit field) hide addi4spn's sixth bit there,
+   which in the full-rd rows still rides an opcode repeat -- the same
+   widest-row coarseness arg-call-pair already lives with; it also cannot
+   see that B's li needs its full-rd narrow row beside the split rows. A
+   band-by-band hand count (B li: rd5 narrow + rd3 seven-bit + one repeat
+   for the eighth) is ~19. Both are inside the block; the gap is a known
+   model artifact, not spare room to spend.
 
 ## rsd-alu-pair
 
