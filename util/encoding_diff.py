@@ -45,7 +45,9 @@ def _stat(frame, grid):
         cp = opcode_codepoints(frame, grid)
     except Exception:
         cp = None
-    widths = {mn: c.get("bits") for mn, c in op_contracts(frame).items()}
+    widths = {f"{s}:{mn}": c.get("bits")
+              for s in ("a", "b")
+              for mn, c in op_contracts(frame, s).items()}
     return {"budget": frame.get("budget"), "demand": cp, "widths": widths,
             "rows": len(frame.get("rows") or [])}
 

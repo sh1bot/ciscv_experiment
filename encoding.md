@@ -13,13 +13,13 @@ No general register block is reserved at present. Earlier drafts held out a cont
     alu     tmp, rs1a, rs2a/imma
     alu     rdb, tmp, rs2b/immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│immb[4:0]│g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs2b   │  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│  rs2b   │imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## load-alu-chain
 
@@ -28,11 +28,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
     load    tmp, k*imma(rs1a)
     alu     rdb, tmp, rs2b/immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs2b   │imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## alu-store-chain
 
@@ -41,11 +41,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
     alu     tmp, rs1a, rs2a/imma
     store   tmp, k*immb(rs1b)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│  rs2a   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
-│h│  rs1b   │g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs1b   │  rs2a   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│  rs1b   │imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
 ## czero-or-chain
 
@@ -54,10 +54,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     czero.X tmp, rs1a, rs2a
     or      rdb, tmp, rs2b
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs2b   │  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## addi-store-chain
 
@@ -66,10 +66,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     addi    tmp, rs1a, imma
     store   tmp, 0(rbase)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1a   │g│imma[4:0]│imma[9:5]│ fn3 │  rbase  │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imma[9:5]│imma[4:0]│  rs1a   │ fn3 │  rbase  │ opcode5 │1 0│
 
  * The data width comes from the op list (sb/sh/sw/sd), as in the other
    memory frames, rather than a width field -- 4 codepoints is cheaper
@@ -86,10 +86,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     lx      tmp, 0(rs1a)
     load    rdb, k*immb(tmp)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[9:5]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[9:5]│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
  * The A slot spends ONE opcode, not seven. `must_chain_base` makes A's
    loaded value B's base address, and a byte or halfword is not an
@@ -114,10 +114,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     lx      tmp, k*imma(rs1a)
     load    rdb, k*immb(tmp)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│imma[4:0]│g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[4:0]│imma[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
  * The offset-bearing sibling of load0-load10-chain, on the pattern of
    addi-store-off-chain. It replaces an earlier `deref-load-chain`, whose
@@ -146,14 +146,22 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      tmp, imma
     bXX     rs1b, tmp, 4*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[9:5]│g│imma[4:0]│  rs1b   │ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[9:5]│imma[4:0]│  rs1b   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * `imma` is a 5-bit register column; `li` declares 8 bits, bought by
    three opcode doublings (census li fit 66.9% -> 85.3% of 2293, ~13
    pairs/codepoint for the extra 32).
+ * The row spells the constant in rs2. A site with the constant on the
+   LEFT of an asymmetric compare (`blt tmp, rs`) is still encodable via
+   the dead-tmp rewrite `bXX K, rs` -> `bYY rs, K+1` (blt<->bge,
+   bltu<->bgeu) -- tmp carries only the comparison constant and dies at
+   B, so changing its value is licensed. rules.py accepts those sites and
+   rejects the two edge cases the rewrite cannot reach: K at the top of
+   the field (K+1 overflows) and K = -1 under an unsigned compare (the
+   predicate flips).
  * TODO: could replace li with alu op and compare result with zero
    (mostly?).
 
@@ -162,15 +170,20 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Test a bit or bit-field and branch on the result.*
 
     andi    tmp, rs1a, imma
-    beqz/bnez tmp, immb
+    beqz/bnez tmp, 4*immb
 
-    slli    tmp, rs1a, imma
-    blt/bge tmp, zero, 4*immb
+    slli/srli tmp, rs1a, imma
+    beqz/bnez tmp, 4*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[9:5]│g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[9:5]│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+
+ * The shift forms are the E1/E2 rewrite targets (low-mask and high-mask
+   zero tests); a single-bit sign test via `slli` + `blt tmp, zero` is
+   equivalence E5, a candidate this frame does NOT yet encode -- its b
+   list has no blt/bge -- and rules.py matches accordingly.
 
 ## load-base-branch-pair
 
@@ -179,10 +192,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     load    rda, k*imma(rs1a)
     beqz/bnez rda, zero, 4*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│   rda   │imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * `immb` is the branch displacement, a 5-bit field. Displacements are
    unresolved labels in the corpus, so their fit is unmeasured.
@@ -194,10 +207,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     load    rda, k*imma(sp)
     beqz/bnez rda, zero, 4*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│imma[4:0]│imma[9:5]│ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imma[9:5]│imma[4:0]│   rda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
 
@@ -208,10 +221,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     inc/dec  rsda
     bXX     rsda, rs2b, 4*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[9:5]│g│  rs2b   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[9:5]│  rs2b   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * The step is +/-1, implied by the opcode (`inc`/`dec` = `addi rsda,
    rsda, +/-1`): 88% of adjacent counter-branch sites compare against a
@@ -241,10 +254,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      tmp, imma
     czero.X rdb, tmp, rs2b
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│imma[4:0]│imma[9:5]│ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imma[9:5]│imma[4:0]│  rs2b   │ fn3 │   rdb   │ opcode5 │1 0│
 
 ## index-mem-chain
 
@@ -256,35 +269,35 @@ No general register block is reserved at present. Earlier drafts held out a cont
     shXadd  tmp, rs1a, rs2a
     store   rs2b, k*immb(tmp)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2a   │g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2a   │g│  rs2b   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[4:0]│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│  rs2b   │  rs2a   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
 ## pre-inc-pair
 
 *Advance a pointer, then access through it (pre-increment).*
 
-    shXadd  rsda, rsda, rs2a
+    shXadd  rsda, rs1a, rsda
     load    rdb, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
     load    rdb, 0(rsda)
 
-    shXadd  rsda, rsda, rs2a
+    shXadd  rsda, rs1a, rsda
     store   rs2b, k*immb(rsda)
 
     addi    rsda, rsda, k*imma
     store   rs2b, 0(rsda)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│  rs2a   │  rsda   │ fn3 │immb[4:0]│ opcode5 │1 0│
-│h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│imma[4:0]│imma[9:5]│ fn3 │  rsda   │ opcode5 │1 0│
-│h│   rdb   │g│imma[4:0]│imma[9:5]│ fn3 │  rsda   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs2b   │  rsda   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│immb[4:0]│  rsda   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│imma[9:5]│imma[4:0]│  rsda   │ fn3 │  rs2b   │ opcode5 │1 0│
+│h│g│imma[9:5]│imma[4:0]│  rsda   │ fn3 │   rdb   │ opcode5 │1 0│
 
  * The addi rows access AT the bumped pointer: at genuine (non- prologue)
    surviving-sum sites the memory offset is zero 68-78% of the time, so
@@ -295,6 +308,18 @@ No general register block is reserved at present. Earlier drafts held out a cont
    ceiling, not full coverage.
  * The shXadd rows keep the 5-bit scaled immb: their stride is the
    register, so the offset field still earns its column.
+ * The shXadd form is the scaled POINTER WALK, `shXadd rsda, rs1a, rsda`
+   (Zba: rd = rs2 + (rs1 << X)) -- the pointer advanced by a scaled
+   stride, which is what "advance a pointer" means and the form the
+   corpus emits (its in-place-scaling sibling `shXadd a, a, x` measured
+   69 scheduled pairs on sqlite-rv64 against this form's 210; one row
+   decodes one operand binding, so rules.py admits only this one). The
+   row is drawn at the STANDARD Zba read ports: the shifted stride `rs1a`
+   in the rs1 column, the pointer `rsda` in rs2 -- Zba's rs2 position. B
+   needs no port for its base at all: a pre-increment accesses through
+   the UPDATED pointer, which is A's result, forwarded inside the packet
+   -- so nothing competes with A for the columns and the operand-position
+   discipline holds without a trade.
 
 ## post-inc-pair
 
@@ -306,11 +331,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
     store   rs2a, k*imma(rsda)
     addi    rsda, rsda, k*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │imma[4:0]│ opcode5 │1 0│
-│h│immb[4:0]│g│imma[4:0]│  rsda   │ fn3 │   rda   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[4:0]│  rs2a   │  rsda   │ fn3 │imma[4:0]│ opcode5 │1 0│
+│h│g│immb[4:0]│imma[4:0]│  rsda   │ fn3 │   rda   │ opcode5 │1 0│
 
  * Timing oddity here because reg in `rd` field is written in first cycle
    not second.
@@ -333,11 +358,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
     store   rs2a, k*imm(sp)
     store   rs2b, k*imm+k(sp)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│imm[4:0] │imm[9:5] │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│  rs2a   │imm[9:5] │ fn3 │imm[4:0] │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imm[9:5] │imm[4:0] │   rda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│imm[9:5] │  rs2a   │  rs2b   │ fn3 │imm[4:0] │ opcode5 │1 0│
 
  * both opcodes in a pair must be identical operations
  * offsets differ by one data width, as in mem-base-pair
@@ -352,11 +377,11 @@ No general register block is reserved at present. Earlier drafts held out a cont
     store   rs2a, k*imm(rbase)
     store   rs2b, k*imm+k(rbase)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│imm[4:0] │  rbase  │ fn3 │   rdb   │ opcode5 │1 0│
-│h│  rs2b   │g│  rs2a   │  rbase  │ fn3 │imm[4:0] │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│   rda   │imm[4:0] │  rbase  │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│  rs2b   │  rs2a   │  rbase  │ fn3 │imm[4:0] │ opcode5 │1 0│
 
  * both opcodes in a pair must be identical operations
  * No `lb`, `lh` or `lwu`: they account for 12 of 37816 scheduled slots
@@ -369,10 +394,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     load    tmp, k*imma(rs1a)
     store   tmp, k*immb(rs1b)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│immb[4:0]│g│imma[4:0]│  rs1a   │ fn3 │  rs1b   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs1b   │imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * Both offsets are width-scaled and unsigned; the loaded value is the
    chain temporary and is not encoded.
@@ -384,28 +409,51 @@ No general register block is reserved at present. Earlier drafts held out a cont
     addi    tmp, rs1a, imma
     store   tmp, k*immb(rbase)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1a   │g│immb[4:0]│  rbase  │ fn3 │imma[4:0]│ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rbase  │imma[4:0]│  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
- * `immb` is width-scaled and unsigned; `imma` is signed. The stored
-   value is the chain temporary and is not encoded.
+ * `immb` is width-scaled and unsigned; `imma` is signed -- and that
+   asymmetry is the frame's whole shape. A memory offset carries an
+   access width, so five bits of `immb` reach 4x or 8x further; an `addi`
+   addend is pointer arithmetic and carries none, so its bits are bytes.
+   `load5-load5-chain` gets a symmetric split because BOTH its immediates
+   are scaled offsets; this frame cannot, and scaling A by the store's k
+   would not help -- the addends are 93% ODD, only 28.8% are aligned to
+   their own store's width, and for `sw` (65% of the population) it is 5
+   of 295. The stored value is the chain temporary and is not encoded.
+ * THE WIDTH BELONGS TO B, measured 2026-08-04. The row draws five bits
+   per column, so a sixth costs a doubling. Over 455 scheduled pairs on
+   sqlite-rv32/rv64 and cpp-rv32/rv64: A's addend fits FIVE bits 97% of
+   the time and two bits 95% of the time, while B's scaled offset fits
+   five only 33% of the time and six 100%. So A was paying 8 codepoints
+   for the 2% that need a sixth bit. Dropped to 5+6: 16 codepoints to 8,
+   at a cost of 5 pairs on sqlite-rv32 and 4 on sqlite-rv64. Narrowing B
+   too (5+5, 4cp) costs a further 135 and 130 -- that bit is real.
+ * This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
+   cpp-rv32. A cpp-only reading makes it look like the worst frame in the
+   encoding; it is not.
+ * rules.py EXCLUDES the li form (rs1a = x0) here even though the row
+   draws rs1a and could encode it: li + store belongs to the frames that
+   price it (addi-store-chain at offset zero, alu-store-chain up to a
+   5-bit offset). The residue -- li + store at an offset only this
+   frame's sixth bit reaches -- stays solo.
 
 ## load-call-chain
 
 *Load a function pointer and call through it (virtual dispatch).*
 
     load    tmp, k*imma(rs1a)
-    jalr_link_ra tmp
+    jalr_link_ra ra, 0(tmp)
 
     load    tmp, k*imma(rs1a)
-    jalr_link_t1 tmp
+    jalr_link_t1 t1, 0(tmp)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│imma[9:5]│g│imma[4:0]│  rs1a   │ fn3 │ unused  │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imma[9:5]│imma[4:0]│  rs1a   │ fn3 │ unused  │ opcode5 │1 0│
 
  * `rd: unused` leaves the selecting sentinel to the enumerator, which
    allocates it from the reserved x0/x2 pool per (host, sentinel) -- both
@@ -422,37 +470,38 @@ No general register block is reserved at present. Earlier drafts held out a cont
 *Set up an argument, then call through a hard-coded base register.*
 
     mv      rda, rs1a
-    jalr_ra 4*immb
+    jalr_ra ra, 4*immb(ra)
 
     li      rda, imma
-    jalr_ra 4*immb
+    jalr_ra ra, 4*immb(ra)
 
     addi4spn rda, 4*imma
-    jalr_ra 4*immb
+    jalr_ra ra, 4*immb(ra)
 
-    load    rda, k*imma(x2)
-    jalr_ra 4*immb
+    load    rda, k*imma(sp)
+    jalr_ra ra, 4*immb(ra)
 
-    store   rs2a, k*imma(x2)
-    jalr_ra 4*immb
+    store   rs2a, k*imma(sp)
+    jalr_ra ra, 4*immb(ra)
 
     addi_rsd rda, imma
-    jr_t1   4*immb
+    jr_t1   4*immb(t1)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1a   │g│immb[4:0]│immb[9:5]│ fn3 │   rda   │ opcode5 │1 0│
-│h│imma[4:0]│g│immb[4:0]│immb[9:5]│ fn3 │imma+rda │ opcode5 │1 0│
-│h│imma[4:0]│g│immb[4:0]│immb[9:5]│ fn3 │  rs2a   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│immb[9:5]│   rda   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│immb[9:5]│imma[4:0]│imma+rda │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│immb[9:5]│  rs2a   │imma[4:0]│ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the three
    ops that want a wide immediate and an ARGUMENT destination, splitting
-   the rd column three-two so `imma` reaches seven bits; row 3 holds the
+   the rs1 column three-two so `imma` reaches seven bits; row 3 holds the
    stores, whose source register needs all five bits and whose stack
-   offsets are small.
- * rd 3 bits costs almost nothing here and buys two: `li` at rd3+imm5
-   catches 925 of the 933 that an unrestricted rd catches on cpp- rv32,
+   offsets are small. The call displacement rides funct5+rd in every row
+   -- the S-type immediate positions.
+ * A 3-bit rda costs almost nothing here and buys two: `li` at rda3+imm5
+   catches 925 of the 933 that an unrestricted rda catches on cpp-rv32,
    because these are argument setups by construction. 3+7 beats 5+5 by
    68% on cpp `li` and 18% on cpp `addi4spn`.
  * Load and store offsets scale by the ACCESS width, as `c.lwsp` and
@@ -464,8 +513,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
    costs 13% of the cpp hits (6473 against 7456 for a raw 7-bit field)
    and buys 0..508 instead of 0..127. On rv64 the scaled form is the one
    the fit prefers outright.
- * The rd column is a register in row 1 only, so this frame neither hosts
-   nor is hosted.
+ * The rd column carries the displacement in every row, so this frame
+   neither hosts nor is hosted.
 
 # macro-op-pair
 
@@ -477,10 +526,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
     add     rda, rs1a, rs2a
     sltu    rdb, rda, rs1a
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│   rda   │  rs2a   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
 
  * CARRY-OUT, measured (2026-08-04). cpp-rv32 holds 156 carry-shaped
    adjacencies, godot 36, everything else under five. The cluster takes
@@ -506,8 +555,8 @@ No general register block is reserved at present. Earlier drafts held out a cont
    pairs. The ceiling is no higher -- adjacent tuple matches with
    positionally shared operands number 31 on musl-rv32, 25 on cpp- rv32,
    2 on sqlite-gcc-rv64, 0 on sqlite-rv64 -- so nothing is suppressing
-   it. Notably the frame is NOT register-window constrained: rules.py
-   carries no x0-x15 set, and this row draws four full 5-bit fields.
+   it. Notably the frame is NOT register-window constrained: this row
+   draws four full 5-bit fields, so every register encodes.
  * ORDER IS NOT ARBITRARY, and it is not a dependency either. The two ops
    read the same two sources and neither consumes the other's result, so
    they commute -- but the RISC-V M extension names one sequence as THE
@@ -542,14 +591,14 @@ No general register block is reserved at present. Earlier drafts held out a cont
     mv/li   rda, rs1a/imma
     li      ardb, immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│   rda   │g│  rs2b   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
-│h│   rda   │g│immb[4:0]│  rs1a   │ fn3 │immb+rdb │ opcode5 │1 0│
-│h│   rda   │g│immb[4:0]│imma[4:0]│ fn3 │immb+rdb │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│   rda   │  rs2b   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│   rda   │immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│   rda   │imma[4:0]│immb[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│   rda   │immb[4:0]│  rs1a   │ fn3 │immb+rdb │ opcode5 │1 0│
+│h│g│   rda   │imma[4:0]│immb[4:0]│ fn3 │immb+rdb │ opcode5 │1 0│
 
  * THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05). With the
    width caps relaxed to ten bits, wide `li` destinations are argument
@@ -596,19 +645,33 @@ No general register block is reserved at present. Earlier drafts held out a cont
     alu rsda, rsda, rs2a/imma
     alu rsdb, rsdb, rs2b/immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs2b   │g│  rs2a   │  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
-│h│  rs2b   │g│imma[4:0]│  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
-│h│immb[4:0]│g│  rs2a   │  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
-│h│immb[4:0]│g│imma[4:0]│  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs2b   │  rs2a   │  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
+│h│g│  rs2b   │imma[4:0]│  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│  rs2a   │  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│imma[4:0]│  rsda   │ fn3 │  rsdb   │ opcode5 │1 0│
 
  * The four register operands occupy the four 5-bit columns -- 20 bits,
    the whole operand budget -- so registers here are a FULL 5-bit field,
-   x0..x31. An earlier note anticipated cutting them to 4 bits; that is
-   not needed, and scheduler/rules.py enforcing x0..x15 was costing 377
-   pairs across the corpus.
+   x0..x31. An earlier draft anticipated cutting them to 4 bits; that is
+   not needed and was never adopted.
+ * The two slots declare DIFFERENT op sets, and deliberately. Range past
+   the row's five drawn bits is bought in opcode entries -- an op
+   declaring N bits occupies 2^(N-5) of them -- so weight, not op count,
+   is the budget, and one bit on `li` costs what four reg-reg opcodes
+   cost. A weighs 16 as fifteen ops that are nearly all weight 1
+   (breadth); B weighs 16 as six ops, of which `li` at eight bits is 8
+   and `addi` at seven is 4 (depth). The block is 16 x 16 = 256, the same
+   as the symmetric set it replaces.
+ * The asymmetry is only purchasable because the pair is ORDER-FREE in
+   87.1% of the corpus residue: rsd-alu-pair packs two independent
+   results, so unless one reads the other's destination the scheduler may
+   emit either orientation and only one need be encodable. The list
+   scheduler already tries both (its tier-1 and tier-2 partner picks).
+   See results/corpus/RSD-RESIDUE.md for the measurement and for the
+   weighted optimisation that chose these two sets.
 
 ## prologue-pair
 
@@ -617,54 +680,61 @@ No general register block is reserved at present. Earlier drafts held out a cont
     addi    sp, -16*imm
     store   rs1b, 16*imm-k(sp)
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│imm[4:0] │imm[9:5] │ fn3 │ unused  │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imm[9:5] │imm[4:0] │  rs1b   │ fn3 │ unused  │ opcode5 │1 0│
+
+ * `rs1b` is a drawn 5-bit field: ANY register may be the one stored at
+   the top of the new frame. ra is the overwhelmingly common case but not
+   a constraint -- a leaf function that keeps its fp saves s0 there
+   instead, and rules.py accepts it.
 
 ## epilogue-pair
 
 *Function epilogue: release the stack frame and return.*
 
     addi    sp, 16*imm
-    jr      rs1b
+    jr_any  rs1b
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│imm[4:0] │imm[9:5] │ fn3 │ unused  │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│imm[9:5] │imm[4:0] │  rs1b   │ fn3 │ unused  │ opcode5 │1 0│
+
+ * The row draws only the target register: the rs2+rs1 columns carry the
+   sp adjustment, so a `jalr` here has a ZERO offset by construction --
+   there is no field for one -- and rules.py rejects the nonzero-offset
+   spelling.
 
 ## arith-jump-pair
 
 *A last in-place computation, then a control transfer.*
 
     alu     rsda, rsda, rs2a/imma
-    jr/jalr rs1b
-
-    mv     rsda, rs2a
-    jr/jalr rs1b
+    jr_any/jalr_link_ra rs1b
 
     li     rsda, imma
-    jr/jalr rs1b
+    jr_any/jalr_link_ra rs1b
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│  rs2a   │  rsda   │ fn3 │ unused  │ opcode5 │1 0│
-│h│  rs1b   │g│imma[4:0]│  rsda   │ fn3 │ unused  │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs1b   │  rs2a   │  rsda   │ fn3 │ unused  │ opcode5 │1 0│
+│h│g│  rs1b   │imma[4:0]│  rsda   │ fn3 │ unused  │ opcode5 │1 0│
 
 ## setup-jump-pair
 
 *Set up an argument or return value, then transfer control.*
 
     mv      rda, rs1a
-    jr      rs1b
+    jr_any/jalr_link_ra rs1b
 
     load    rda, k*imma(rs1a)
-    jr      rs1b
+    jr_any/jalr_link_ra rs1b
 
     li      rda, imma
-    jr      rs1b
+    jr_any/jalr_link_ra rs1b
 
     mv      rda, rs1a
     j       4*immb
@@ -675,22 +745,23 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      rda, imma
     j       4*immb
 
-┌─┬─────────┬─┬─────────┬─────────┬─────┬─────────┬─────────────┐
-│h│ funct5  │g│   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
-└─┴─────────┴─┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│  rs1b   │g│imma[4:0]│  rs1a   │ fn3 │   rda   │ opcode5 │1 0│
-│h│  rs1b   │g│imma[4:0]│imma[9:5]│ fn3 │   rda   │ opcode5 │1 0│
-│h│  rs1a   │g│immb[4:0]│immb[9:5]│ fn3 │   rda   │ opcode5 │1 0│
-│h│imma[4:0]│g│immb[4:0]│immb[9:5]│ fn3 │   rda   │ opcode5 │1 0│
+┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
+│h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
+└─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
+│h│g│  rs1b   │imma[4:0]│  rs1a   │ fn3 │   rda   │ opcode5 │1 0│
+│h│g│imma[9:5]│imma[4:0]│  rs1b   │ fn3 │   rda   │ opcode5 │1 0│
+│h│g│immb[9:5]│   rda   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│immb[9:5]│imma[4:0]│   rda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * `j` covers `jal x0`; a jal with a real destination is a call and is
    excluded from every jump frame.
  * Direct `j` (78-92% of this frame's packets) takes rows 3-4: `rs1b` is
-   dropped -- a direct jump has no register operand -- and `immb` gets
-   the rs2+rs1 span, a 10-bit displacement in PACKET units. Packets are
-   4-byte aligned, so the low bit RVC must carry is dead and a
-   displacement costs 0.54x its RVC bits. 10 bits covers 84.6% of direct
-   `j` on sqlite and 97-98% on musl.
+   dropped -- a direct jump has no register operand -- and `immb` takes
+   funct5+rd, a 10-bit displacement in PACKET units at the branch-
+   immediate positions every control frame shares. Packets are 4-byte
+   aligned, so the low bit RVC must carry is dead and a displacement
+   costs 0.54x its RVC bits. 10 bits covers 84.6% of direct `j` on sqlite
+   and 97-98% on musl.
  * rules.py cannot range-check the displacement: corpus jump operands are
    unresolved labels, so a pairwise rule has nothing to test. The
    scheduled count includes the over-range tail (~15% on sqlite). See

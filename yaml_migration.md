@@ -31,9 +31,9 @@ compiler reads the YAML (and the templates) and emits the matcher.
 
 ## Deferred / abandoned
 
-- **4-bit low-register class** (x0..x15 RSD fields). Abandoned for now — the
-  provisional system completes without the constraint, so those register-class
-  limits fall on the floor today. May revisit later.
+- **4-bit register class** (narrowing the RSD register fields). Abandoned. The
+  rows draw four full 5-bit columns and the system completes without any
+  register-class limit, so none is declared or enforced anywhere.
 
 ## Decisions recorded
 

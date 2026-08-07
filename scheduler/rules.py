@@ -8,7 +8,6 @@ The mechanism (can_pair, greedy_pair, stamp_slot_eligibility) lives in pairing.p
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Final
-from collections.abc import Iterable
 from functools import wraps
 
 from isa.instruction import Instruction
@@ -17,6 +16,7 @@ from scheduler.imm_contracts import width_of as _yaml_width
 from scheduler.imm_contracts import narrow_field_of as _yaml_narrow_field
 from scheduler.imm_contracts import rd_column_slots as _rd_slots
 from scheduler.imm_contracts import link_regs_for as _yaml_link_regs
+from scheduler.imm_contracts import link_regs_closed as _yaml_link_closed
 from scheduler.imm_contracts import accepts_pcrel_lo as _yaml_pcrel_lo
 
 
@@ -29,6 +29,25 @@ def _w(rule: str, slot: str, op: str) -> int:
         raise RuntimeError(
             f"encoding.yaml declares no immediate width for {rule}/{slot}/{op}")
     return v
+
+
+def _slot_widths(rule: str, slot: str) -> dict:
+    """{yaml op name: declared bits} for one slot, from encoding.yaml."""
+    from scheduler.imm_contracts import widths_for
+    return dict(widths_for(rule, slot))
+
+
+def _slot_mnemonics(rule: str, slot: str) -> frozenset:
+    """The MNEMONICS one slot accepts, from its yaml op list.
+
+    `li` is not a mnemonic -- it is `addi` with rs1 = x0 -- so a slot declaring
+    li accepts `addi` and the width lookup separates them.
+    """
+    ops = set(_slot_widths(rule, slot))
+    if "li" in ops:
+        ops.discard("li")
+        ops.add("addi")
+    return frozenset(ops)
 
 
 def _lr(rule: str, slot: str) -> frozenset:
@@ -114,7 +133,6 @@ _RSD_ALU_MN = frozenset({
     "add",  "and",  "or",   "xor",
     "slli", "srli",                          # shift-immediate forms
     })
-_RSD_ALU_REGS = frozenset(range(32))         # x0..x31 — a FULL 5-bit field
 
 # Signed immediate widths, derived from the yaml op contracts at import.
 _RSD_IMM_BITS   = {mn: _w("rsd-alu-pair", "a", mn)
@@ -166,6 +184,10 @@ def _chain_alu_imm_in_range(insn: Instruction) -> None:
     andi the 5-bit base range; shifts an unsigned 5-bit amount."""
     bits = _CHAIN_ALU_IMM_BITS.get(insn.mnemonic)
     if bits is not None:
+        if insn.base_from_auipc and insn.mnemonic in ("addi", "addiw"):
+            # The lo half of an auipc address materialisation: the corpus
+            # value is layout junk and this field cannot span the residue.
+            raise NotPair("pcrel-lo-addi")
         imm = insn.imm
         if imm is None:
             raise NotPair("MALFORMED: missing-immediate")
@@ -208,11 +230,14 @@ def _imm_in_range(insn: Instruction, widths: dict = _RSD_IMM_BITS,
     `widths` selects the per-frame contract: rsd-alu-pair passes _RSD_IMM_BITS,
     arith-jump-pair the narrower _RSD_JUMP_BITS its row can actually draw.
 
-    Register-range checks are not done here: they belong to the uses_low_regs
-    family of decorators, which every caller already applies.
+    Register ranges are not checked anywhere: every frame draws its register
+    operands in 5-bit columns, so there is no narrower class to enforce (gated
+    by tests/test_conformance.py).
     """
     bits = widths.get(insn.mnemonic)
     if bits is not None:
+        if insn.base_from_auipc and insn.mnemonic in ("addi", "addiw"):
+            raise NotPair("pcrel-lo-addi")   # lo half; field cannot span it
         imm = insn.imm
         # imm==0 on addi/addiw encodes as add/addw rd, rs1, x0 — allow it through.
         lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
@@ -293,7 +318,22 @@ def must_not_chain(func: Callable):
     return check_chain3
 
 
+# An offset whose base register came straight from an `auipc` is the
+# %pcrel_lo half of an address materialisation: the corpus value is
+# (target - pc_of_auipc) mod 4096, a fact about the layout the binary was
+# LINKED for, not a displacement the program chose.  What survives relinking
+# is only the target's ALIGNMENT; the magnitude is recomputed.  So a slot can
+# hold "whatever lo our own link step produces" iff its field spans the whole
+# 12-bit residue — declared bits + log2(scale) >= 12 — and signedness is
+# free, because the toolchain biases the auipc's hi half to land the residual
+# in whatever range the field has.  A frame whose field qualifies declares
+# `accepts_pcrel_lo` (gated by tests/test_conformance.py), skips the
+# magnitude check and tests only alignment: see load-call-chain and
+# pre-inc-pair.  These decorators are for every OTHER slot — a field that
+# cannot span the residue has nothing meaningful to range-check, so the pair
+# is refused instead of measured wrongly.  ACCOUNTING.md sec 8.
 def a_base_not_from_auipc(func: Callable):
+    """A's field cannot span the 12-bit pcrel-lo residue: refuse the pair."""
     @wraps(func)
     def check_a_base_from_auipc(a: Instruction, b: Instruction):
         if a.base_from_auipc:
@@ -303,6 +343,7 @@ def a_base_not_from_auipc(func: Callable):
 
 
 def b_base_not_from_auipc(func: Callable):
+    """B's field cannot span the 12-bit pcrel-lo residue: refuse the pair."""
     @wraps(func)
     def check_b_base_from_auipc(a: Instruction, b: Instruction):
         if b.base_from_auipc:
@@ -379,47 +420,6 @@ def exclusive_rd(func: Callable):
     return check_rd_exclusive
 
 
-def _get_fields(insn: Iterable[Instruction], fields: Iterable[str], f: Callable):
-    field_names = {
-            "a.rd": (0, "rd"),
-            "a.rs1": (0, "rs1"),
-            "a.rs2": (0, "rs2"),
-            "b.rd": (1, "rd"),
-            "b.rs1": (1, "rs1"),
-            "b.rs2": (1, "rs2"),
-    }
-    def per_field(name: str):
-        n, field = field_names[name]
-        return f(getattr(insn[n], field, None))
-    return map(per_field, fields)
-
-
-def _confirm_low_regs(a: Instruction, b: Instruction, fields: Iterable[str]):
-    r_is_low = lambda r: r is None or r in _RSD_ALU_REGS
-    if not all(_get_fields((a, b), fields, r_is_low)):
-        raise NotPair("big-reg")
-
-
-def uses_low_regs(func: Callable):
-    all_regs = ("a.rd", "a.rs1", "a.rs2", "b.rd", "b.rs1", "b.rs2")
-    @wraps(func)
-    def check_low_regs(a: Instruction, b: Instruction):
-        _confirm_low_regs(a, b, all_regs)
-        return func(a, b)
-    return check_low_regs
-
-
-def chain_uses_low_regs(func: Callable):
-    @wraps(func)
-    def check_low_regs1(a: Instruction, b: Instruction):
-        if b.is_commutative and b.rs2 == a.rd:
-            _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs1"))
-        else:
-            _confirm_low_regs(a, b, ("a.rs1", "a.rs2", "b.rd", "b.rs2"))
-        return func(a, b)
-    return check_low_regs1
-
-
 def a_imm_ok(func: Callable):
     """A-slot's immediate / shift amount is in the RSD-encodable range."""
     @wraps(func)
@@ -448,45 +448,84 @@ def a_jump_imm_ok(func: Callable):
     return check_a_jump_imm_ok
 
 
-def uses_low_regs_here(*these_regs: str):
-    def uses_low_regs_dec(func: Callable):
-        @wraps(func)
-        def check_low_regs_here(a: Instruction, b: Instruction):
-            _confirm_low_regs(a, b, these_regs)
-            return func(a, b)
-        return check_low_regs_here
-    return uses_low_regs_dec
-
-
 # ---------------------------------------------------------------------------
 # rsd-alu-pair
 # ---------------------------------------------------------------------------
+
+# The two slots declare DIFFERENT op sets and different per-op immediate widths.
+# Range past the row's five drawn bits is bought in opcode entries -- an op
+# declaring N bits occupies 2^(N-5) -- so WEIGHT is the budget, not op count,
+# and one more bit on `li` costs what four reg-reg opcodes cost.  A spends its
+# sixteen on breadth (fifteen ops, nearly all weight 1); B spends twelve of its
+# sixteen on two deep immediates (`li` at 8 bits, `addi` at 7).  Both from
+# encoding.yaml, never restated here -- see results/corpus/RSD-RESIDUE.md for
+# the weighted optimisation that chose them.
+#
+# Asymmetry is legitimate because the pair is ORDER-FREE in 87.1% of the
+# corpus residue: two independent results, so unless one reads the other's
+# destination either orientation may be emitted and only one need encode.  The
+# list scheduler already tries both, via its tier-1 and tier-2 partner picks.
+_RSD_A_W = _slot_widths("rsd-alu-pair", "a")
+_RSD_B_W = _slot_widths("rsd-alu-pair", "b")
+_RSD_A_MN = _slot_mnemonics("rsd-alu-pair", "a")
+_RSD_B_MN = _slot_mnemonics("rsd-alu-pair", "b")
+# Shift amounts are unsigned; every other immediate this frame carries is
+# signed.  Kept local so the check does not depend on analysis/ (rules.py
+# imports nothing from there).
+_RSD_UNSIGNED_MN = frozenset({"slli", "srli", "srai",
+                              "slliw", "srliw", "sraiw"})
+
+
+def _rsd_slot_imm_ok(insn: Instruction, widths: dict, slot: str) -> None:
+    """The immediate fits the width THIS SLOT declares for this op.
+
+    A register-register form has no field to check.  `li` is `addi` with
+    rs1 = x0 and is declared separately in the yaml (it breaks the RSD form the
+    rest of the frame relies on), so it is looked up under its own name.
+    """
+    if insn.imm_unresolved:
+        # An unresolved relocation (e.g. `addi rd, rd, %lo(sym)`) is not a
+        # constant this frame's field measured; dropping it mis-encodes.
+        raise NotPair(f"{slot}-unresolved-immediate")
+    if insn.base_from_auipc and insn.mnemonic in ("addi", "addiw"):
+        raise NotPair("pcrel-lo-addi")       # lo half; field cannot span it
+    if insn.imm is None:
+        return
+    key = "li" if insn.is_li else insn.mnemonic
+    bits = widths.get(key)
+    if bits is None:
+        raise NotPair(f"{slot}-op-not-in-slot-set")
+    if key in _RSD_UNSIGNED_MN:
+        lo, hi = 0, (1 << bits) - 1
+    else:
+        lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    if not (lo <= insn.imm <= hi):
+        raise NotPair("big-imm")
+
 
 @a_is_rsd_or_li
 @b_is_rsd_or_li
 @a_rsd_swappable
 @b_rsd_swappable
-@uses_low_regs
-@a_imm_ok
-@b_imm_ok
 @exclusive_rd
 def _rsd_alu_pair(a: Instruction, b: Instruction) -> None:
-    """Both instructions RSD or li form, x0..x15, immediates in range, and the
-    two slots write distinct destination registers.
+    """Both instructions RSD or li form, immediates in range, and the two slots
+    write distinct destination registers.
 
     Distinct destinations: rsd-alu-pair exists to pack two independent, both-live
     ALU results.  If a.rd == b.rd then either B consumes A (a producer/consumer
-    chain — handled, more capably, by alu-alu-chain, whose shared register need
-    not be in x0..x15) or B does not (making A's write dead).  Either way this
+    chain — handled, more capably, by alu-alu-chain) or B does not (making A's
+    write dead).  Either way this
     rule should not claim the pair; require distinct destinations.
     """
+    _rsd_slot_imm_ok(a, _RSD_A_W, "A")
+    _rsd_slot_imm_ok(b, _RSD_B_W, "B")
 
 
 # ---------------------------------------------------------------------------
 # alu-alu-chain
 # ---------------------------------------------------------------------------
 
-@chain_uses_low_regs
 @must_chain
 @no_escape
 @a_chain_imm_ok
@@ -499,9 +538,7 @@ def _alu_alu_chain(a: Instruction, b: Instruction) -> None:
     overwrites it (b.rd == a.rd) or it is not live in b.live_out.
 
     Because a.rd is produced and consumed within the packet and dies there, it
-    is not encoded and is exempt from the x0..x15 range limit — hence
-    @chain_uses_low_regs (which skips a.rd and B's consuming source), matching
-    load-chain / store-chain.
+    is not encoded at all.
     """
     if not any(a.mnemonic in A and b.mnemonic in B
                for A, B in _ALU_ALU_BLOCKS):
@@ -563,9 +600,9 @@ def b_chain_mem(bits: int):
 # a.rd (the chain register) is dead after B and not encoded in the packet, so it
 # is exempt from range checks.  @must_chain / @must_chain_stored already reject
 # a.rd is None, so the ALU/mem checks below never see a destination-less A.
-@chain_uses_low_regs
 @must_chain
 @no_escape
+@a_base_not_from_auipc
 @a_chain_mem(6)
 @b_chain_imm_ok
 def _load_alu_chain(a: Instruction, b: Instruction) -> None:
@@ -597,6 +634,11 @@ _ADDI_STORE_BITS = 10                        # signed immediate field
 
 def _addi_store_chain(a: Instruction, b: Instruction) -> None:
     """A computes an addi; B stores the result, after which it is dead."""
+    if a.base_from_auipc or b.base_from_auipc:
+        # a with a tainted rs1a is the lo half of an auipc address
+        # materialisation: its immediate is a link-layout artifact, not a
+        # displacement this frame measured (ACCOUNTING.md sec 8).
+        raise NotPair("relocatable-offset")
     if a.imm is None:
         raise NotPair("MALFORMED: missing-immediate")
     lo, hi = -(1 << (_ADDI_STORE_BITS - 1)), (1 << (_ADDI_STORE_BITS - 1)) - 1
@@ -612,10 +654,10 @@ def _addi_store_chain(a: Instruction, b: Instruction) -> None:
         raise NotPair("B-big-imm")           # the one row encodes no offset
 
 
-@chain_uses_low_regs
 @must_chain_stored
 @no_escape
 @a_chain_imm_ok
+@b_base_not_from_auipc
 @b_chain_mem(5)
 def _alu_store_chain(a: Instruction, b: Instruction) -> Optional[str]:
     """A (ALU) computes a value; B stores it to the stack, after which it is dead."""
@@ -817,6 +859,8 @@ _MEM_SP_OFF_BITS = _w("mem-sp-pair", "a", "lx")
 
 
 @exclusive_rd
+@a_base_not_from_auipc
+@b_base_not_from_auipc
 def _mem_base_pair(a: Instruction, b: Instruction) -> None:
     """Adjacent same-width same-base loads or stores; offsets differ by one data width."""
     if a.mnemonic != b.mnemonic:
@@ -1071,6 +1115,7 @@ def post_inc_family(role: str):
     return deco
 
 
+@a_base_not_from_auipc
 @post_inc_family("mem_addi")
 def _post_inc_addi(a: Instruction, b: Instruction) -> None:
     """`addi rsda, rsda, k*immb` — stride a nonzero width-scaled uimm5."""
@@ -1143,6 +1188,9 @@ _LI_BRANCH_B_MN = frozenset({"beq", "bne", "blt", "bge", "bltu", "bgeu"})
 _CHAIN_LI_BITS = _w("li-branch-chain", "a", "li")
 
 
+_ASYM_BRANCH_MN = frozenset({"blt", "bge", "bltu", "bgeu"})
+
+
 @must_chain
 @no_escape
 def _chain_li_branch(a: Instruction, b: Instruction) -> None:
@@ -1152,6 +1200,17 @@ def _chain_li_branch(a: Instruction, b: Instruction) -> None:
     # The 5-bit imma column plus the doublings the yaml's li op buys.
     if not a.imm_fits(_CHAIN_LI_BITS):
         raise NotPair(f"immediate out of {_CHAIN_LI_BITS}-bit signed range")
+    # The row spells the constant in rs2 (`bXX rs1b, tmp`).  A pair with the
+    # constant on the LEFT of an asymmetric compare is encoded by the dead-tmp
+    # rewrite `bXX tmp(K), rs` -> `bYY rs, tmp(K+1)` (blt<->bge, bltu<->bgeu),
+    # legal because tmp carries only the comparison constant and dies at B.
+    # That needs K+1 representable: K at the top of the field overflows it, and
+    # for the unsigned compares K = -1 (unsigned max) flips the predicate.
+    if (b.mnemonic in _ASYM_BRANCH_MN and b.rs1 == a.rd and b.rs2 != a.rd):
+        if a.imm == (1 << (_CHAIN_LI_BITS - 1)) - 1:
+            raise NotPair("swap-rewrite-overflows-field")
+        if b.mnemonic in ("bltu", "bgeu") and a.imm == -1:
+            raise NotPair("swap-rewrite-wraps-unsigned")
     return None
 
 
@@ -1242,7 +1301,7 @@ def _shift_for_zero_test(imm) -> Optional[tuple]:
     if imm is None:
         return None
     if imm > 1 and (imm & (imm + 1)) == 0:          # 2^N - 1
-        return ("slli", 64 - imm.bit_length())
+        return ("slli", XLEN - imm.bit_length())    # E1: s = XLEN - n
     if imm < -1 and (-imm & (-imm - 1)) == 0:        # ~(2^N - 1) = -(2^N)
         return ("srli", (-imm).bit_length() - 1)
     return None
@@ -1365,10 +1424,14 @@ def _index_mem_chain(a: Instruction, b: Instruction) -> None:
 # ---------------------------------------------------------------------------
 # pre-inc-pair
 # ---------------------------------------------------------------------------
-# A is in RSD form: rd == rs1 (or commutative: rd == rs2).  A writes its
-# result back to its own source register — a pre-increment or accumulate.
-# B reads A's rd as its rs1 — the updated pointer (for loads/stores) or the
-# left-hand side of a comparison.  For memory B, the offset must be zero.
+# A is in RSD form: A writes its result back to its own source register — a
+# pre-increment.  For addi that is rd == rs1 (`addi rsda, rsda, k*imma`); for
+# shXadd it is rd == rs2 (`shXadd rsda, rs1a, rsda`, the scaled pointer walk,
+# drawn at the standard Zba ports — the shifted stride in the rs1 column, the
+# pointer at rs2).  The rd == rs1 shXadd spelling scales in place and is not
+# this frame's shape — see the yaml note.  B accesses through A's rd — the
+# updated pointer, A's forwarded result.  For the addi rows, B's offset must
+# be zero.
 #
 # Canonical order only: B depends on A's result, so the pair cannot be
 # reversed.  A's rd must not be destroyed by B (B.rd != A.rd) since
@@ -1393,6 +1456,12 @@ _PRE_INC_BUMP_BITS = _w("pre-inc-pair", "a", "addi")
 _PRE_INC_OFF_BITS = _w("pre-inc-pair", "b", "lw")
 
 
+_PRE_INC_PCREL = _yaml_pcrel_lo("pre-inc-pair")   # 10-bit scaled imma spans
+# the pcrel residue, so the lo half of an `auipc; addi; access 0()` chain is
+# encodable by construction (see the decorator note above).  B's base cannot
+# be tainted here: it is A's destination, so A's write killed the taint.
+
+
 @a_is_rsd
 @must_chain_base
 @exclusive_rd
@@ -1400,6 +1469,15 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
     """A (RSD form) updates a register; B reads that register as rs1."""
     if (a.mnemonic, b.mnemonic) not in _PRE_INC_TUPLES:
         raise NotPair("bad-tuple")
+    if a.mnemonic != "addi" and a.rd != a.rs2:
+        # The row writes `shXadd rsda, rs1a, rsda` — the scaled POINTER
+        # WALK, rd == rs2, drawn at the standard Zba read ports: the shifted
+        # stride in the rs1 column, the pointer at rs2 (B's base is A's
+        # forwarded result and needs no port — encoding.yaml pre-inc note).
+        # is_rsd also admits rd == rs1 (`shXadd a, a, x`, scaling in place),
+        # but one row decodes one operand binding, so only the template's
+        # form is encodable.
+        raise NotPair("A-shXadd-not-template-form")
     if a.mnemonic == "addi":
         # The addi rows access AT the bumped pointer (offset structurally
         # zero) and spend the freed column on a 10-bit width-scaled bump —
@@ -1409,6 +1487,14 @@ def _pre_inc_pair(a: Instruction, b: Instruction) -> None:
         shift = b.access_shift or 0
         if a.imm is None or not a.imm_multiple(shift):
             raise NotPair("A-stride-not-width-multiple")
+        if a.base_from_auipc:
+            # The lo half of an address materialisation.  Alignment (checked
+            # above) survives relinking; the magnitude does not, and the
+            # 10-bit width-scaled field spans every k-aligned residue, so it
+            # is not range-checked (accepts_pcrel_lo, ACCOUNTING.md sec 8).
+            if not _PRE_INC_PCREL:
+                raise NotPair("A-relocatable-offset")
+            return None
         v = a.imm >> shift if a.imm >= 0 else -((-a.imm) >> shift)
         lim = 1 << (_PRE_INC_BUMP_BITS - 1)
         if not (-lim <= v < lim):
@@ -1429,9 +1515,9 @@ _EPILOGUE_B_MN = frozenset({"jalr", "ret"})
 
 
 def _prologue_pair(a: Instruction, b: Instruction) -> None:
-    """A reserves stack frame, B stores return address at top of frame
-    A: addi sp, sp, -N  - width-scaled negative uimm x16, nonzero
-    B: sw ra, N-4(sp)  - store return address
+    """A reserves the stack frame, B stores a register at the top of it.
+    A: addi sp, sp, -N       — width-scaled negative uimm x16, nonzero
+    B: sw/sd rs1b, N-k(sp)   — rs1b is a drawn field; ra in practice
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
@@ -1439,8 +1525,10 @@ def _prologue_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-big-imm")
     if b.rs1 != 2:
         raise NotPair("B-not-SP-base")
-    if b.rs2 != 1:
-        raise NotPair("B-not-RA-src")
+    if b.rs2 is None:
+        raise NotPair("MALFORMED: missing store source")
+    # The stored register is the drawn `rs1b` field (encoding.yaml row), so
+    # any register encodes; ra is merely the overwhelmingly common case.
     if b.imm + b.access_width + a.imm != 0:
         raise NotPair("B-bad-delta")
 
@@ -1454,8 +1542,11 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
     not a valid packet -- is_control_transfer also keeps ret/jalr out of A.
 
     A: addi sp, sp, +N  — width-scaled uimm×16, nonzero
-    B: ret or jalr rd∈{0,1} with 12-bit signed offset (architectural, not a
-       yaml field — the jump target register is what the row encodes)
+    B: ret or jr with a ZERO offset — the row draws only the target register
+       (`rs1b`); a nonzero jalr offset has no field to live in, so it cannot
+       ride here.  The yaml declares only non-linking forms (jr_any, ret) —
+       an epilogue never links — and _guard_link_regs enforces that closed
+       slot, so the (0, 1) below is a backstop, not the policy.
     """
     if a.rd != 2 or a.rs1 != 2:
         raise NotPair("A-not-addi-sp")
@@ -1463,8 +1554,8 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
         raise NotPair("A-big-imm")
     if b.rd not in (0, 1):
         raise NotPair("B rd must be x0 or x1")
-    if not b.imm_fits(12):
-        raise NotPair("B-big-imm")
+    if b.mnemonic != "ret" and b.imm not in (0, None):
+        raise NotPair("B-nonzero-offset")
 
 
 # ---------------------------------------------------------------------------
@@ -1475,7 +1566,7 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # legacy scheduler's arith_jump / mv_load_jump rules — its single largest
 # advantage on real code, and offset-independent (unlike its memory rules).
 #
-#   arith-jump-pair:   A = RSD ALU op (or li), x0..x15, imm in range
+#   arith-jump-pair:   A = RSD ALU op (or li), imm in range
 #   setup-jump-pair:  A = mv, li (10-bit signed), or lbu/lw/ld with a
 #                          non-negative offset fitting a 5-bit scaled field
 #   B (both):          ret / jr / indirect jalr (imm 0) / direct j / jal x0
@@ -1485,15 +1576,18 @@ def _epilogue_pair(a: Instruction, b: Instruction) -> None:
 # *-branch rules apply (see CLAUDE.md); returns and register-indirect jumps need
 # no offset field and are always encodable.
 
-_SMALL_JUMP_MN = frozenset({"ret", "jalr", "j", "jal"})
+# `jal` is gone: `j` already declares rd=x0, bare `jal` declared nothing,
+# and the corpus never took a linking `jal` through these frames.
+_SMALL_JUMP_MN = frozenset({"ret", "jalr", "j"})
 _MVLOAD_JUMP_A_MN = frozenset({"addi", "lbu", "lw", "ld"})
 _MVLOAD_JUMP_LI_BITS = _w("setup-jump-pair", "a", "li")
 _MVLOAD_JUMP_OFF_BITS = 5        # imma[4:0], scaled by the access width
                                  # (a ONE-ROW narrowing — imm_contracts is
                                  # per-op and cannot express it)
 # A DIRECT jump needs a displacement, and encoding.yaml pays for it out of the
-# A slot: rows 3-4 give immb the rs2+rs1 span, leaving A only the funct5 column.
-# So li narrows to 5 bits and a load has no offset field left at all.  (The
+# A slot: rows 3-4 give immb the funct5+rd span (the shared branch-immediate
+# position), leaving A one register column.  So li narrows to 5 bits and a
+# load has no offset field left at all.  (The
 # displacement itself cannot be checked here — corpus jump operands are
 # unresolved labels, so a pairwise rule has nothing to measure.)  Rows 6-7 draw
 # the opposite trade: full-width A, 7-bit displacement.  Both are encodable, so
@@ -1529,7 +1623,6 @@ def _is_small_jump(insn: Instruction) -> bool:
 
 @a_is_rsd_or_li
 @a_rsd_swappable
-@uses_low_regs_here("a.rd", "a.rs1", "a.rs2")
 @a_jump_imm_ok
 def _arith_jump_pair(a: Instruction, b: Instruction) -> None:
     """RSD ALU op (or li) followed by a small unconditional control transfer."""
@@ -1558,6 +1651,10 @@ def _mvload_jump_pair(a: Instruction, b: Instruction) -> None:
             raise NotPair("A-big-imm")
         return None
     if a.reads_memory:
+        if a.base_from_auipc:
+            # The offset is a %pcrel_lo link artifact, not a displacement
+            # this frame's field measured (ACCOUNTING.md sec 8).
+            raise NotPair("A-relocatable-offset")
         off, width = a.imm, a.access_width
         if off is None or off < 0 or not width:
             raise NotPair("A-big-imm")
@@ -1593,6 +1690,7 @@ _LOAD_STORE_OFF_BITS = _w("load-store-chain", "a", "lw")
 @must_chain_stored
 @no_escape
 @a_base_not_from_auipc
+@b_base_not_from_auipc
 def _load_store_chain(a: Instruction, b: Instruction) -> None:
     """Load a value and store it straight back out; the temporary dies."""
     if a.rd is None or a.rbase is None or b.rbase is None:
@@ -1653,15 +1751,20 @@ def _load_call_chain(a: Instruction, b: Instruction) -> None:
         # link register the frame has no codepoint for -- see _LOAD_CALL_LINK_REGS.
         raise NotPair("B-link-register-not-encodable")
     if a.base_from_auipc:
-        # No `@a_base_not_from_auipc` here, by declaration: this frame's field
-        # spans the whole pcrel-lo range, so the offset the link step computes
-        # for the PACKED layout fits whatever it turns out to be.  The corpus
-        # number is not that offset -- it belongs to the layout the binary was
-        # linked for -- so it is not checked rather than checked wrongly.  The
-        # frame states the reasoning and the residue; see `accepts_pcrel_lo` in
-        # encoding.yaml and ACCOUNTING.md sec 8.
+        # No `@a_base_not_from_auipc` here, by declaration: this frame's
+        # 10-bit width-scaled field spans the whole 12-bit pcrel-lo residue,
+        # so the offset the link step computes for the PACKED layout fits
+        # whatever it turns out to be (sign included -- the toolchain biases
+        # the auipc).  The corpus MAGNITUDE is not that offset -- it belongs
+        # to the layout the binary was linked for -- so it is not checked
+        # rather than checked wrongly.  The target's ALIGNMENT, by contrast,
+        # is a property of the object and survives relinking, so the scaled
+        # field's alignment requirement IS checked.  See `accepts_pcrel_lo`
+        # in encoding.yaml and ACCOUNTING.md sec 8.
         if not _LOAD_CALL_PCREL_LO:
             raise NotPair("A-relocatable-offset")
+        if a.imm is not None and not a.imm_multiple(a.access_shift or 0):
+            raise NotPair("A-pcrel-target-misaligned")
         return None
     if not a.uimm_fits(_LOAD_CALL_OFF_BITS, a.access_shift or 0):
         raise NotPair("A-big-imm")
@@ -1685,6 +1788,7 @@ _ASO_B_BITS = _w("addi-store-off-chain", "b", "sw")
 @must_chain_stored
 @no_escape
 @a_base_not_from_auipc
+@b_base_not_from_auipc
 def _addi_store_off_chain(a: Instruction, b: Instruction) -> None:
     """Compute a value, store it at an offset from another base."""
     if a.rd is None or a.rs1 is None or b.rbase is None:
@@ -1737,11 +1841,11 @@ _ARG_CALL_SPN_BITS = _w("arg-call-pair", "a", "addi4spn")    # 7, rd3 row
 _ARG_CALL_LOAD_BITS = _w("arg-call-pair", "a", "lw")         # 7, scaled, rd3
 _ARG_CALL_STORE_BITS = _w("arg-call-pair", "a", "sw")        # 5, scaled, rs5
 _ARG_CALL_RSD_BITS = _w("arg-call-pair", "a", "addi_rsd")    # reads 7: the
-# bare-op fallback takes the WIDEST imma row (the rd3 split row).  Whether
+# bare-op fallback takes the WIDEST imma row (the rda3 split row).  Whether
 # addi_rsd really has the 7-bit row is unverified -- an earlier copy of this
 # constant said 5.  Pre-existing, kept as-is until re-measured (TODO A8):
 # narrowing it here changes arg-call-pair's accepted range.
-# (_ARG_REGS -- the a0-a7 window this frame's 3-bit rd column draws -- is
+# (_ARG_REGS -- the a0-a7 window this frame's 3-bit rda field draws -- is
 # defined beside dual-setup-pair, which shares it.)
 
 
@@ -1765,6 +1869,8 @@ def _is_hardcoded_call(insn: Instruction) -> bool:
 
 def _arg_call_a_ok(a: Instruction) -> bool:
     """Whichever of the frame's A rows can hold `a`, if any."""
+    if a.imm_unresolved:
+        return False       # a relocation is not the zero immediate `i` defaults to
     m, rd, rs1, imm = a.mnemonic, a.rd, a.rs1, a.imm
     i = imm if imm is not None else 0
     if m in ("mv",) or (m in ("addi", "addiw") and i == 0 and rs1 not in (0, None)):
@@ -1777,7 +1883,16 @@ def _arg_call_a_ok(a: Instruction) -> bool:
         # so the codepoint is spent on 512 instead of wasting it on 0
         return rd in _ARG_REGS and _fits_u(i - 4, _ARG_CALL_SPN_BITS, 4)
     if m in ("addi", "addiw") and rd == rs1 and rd not in (0, None):
-        return _fits_s(i, _ARG_CALL_RSD_BITS)
+        if a.base_from_auipc:
+            return False     # lo half of an auipc chain; 7 bits cannot span it
+        # Row 2's rs1 column is SPLIT -- two bits of imma[6:5] and only three
+        # of rda -- so this destination is the 3-bit class, exactly as the li /
+        # addi4spn / load rows sharing that row already require.  This branch
+        # was the one op on that row not saying so.  Latent, not live: all 49
+        # addi_rsd pairs in the corpus already land in a0-a7, so adding the
+        # restriction rejects nothing.  Row 1 (mv) keeps the full 5-bit column
+        # and is deliberately unrestricted.
+        return rd in _ARG_REGS and _fits_s(i, _ARG_CALL_RSD_BITS)
     if m in ("lw", "ld") and rs1 == 2:
         return rd in _ARG_REGS and _fits_u(i, _ARG_CALL_LOAD_BITS, MEM_SCALE[m])
     if m in ("sw", "sd") and rs1 == 2:
@@ -1812,8 +1927,8 @@ def _arg_call_pair(a: Instruction, b: Instruction) -> None:
 RULES: list[PairingRule] = [
     PairingRule(
         name="rsd-alu-pair",
-        a_mnemonic_set=_RSD_ALU_MN,
-        b_mnemonic_set=_RSD_ALU_MN,
+        a_mnemonic_set=_RSD_A_MN,
+        b_mnemonic_set=_RSD_B_MN,
         check=_rsd_alu_pair,
     ),
     PairingRule(
@@ -2024,8 +2139,34 @@ def _guard_sentinel(rule: "PairingRule") -> None:
     rule.check = wraps(inner)(checked) if inner else checked
 
 
+# A slot whose ops ALL hard-code their destination has codepoints for exactly
+# those spellings, so anything else is unencodable and must not be scheduled.
+# The closed test is the whole point: `link_regs_for` is a UNION of what
+# individual ops pin, and reading it as a whitelist on an OPEN slot -- one
+# still listing a bare `jalr` -- rejects every linking transfer the frame does
+# encode.  That mistake was made and measured here at 7716 pairs before the
+# jump frames were split into `jalr_link_ra` / `jr_any`, which is what closed
+# them.
+def _guard_link_regs(rule: "PairingRule") -> None:
+    decls = {slot: frozenset(_yaml_link_regs(rule.name, slot))
+             for slot in ("a", "b")
+             if _yaml_link_regs(rule.name, slot)
+             and _yaml_link_closed(rule.name, slot)}
+    if not decls:
+        return
+    inner = rule.check
+    def checked(a: Instruction, b: Instruction):
+        for slot, allowed in decls.items():
+            insn = a if slot == "a" else b
+            if insn.rd is not None and insn.rd not in allowed:
+                raise NotPair(f"{slot}-rd-not-declared")
+        return inner(a, b) if inner else None
+    rule.check = wraps(inner)(checked) if inner else checked
+
+
 for _rule in RULES:
     _guard_sentinel(_rule)
+    _guard_link_regs(_rule)
 
 A_SLOT_DISQUALIFIERS: list[str] = [
     "is_unknown",

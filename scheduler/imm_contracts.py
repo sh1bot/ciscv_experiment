@@ -240,6 +240,40 @@ def link_regs_for(rule, slot):
     return _encoded_rd().get(rule, {}).get(slot, ())
 
 
+def link_regs_closed(rule, slot):
+    """Is EVERY op in this slot's list one that hard-codes its rd?
+
+    `link_regs_for` is a UNION of the rds individual ops pin, so it is a
+    whitelist for the slot only when nothing in the slot leaves rd open.  Bare
+    `jalr` and `jal` are not pseudo-ops and pin nothing, so a slot listing them
+    is open however many of its other ops are pinned -- reading the union as a
+    whitelist there would reject every linking transfer the frame legitimately
+    encodes.  Callers that want to enforce the declaration must ask this first.
+    """
+    import sys
+    sys.path.insert(0, os.path.join(_ROOT, "util"))
+    from encoding_render import op_name
+    spec = yaml.safe_load(open(_YAML))
+    pseudo = spec.get("pseudo_ops") or {}
+    for node in spec["doc"]:
+        frame = node.get("frame") if isinstance(node, dict) else None
+        if not frame or not frame.get("ops"):
+            continue
+        names = (frame.get("rules_py_names")
+                 or [x.strip() for x in frame["name"].split(",")])
+        if rule not in names:
+            continue
+        seen = False
+        for cluster in frame["ops"]:
+            for entry in cluster.get(slot, []):
+                seen = True
+                enc = (pseudo.get(op_name(entry)) or {}).get("encode") or {}
+                if enc.get("rd") is None:
+                    return False
+        return seen
+    return False
+
+
 def rd_column_slots(rule):
     """Slots whose destination register this frame encodes in the rd column."""
     return _rd_column().get(rule, ())

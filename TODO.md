@@ -95,9 +95,11 @@ Recorded here so they are not lost; each needs a home in the design documents.
 - **Global slot discipline** — A executes before B; control transfers may only
   occupy the B slot; unknown instructions never pair; calls are excluded from
   jump frames.  This is packet execution semantics, not a heuristic.
-- **Relocation and optimism policy** — `%pcrel_lo`/auipc-fed loads never pair;
-  branch and jump displacements are deliberately *not* range-checked.  Same
-  optimism as the RVC-eligibility ceiling.
+- **Relocation and optimism policy** — a `%pcrel_lo`/auipc-fed offset pairs
+  only where the slot's field spans the full 12-bit residue (declared
+  `accepts_pcrel_lo`, magnitude unchecked, alignment checked); narrower
+  slots refuse it.  Branch and jump displacements are deliberately *not*
+  range-checked.  See ACCOUNTING.md §8.
 - **Methodology constants** — the 90/95/99% coverage targets, p95 as the
   immediate-width statistic, the starvation and register-pressure thresholds in
   `encoding_budget.py`.  These define what "fits" means.
@@ -139,18 +141,23 @@ Every numeric width in `rules.py` now derives from the yaml at import
 including the scaled and coupled-immediate shapes it could never reach.
 What remains, deliberately:
 
-- **Row-level narrowings are not per-op facts**, and this is a live HAZARD,
-  not merely a documented literal.  `imm_field_bits` takes the WIDEST row, so
-  a frame whose rows differ in shape is priced against its most generous one.
-  Concretely: `setup-jump-pair` draws `imma[4:0|9:5]` on its `li` row, so
-  pricing reports a 6-bit LOAD offset as free — while its load row also fields
-  `rda`, `rs1a` and `rs1b` and is full at 20 bits, where six offset bits would
-  need 21.  Nothing declares that today, but nothing prevents it either, and
-  the accounting would authorise an unencodable widening exactly as the g/h
-  machinery once did.  (Its direct-j row separately narrows `li` to 5 bits and
+- **Row-level narrowings are not per-op facts** — the hazard is now FENCED
+  (2026-08-06): `row_contract_complaints` (encoding_render, wired into
+  `lint_frame` and so into the codepoint-accounting commit gate) computes,
+  per declared-width op, the widest row able to hold that op's operands —
+  learned from the frame's own template lines, placeholder heads included —
+  and complains when `imm_field_bits`' widest-row pricing assumes more.  The
+  documented example (a 6-bit LOAD offset in `setup-jump-pair`, whose load
+  row also fields `rda`, `rs1a` and `rs1b` and is full at 20 bits while its
+  `li` row draws imma 10) is pinned as a must-catch in
+  tests/test_conformance.py.  Still open, deliberately: the PRICER itself
+  stays widest-row — safe now only because the lint refuses any declaration
+  it would misprice — and bits riding register-restricted split rows
+  (dual-setup's a0-a7 bands) are still under-counted by the model, which is
+  the A12 budget-rule item.  Ops no template line spells (dual-setup's
+  `addi4spn`) cannot be judged and are skipped, as in the correspondence
+  lint.  (setup-jump's direct-j row separately narrows `li` to 5 bits and
   drops the load offset; the SP-relative chain rows dissolved with A9.)
-  Fix: attach contracts to ROWS, or have `lint_frame` reject an op whose
-  declared width exceeds the narrowest row able to hold that op's operands.
 - **`bit-test-branch-chain a:andi` is unverifiable by interval compare**:
   its accepted set is powers of two and masks, not a range.  Covered by
   `tests/test_pairing.py` boundary tests instead.
@@ -212,6 +219,33 @@ Follow-on census findings (adjacent sites, musl-rv32 + sqlite-rv64):
   Dropping the w forms halves the block; the unprovable residue simply
   forgoes the pairing (solo `addiw` + branch), losing the optimisation,
   never correctness.
+
+## A12 — findings from the 2026-08-05 yaml/rules conformance review
+
+Open items only; the closed ones (backward-pass dependence safety, pcrel
+guards on every memory slot, epilogue's phantom jalr offset, prologue's
+undeclared ra-only restriction, pre-inc's shXadd operand direction, the
+bit-test and arith-jump template ghosts) were fixed in the review commit.
+The bare-`jalr` rd under-specification in the jump frames was closed on
+main: `jr_any` was added as the non-linking spelling, arith-jump-pair and
+setup-jump-pair declare [jalr_link_ra, jr_any] (setup-jump rebudgeted
+16 -> 32), epilogue-pair gets `jr_any` only, and `_guard_link_regs`
+enforces closed slots.
+
+- **dual-setup-pair fails the yaml's own budget sanity rule** by the model's
+  count (11 not in (16, 32]); the hand count ~19 is in range.  The
+  widest-row coarseness of `opcode_codepoints` is the known cause (A8's
+  row-contract item).  Either teach the pricer rows or mark the frame
+  exempt, so the header's (budget/2, budget] claim is enforceable again.
+- **The rd-sentinel note overstates enforcement.**  `doc.reserved` says
+  rules.py rejects x0/x2 "wherever a row draws a register" in the rd
+  column; `imm_contracts.rd_column_slots` (deliberately) covers only
+  DESTINATIONS, so a source there — addi-store-chain's `rbase`,
+  pre-inc-pair's `rs2b` on its addi store row — may still be x0/x2
+  (`sw zero, 0(sp)` is real traffic).  Harmless while those frames host no
+  guests, since the sentinel is only decoded inside a host's block, but the
+  note and the hosting precondition ("a REGISTER in every row") should say
+  which registers count.
 
 ---
 

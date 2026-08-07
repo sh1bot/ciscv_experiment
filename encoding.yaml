@@ -34,10 +34,33 @@ grid:
   # pattern from the reserved pool (the x0/x2 sentinels, A1.11).  A field split
   # between two operands states its sub-parts explicitly as {bits, value}
   # entries, most-significant first, summing to the field's width.
+  #
+  # OPERAND-POSITION DISCIPLINE.  The columns are the standard RISC-V operand
+  # positions, and rows keep operands in them: A-slot register SOURCES read
+  # from their standard ports (rs1-family operands -- rs1a/rsda/a base -- in
+  # the rs1 column, rs2a and store data in rs2, immediate low bits where
+  # I-type/S-type put them), the rd column belongs to a destination, and
+  # funct5 is the OVERFLOW column (B's second source, or a displaced
+  # destination when both slots have one).  This is the operand half of the
+  # decoder-alignment objective (A1.10 covers the opcode half): a decoder can
+  # route the common frames through the standard read ports.  Displacing an
+  # operand from its standard column is a DESIGN DECISION, not a layout
+  # convenience -- it happens only where a wide immediate or the partner
+  # slot's operand claims the column, and every such exception is pinned in
+  # tests/test_conformance.py so a row edit cannot move one silently.
+  # (Templates bind operand SEMANTICS to the columns, so re-ordering a
+  # template's operands moves fields just as surely as editing a row.)
+  # `g` and `h` sit at bits [31:30] -- RISC-V's imm[11:10] (I-type) and
+  # funct7[6:5] -- so [31:25] is a contiguous h|g|funct5 opcode region
+  # occupying exactly funct7, and every 10-bit packet immediate is a
+  # TRUNCATED RISC-V immediate at the standard positions: funct5+rs2 =
+  # [29:20] = I-type imm[9:0], and funct5+rd = imm[9:5]|[4:0] = S-type.
+  # (Branch displacements share S-type's field boundaries but are linear,
+  # not B-type bit-scrambled.)
   fields:
     h:       {bits: [31, 31]}
-    funct5:  {bits: [30, 26]}
-    g:       {bits: [25, 25]}
+    g:       {bits: [30, 30]}
+    funct5:  {bits: [29, 25]}
     rs2:     {bits: [24, 20]}
     rs1:     {bits: [19, 15]}
     funct3:  {bits: [14, 12]}
@@ -109,6 +132,13 @@ pseudo_ops:
     base: jal
     encode: {rd: x0}
     match:  [{op: jal, rd: x0}, {op: j}]
+  # NAMING for the jalr family: a bare register suffix pins EVERY register
+  # the op touches -- `jalr_ra` is `jalr ra, imm(ra)`, link AND base both ra;
+  # `jr_t1` is `jr imm(t1)`, base t1 and no link.  A `_link_` infix pins only
+  # the LINK and leaves the base free (`jalr_link_ra`, `jalr_link_t1`), and
+  # `jr_any` pins only rd = x0.  The `encode` mapping is always the
+  # authoritative machine-readable statement; templates spell the operands
+  # out in full so nothing need be inferred from the name.
   jalr_ra:
     base: jalr
     encode: {rd: x1, rs1: x1}            # jalr ra, imm(ra) -- a far CALL
@@ -131,6 +161,17 @@ pseudo_ops:
     base: jalr
     encode: {rd: x6}                     # jalr t1, rs -- a linking JUMP
     match:  [{op: jalr, rd: x6}]
+  # The NON-linking spelling, rs1 free -- `jr rs`.  jr_t1 and ret pin their
+  # base register; this one does not, so it is the partner jalr_link_ra needed.
+  # Without it a frame wanting both the linking and non-linking indirect
+  # transfer had only bare `jalr`, which declares no rd at all: one codepoint
+  # covering two behaviours, in rows whose rd column is the sentinel and so
+  # has no field to tell them apart.
+  jr_any:
+    base: jalr
+    encode: {rd: x0}                     # jr imm(rs) -- an indirect JUMP
+    match:  [{op: jalr, rd: x0}]
+    after: ret                           # ret and jr_t1 are the pinned-base
   ret:
     base: jalr
     encode: {rd: x0, rs1: x1, imm: 0}
@@ -227,10 +268,11 @@ opsets:
   # Only addi earns extra range (7-bit, 4 codepoints) -- it carries li/mv, so it
   # is where the wide constants are. Spending 8 codepoints on an 8-bit addi, as
   # the first attempt did, buys almost nothing and starves the op list.
-  # Re-optimised after const-store-pair was carved out: that frame drains the
-  # `li tmp, K` + store cases from store-chain (869 -> 295 pairs), which were
-  # what justified a 7-bit addi. 6 bits now suffice, freeing 2 slots for two
-  # more opcodes. Capture over the three chain populations 578 -> 639.
+  # Re-optimised after the li + store cases were carved out of store-chain
+  # (869 -> 295 pairs; first as a `const-store-pair` frame, since generalised
+  # into addi-store-chain), which were what justified a 7-bit addi. 6 bits now
+  # suffice, freeing 2 slots for two more opcodes. Capture over the three
+  # chain populations 578 -> 639.
   alu_chain: &alu_chain
     - {op: addi, imm: {bits: 6, signed: true}}     # 2 codepoints; carries li/mv
     - add
@@ -447,7 +489,7 @@ doc:
       ops:
         - {a: [{op: addi, imm: {bits: 10, signed: true}}], b: [sb, sh, sw, sd]}
       rows:
-        - {funct5: rs1a, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rbase}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: rbase}
       notes:
         - >-
           The data width comes from the op list (sb/sh/sw/sd), as in the
@@ -499,7 +541,7 @@ doc:
       ops:
         - {a: [lx], b: *loads}
       rows:
-        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rdb}
       notes:
         - >-
           The offset-bearing sibling of load0-load10-chain, on the pattern of
@@ -542,6 +584,15 @@ doc:
           three opcode doublings (census li fit 66.9% -> 85.3% of 2293, ~13
           pairs/codepoint for the extra 32).
         - >-
+          The row spells the constant in rs2.  A site with the constant on
+          the LEFT of an asymmetric compare (`blt tmp, rs`) is still
+          encodable via the dead-tmp rewrite `bXX K, rs` -> `bYY rs, K+1`
+          (blt<->bge, bltu<->bgeu) -- tmp carries only the comparison
+          constant and dies at B, so changing its value is licensed.
+          rules.py accepts those sites and rejects the two edge cases the
+          rewrite cannot reach: K at the top of the field (K+1 overflows)
+          and K = -1 under an unsigned compare (the predicate flips).
+        - >-
           TODO: could replace li with alu op and compare result with zero
           (mostly?).
   - frame:
@@ -550,10 +601,17 @@ doc:
       budget: 32
       level: 2
       templates:
-        - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, immb"]
-        - ["slli    tmp, rs1a, imma", "blt/bge tmp, zero, 4*immb"]
+        - ["andi    tmp, rs1a, imma", "beqz/bnez tmp, 4*immb"]
+        - ["slli/srli tmp, rs1a, imma", "beqz/bnez tmp, 4*immb"]
       ops:
         - {a: [{op: andi, imm: {bits: 6, signed: false}}, *slli_6u, *srli_6u], b: [beqz, bnez, beq, bne]}
+      notes:
+        - >-
+          The shift forms are the E1/E2 rewrite targets (low-mask and
+          high-mask zero tests); a single-bit sign test via `slli` + `blt
+          tmp, zero` is equivalence E5, a candidate this frame does NOT yet
+          encode -- its b list has no blt/bge -- and rules.py matches
+          accordingly.
       rows:
         - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
 
@@ -590,7 +648,7 @@ doc:
       ops:
         - {a: [lw, ld, lbu], b: [beqz, bnez]}
       rows:
-        - {funct5: rda, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: "immb[4:0]"}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rda, rd: "immb[4:0]"}
       notes:
         - >-
           `immb` as in load-base-branch-pair: unresolved, fit unmeasured.
@@ -650,7 +708,7 @@ doc:
       ops:
         - {a: [{op: li, imm: {bits: 10, signed: true}}], b: [czero.eqz, czero.nez]}
       rows:
-        - {funct5: rs2b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rdb}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs2b, rd: rdb}
 
   - frame:
       name: index-mem-chain
@@ -674,18 +732,27 @@ doc:
         - {a: [sh2add], b: [lw, sw]}
         - {a: [sh3add], b: [ld, sd]}
       rows:
-        - {funct5: rs2a, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
-        - {funct5: rs2a, rs2: rs2b, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rs1a, rd: rdb}
+        - {funct5: rs2b, rs2: rs2a, rs1: rs1a, rd: "immb[4:0]"}
 
   - frame:
       name: pre-inc-pair
       does: "Advance a pointer, then access through it (pre-increment)."
       budget: 8
       level: 2
+      # The addi rows' 10-bit width-scaled imma spans the whole 12-bit
+      # pcrel-lo residue (bits + log2(k) >= 12), so the lo half of an
+      # `auipc; addi lo; access 0()` address chain is encodable by
+      # construction -- whatever lo OUR link step computes fits, with the
+      # sign free because the toolchain biases the auipc.  Only the target's
+      # alignment survives relinking, and only it is checked.  Same claim as
+      # load-call-chain's; gated by test_conformance (the declaration is
+      # valid only while the field really spans the residue).
+      accepts_pcrel_lo: true
       templates:
-        - ["shXadd  rsda, rsda, rs2a", "load    rdb, k*immb(rsda)"]
+        - ["shXadd  rsda, rs1a, rsda", "load    rdb, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "load    rdb, 0(rsda)"]
-        - ["shXadd  rsda, rsda, rs2a", "store   rs2b, k*immb(rsda)"]
+        - ["shXadd  rsda, rs1a, rsda", "store   rs2b, k*immb(rsda)"]
         - ["addi    rsda, rsda, k*imma", "store   rs2b, 0(rsda)"]
       ops:            # addi split by width so each declares its true scale
         - {a: [{op: addi, imm: {bits: 10, signed: true, scale: 8}}], b: [ld, sd]}
@@ -693,10 +760,10 @@ doc:
         - {a: [sh3add], b: [ld, sd]}
         - {a: [sh2add], b: [lw, sw]}
       rows:
-        - {funct5: rs2b, rs2: rs2a, rs1: rsda, rd: "immb[4:0]"}
-        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rsda, rd: rdb}
-        - {funct5: rs2b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rsda}
-        - {funct5: rdb, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rsda}
+        - {funct5: rs2b, rs2: rsda, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[4:0]", rs2: rsda, rs1: rs1a, rd: rdb}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rsda, rd: rs2b}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rsda, rd: rdb}
       notes:
         - >-
           The addi rows access AT the bumped pointer: at genuine (non-
@@ -709,6 +776,20 @@ doc:
         - >-
           The shXadd rows keep the 5-bit scaled immb: their stride is the
           register, so the offset field still earns its column.
+        - >-
+          The shXadd form is the scaled POINTER WALK, `shXadd rsda, rs1a,
+          rsda` (Zba: rd = rs2 + (rs1 << X)) -- the pointer advanced by a
+          scaled stride, which is what "advance a pointer" means and the
+          form the corpus emits (its in-place-scaling sibling `shXadd a, a,
+          x` measured 69 scheduled pairs on sqlite-rv64 against this form's
+          210; one row decodes one operand binding, so rules.py admits only
+          this one).  The row is drawn at the STANDARD Zba read ports: the
+          shifted stride `rs1a` in the rs1 column, the pointer `rsda` in
+          rs2 -- Zba's rs2 position.  B needs no port for its base at all:
+          a pre-increment accesses through the UPDATED pointer, which is
+          A's result, forwarded inside the packet -- so nothing competes
+          with A for the columns and the operand-position discipline holds
+          without a trade.
   - frame:
       name: post-inc-pair
       does: "Access through a pointer, then advance it (post-increment)."
@@ -776,8 +857,8 @@ doc:
         - {a: {op: sx, rs1: 2, rs2: 10, imm: 0},
            b: {op: sx, rs1: 2, rs2: 11, imm: 4}, lockstep: true}
       rows:
-        - {funct5: rda, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: rdb}
-        - {funct5: rs2b, rs2: rs2a, rs1: "imm[9:5]", rd: "imm[4:0]"}
+        - {funct5: "imm[9:5]", rs2: "imm[4:0]", rs1: rda, rd: rdb}
+        - {funct5: "imm[9:5]", rs2: rs2a, rs1: rs2b, rd: "imm[4:0]"}
       notes:
         - >-
           both opcodes in a pair must be identical operations
@@ -868,7 +949,7 @@ doc:
         - {a: {op: ld, rd: 31, rs1: 12, imm: 0},
            b: {op: sd, rs1: 13, rs2: 31, imm: 0}}
       rows:
-        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rs1a, rd: rs1b}
+        - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
       notes:
         - >-
           Both offsets are width-scaled and unsigned; the loaded value is
@@ -879,23 +960,50 @@ doc:
       # addi-store-chain's offset-bearing sibling: B keeps a real offset field,
       # so A's addend narrows to five bits.  Both rows exist because the
       # populations split -- see FINDINGS.
-      budget: 16
+      budget: 8
       level: 2
       templates:
         - ["addi    tmp, rs1a, imma", "store   tmp, k*immb(rbase)"]
       ops:
-        - a: [{op: addi, imm: {bits: 6, signed: true}}]
+        - a: [addi]
           b: [{op: sb, imm: &aso6 {bits: 6, signed: false}}, {op: sh, imm: *aso6},
               {op: sw, imm: *aso6}, {op: sd, imm: *aso6}]
       probe:
         - {a: {op: addi, rd: 31, rs1: 12, imm: 8},
            b: {op: sw, rs1: 13, rs2: 31, imm: 4}}
       rows:
-        - {funct5: rs1a, rs2: "immb[4:0]", rs1: rbase, rd: "imma[4:0]"}
+        - {funct5: rbase, rs2: "imma[4:0]", rs1: rs1a, rd: "immb[4:0]"}
       notes:
         - >-
-          `immb` is width-scaled and unsigned; `imma` is signed.  The stored
+          `immb` is width-scaled and unsigned; `imma` is signed -- and that
+          asymmetry is the frame's whole shape.  A memory offset carries an
+          access width, so five bits of `immb` reach 4x or 8x further; an
+          `addi` addend is pointer arithmetic and carries none, so its bits are
+          bytes.  `load5-load5-chain` gets a symmetric split because BOTH its
+          immediates are scaled offsets; this frame cannot, and scaling A by
+          the store's k would not help -- the addends are 93% ODD, only 28.8%
+          are aligned to their own store's width, and for `sw` (65% of the
+          population) it is 5 of 295.  The stored
           value is the chain temporary and is not encoded.
+        - >-
+          THE WIDTH BELONGS TO B, measured 2026-08-04.  The row draws five bits
+          per column, so a sixth costs a doubling.  Over 455 scheduled pairs
+          on sqlite-rv32/rv64 and cpp-rv32/rv64: A's addend fits FIVE bits 97%
+          of the time and two bits 95% of the time, while B's scaled offset
+          fits five only 33% of the time and six 100%.  So A was paying 8 codepoints for the 2%
+          that need a sixth bit.  Dropped to 5+6: 16 codepoints to 8, at a cost
+          of 5 pairs on sqlite-rv32 and 4 on sqlite-rv64.  Narrowing B too
+          (5+5, 4cp) costs a further 135 and 130 -- that bit is real.
+        - >-
+          This is a SQLITE-shaped frame: 212 hits on sqlite-rv32 against 12 on
+          cpp-rv32.  A cpp-only reading makes it look like the worst frame in
+          the encoding; it is not.
+        - >-
+          rules.py EXCLUDES the li form (rs1a = x0) here even though the row
+          draws rs1a and could encode it: li + store belongs to the frames
+          that price it (addi-store-chain at offset zero, alu-store-chain up
+          to a 5-bit offset).  The residue -- li + store at an offset only
+          this frame's sixth bit reaches -- stays solo.
   - frame:
       name: load-call-chain
       does: "Load a function pointer and call through it (virtual dispatch)."
@@ -909,15 +1017,20 @@ doc:
       # return-address stack).  x5 is not offered -- it never occurs.
       budget: 4
       level: 2
-      # DECLARED OPTIMISM (ACCOUNTING.md sec 8, and FINDINGS).  Admits a load
-      # whose base came from an `auipc`, which every other frame refuses: the
-      # corpus offset is a link-time artifact, but this field is ten bits
-      # scaled by the access width and holds anything the split can produce,
-      # so it is encodable by construction rather than by measurement.
+      # DECLARED RELAXATION (ACCOUNTING.md sec 8, and FINDINGS).  Admits a
+      # load whose base came from an `auipc`, which a NARROW-field frame must
+      # refuse: the corpus offset is a link-time artifact, but this field is
+      # ten bits scaled by the access width -- it spans the whole 12-bit
+      # pcrel-lo residue, so it holds anything the split can produce and is
+      # encodable by construction rather than by measurement.  The target's
+      # alignment is the one fact that survives relinking, and rules.py
+      # checks it; the sign is free (the toolchain biases the auipc), so the
+      # earlier unsigned-vs-biased caveat and the rv64 "0-7% not 8-aligned"
+      # residue are now handled per-site instead of assumed away.
       accepts_pcrel_lo: true
       templates:
-        - ["load    tmp, k*imma(rs1a)", "jalr_link_ra tmp"]
-        - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 tmp"]
+        - ["load    tmp, k*imma(rs1a)", "jalr_link_ra ra, 0(tmp)"]
+        - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 t1, 0(tmp)"]
       ops:
         - {a: [{op: lw, imm: {bits: 10, signed: false}},
                {op: ld, imm: {bits: 10, signed: false}}],
@@ -959,12 +1072,12 @@ doc:
       budget: 16
       level: 2
       templates:
-        - ["mv      rda, rs1a",         "jalr_ra 4*immb"]
-        - ["li      rda, imma",         "jalr_ra 4*immb"]
-        - ["addi4spn rda, 4*imma",      "jalr_ra 4*immb"]
-        - ["load    rda, k*imma(x2)",   "jalr_ra 4*immb"]
-        - ["store   rs2a, k*imma(x2)",  "jalr_ra 4*immb"]
-        - ["addi_rsd rda, imma",        "jr_t1   4*immb"]
+        - ["mv      rda, rs1a",         "jalr_ra ra, 4*immb(ra)"]
+        - ["li      rda, imma",         "jalr_ra ra, 4*immb(ra)"]
+        - ["addi4spn rda, 4*imma",      "jalr_ra ra, 4*immb(ra)"]
+        - ["load    rda, k*imma(sp)",   "jalr_ra ra, 4*immb(ra)"]
+        - ["store   rs2a, k*imma(sp)",  "jalr_ra ra, 4*immb(ra)"]
+        - ["addi_rsd rda, imma",        "jr_t1   4*immb(t1)"]
       ops:
         - a: [mv, {op: li, imm: {bits: 7}}, {op: addi4spn, imm: {bits: 7, scale: 4, signed: false}},
               {op: lw, imm: {bits: 7, signed: false}},
@@ -995,26 +1108,27 @@ doc:
         - {a: {op: addi, rd: 10, rs1: 8, imm: 0},
            b: {op: jalr, rd: 0, rs1: 6, imm: 16}}
       rows:
-        - {funct5: rs1a, rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
-        - funct5: "imma[4:0]"
-          rs2: "immb[4:0]"
-          rs1: "immb[9:5]"
-          rd:
+        - {funct5: "immb[9:5]", rs2: rda, rs1: rs1a, rd: "immb[4:0]"}
+        - funct5: "immb[9:5]"
+          rs2: "imma[4:0]"
+          rs1:
             - {bits: 2, value: "imma[6:5]"}
             - {bits: 3, value: rda}
-        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rs2a}
+          rd: "immb[4:0]"
+        - {funct5: "immb[9:5]", rs2: rs2a, rs1: "imma[4:0]", rd: "immb[4:0]"}
       notes:
         - >-
           Row 1 holds `mv`, which needs only rs1a and rda; row 2 holds the
           three ops that want a wide immediate and an ARGUMENT destination,
-          splitting the rd column three-two so `imma` reaches seven bits;
+          splitting the rs1 column three-two so `imma` reaches seven bits;
           row 3 holds the stores, whose source register needs all five bits
-          and whose stack offsets are small.
+          and whose stack offsets are small.  The call displacement rides
+          funct5+rd in every row -- the S-type immediate positions.
         - >-
-          rd 3 bits costs almost nothing here and buys two: `li` at rd3+imm5
-          catches 925 of the 933 that an unrestricted rd catches on cpp-
-          rv32, because these are argument setups by construction.  3+7
-          beats 5+5 by 68% on cpp `li` and 18% on cpp `addi4spn`.
+          A 3-bit rda costs almost nothing here and buys two: `li` at
+          rda3+imm5 catches 925 of the 933 that an unrestricted rda catches
+          on cpp-rv32, because these are argument setups by construction.
+          3+7 beats 5+5 by 68% on cpp `li` and 18% on cpp `addi4spn`.
         - >-
           Load and store offsets scale by the ACCESS width, as `c.lwsp` and
           `c.sdsp` do: spill slots are aligned to the access, so `k*imm`
@@ -1027,8 +1141,8 @@ doc:
           7-bit field) and buys 0..508 instead of 0..127.  On rv64 the
           scaled form is the one the fit prefers outright.
         - >-
-          The rd column is a register in row 1 only, so this frame neither
-          hosts nor is hosted.
+          The rd column carries the displacement in every row, so this
+          frame neither hosts nor is hosted.
   - frame:
       name: macro-op-pair
       does: "Both halves of ONE computation over the same operands (mul/mulh, div/rem), declared as a pair so an implementation can fuse them."
@@ -1092,8 +1206,8 @@ doc:
           positionally shared operands number 31 on musl-rv32, 25 on cpp-
           rv32, 2 on sqlite-gcc-rv64, 0 on sqlite-rv64 -- so nothing is
           suppressing it. Notably the frame is NOT register-window
-          constrained: rules.py carries no x0-x15 set, and this row draws
-          four full 5-bit fields.
+          constrained: this row draws four full 5-bit fields, so every
+          register encodes.
         - >-
           ORDER IS NOT ARBITRARY, and it is not a dependency either. The two
           ops read the same two sources and neither consumes the other's
@@ -1152,7 +1266,7 @@ doc:
       rows:
         - {funct5: rda, rs2: rs2b, rs1: rs1a, rd: rdb}
         - {funct5: rda, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
-        - {funct5: rda, rs2: "immb[4:0]", rs1: "imma[4:0]", rd: rdb}
+        - {funct5: rda, rs2: "imma[4:0]", rs1: "immb[4:0]", rd: rdb}
         - funct5: rda
           rs2: "immb[4:0]"
           rs1: rs1a
@@ -1160,8 +1274,8 @@ doc:
             - {bits: 2, value: "immb[6:5]"}
             - {bits: 3, value: rdb}
         - funct5: rda
-          rs2: "immb[4:0]"
-          rs1: "imma[4:0]"
+          rs2: "imma[4:0]"
+          rs1: "immb[4:0]"
           rd:
             - {bits: 2, value: "immb[6:5]"}
             - {bits: 3, value: rdb}
@@ -1219,7 +1333,18 @@ doc:
       templates:
         - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
       ops:
-        - {a: *rsd_alu, b: *rsd_alu}
+        - a: [add, sub, mul, or, sh1add, sh2add, sh3add, czero.nez,
+              {op: addi,  imm: {bits: 5, signed: true}},
+              {op: li,    imm: {bits: 5, signed: true}},
+              {op: addiw, imm: {bits: 5, signed: true}},
+              {op: andi,  imm: {bits: 5, signed: true}},
+              {op: slli,  imm: {bits: 6, signed: false}},
+              {op: slliw, imm: {bits: 5, signed: false}},
+              {op: srli,  imm: {bits: 5, signed: false}}]
+          b: [add, or, czero.eqz,
+              {op: li,   imm: {bits: 8, signed: true}},
+              {op: addi, imm: {bits: 7, signed: true}},
+              {op: slli, imm: {bits: 5, signed: false}}]
       rows:
         - {funct5: rs2b, rs2: rs2a, rs1: rsda, rd: rsdb}
         - {funct5: rs2b, rs2: "imma[4:0]", rs1: rsda, rd: rsdb}
@@ -1229,9 +1354,25 @@ doc:
         - >-
           The four register operands occupy the four 5-bit columns -- 20
           bits, the whole operand budget -- so registers here are a FULL
-          5-bit field, x0..x31. An earlier note anticipated cutting them to
-          4 bits; that is not needed, and scheduler/rules.py enforcing
-          x0..x15 was costing 377 pairs across the corpus.
+          5-bit field, x0..x31. An earlier draft anticipated cutting them to
+          4 bits; that is not needed and was never adopted.
+        - >-
+          The two slots declare DIFFERENT op sets, and deliberately. Range past
+          the row's five drawn bits is bought in opcode entries -- an op
+          declaring N bits occupies 2^(N-5) of them -- so weight, not op count,
+          is the budget, and one bit on `li` costs what four reg-reg opcodes
+          cost. A weighs 16 as fifteen ops that are nearly all weight 1
+          (breadth); B weighs 16 as six ops, of which `li` at eight bits is 8
+          and `addi` at seven is 4 (depth). The block is 16 x 16 = 256, the
+          same as the symmetric set it replaces.
+        - >-
+          The asymmetry is only purchasable because the pair is ORDER-FREE in
+          87.1% of the corpus residue: rsd-alu-pair packs two independent
+          results, so unless one reads the other's destination the scheduler
+          may emit either orientation and only one need be encodable. The
+          list scheduler already tries both (its tier-1 and tier-2 partner
+          picks). See results/corpus/RSD-RESIDUE.md for the measurement and
+          for the weighted optimisation that chose these two sets.
   - frame:
       name: prologue-pair
       does: "Function prologue: reserve the stack frame and save the return address."
@@ -1242,7 +1383,13 @@ doc:
       ops:
         - {a: [addi], b: [sw, sd]}
       rows:
-        - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
+        - {funct5: "imm[9:5]", rs2: "imm[4:0]", rs1: rs1b, rd: "unused"}
+      notes:
+        - >-
+          `rs1b` is a drawn 5-bit field: ANY register may be the one stored
+          at the top of the new frame.  ra is the overwhelmingly common case
+          but not a constraint -- a leaf function that keeps its fp saves s0
+          there instead, and rules.py accepts it.
 
   - frame:
       name: epilogue-pair
@@ -1250,23 +1397,37 @@ doc:
       budget: 2
       level: 2
       templates:
-        - ["addi    sp, 16*imm", "jr      rs1b"]
+        - ["addi    sp, 16*imm", "jr_any  rs1b"]
       ops:
-        - {a: [addi], b: [jalr, ret]}
+        # NO linking spelling.  An epilogue tears the frame down and transfers
+        # away; a `jalr ra` here would return into the frame it just freed, so
+        # a register tail call is `jr`, never a call.  The corpus agrees --
+        # 8490 `ret` and 403 `jr` through x5/x6/x14/x15, and not one linking
+        # transfer -- so declaring jalr_link_ra would buy nothing and cost the
+        # frame its 2-codepoint block.
+        - {a: [addi], b: [jr_any, ret]}
       rows:
-        - {funct5: rs1b, rs2: "imm[4:0]", rs1: "imm[9:5]", rd: "unused"}
+        - {funct5: "imm[9:5]", rs2: "imm[4:0]", rs1: rs1b, rd: "unused"}
+      notes:
+        - >-
+          The row draws only the target register: the rs2+rs1 columns carry
+          the sp adjustment, so a `jalr` here has a ZERO offset by
+          construction -- there is no field for one -- and rules.py rejects
+          the nonzero-offset spelling.
 
   - frame:
       name: arith-jump-pair
       does: "A last in-place computation, then a control transfer."
       budget: 64
       level: 2
+      # No `mv` template: the op set has no mv codepoint (the block is full at
+      # 16 x 4) and `mv rsda, rs2a` is neither RSD nor li, so rules.py does
+      # not match it either.  `li` rides addi's codepoints (rs1 = x0).
       templates:
-        - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
-        - ["mv     rsda, rs2a", "jr/jalr rs1b"]
-        - ["li     rsda, imma", "jr/jalr rs1b"]
+        - ["alu     rsda, rsda, rs2a/imma", "jr_any/jalr_link_ra rs1b"]
+        - ["li     rsda, imma", "jr_any/jalr_link_ra rs1b"]
       ops:
-        - {a: *rsd_alu_j, b: [ret, jalr, j, jal]}
+        - {a: *rsd_alu_j, b: [ret, jalr_link_ra, jr_any, j]}
       rows:
         - {funct5: rs1b, rs2: rs2a, rs1: rsda, rd: "unused"}
         - {funct5: rs1b, rs2: "imma[4:0]", rs1: rsda, rd: "unused"}
@@ -1278,25 +1439,25 @@ doc:
       # that B's jump does not read.  That independence is what costs the room
       # -- rda, rs1a and rs1b must all be fielded, so the load row is full at
       # 20 bits and its offset can never exceed five.
-      budget: 16
+      budget: 32
       level: 2
       templates:
-        - ["mv      rda, rs1a", "jr      rs1b"]
-        - ["load    rda, k*imma(rs1a)", "jr      rs1b"]
-        - ["li      rda, imma", "jr      rs1b"]
+        - ["mv      rda, rs1a", "jr_any/jalr_link_ra rs1b"]
+        - ["load    rda, k*imma(rs1a)", "jr_any/jalr_link_ra rs1b"]
+        - ["li      rda, imma", "jr_any/jalr_link_ra rs1b"]
         - ["mv      rda, rs1a", "j       4*immb"]
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
       ops:
-        - {a: [mv, lbu, lw, ld], b: [ret, jalr]}
-        - {a: [li], b: [ret, jalr]}
+        - {a: [mv, lbu, lw, ld], b: [ret, jalr_link_ra, jr_any]}
+        - {a: [li], b: [ret, jalr_link_ra, jr_any]}
         - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
         - {a: [li], b: [j]}
       rows:
         - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: rda}
-        - {funct5: rs1b, rs2: "imma[4:0]", rs1: "imma[9:5]", rd: rda}
-        - {funct5: rs1a, rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
-        - {funct5: "imma[4:0]", rs2: "immb[4:0]", rs1: "immb[9:5]", rd: rda}
+        - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1b, rd: rda}
+        - {funct5: "immb[9:5]", rs2: rda, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rda, rd: "immb[4:0]"}
       notes:
         - >-
           `j` covers `jal x0`; a jal with a real destination is a call and
@@ -1304,7 +1465,8 @@ doc:
         - >-
           Direct `j` (78-92% of this frame's packets) takes rows 3-4: `rs1b`
           is dropped -- a direct jump has no register operand -- and `immb`
-          gets the rs2+rs1 span, a 10-bit displacement in PACKET units.
+          takes funct5+rd, a 10-bit displacement in PACKET units at the
+          branch-immediate positions every control frame shares.
           Packets are 4-byte aligned, so the low bit RVC must carry is dead
           and a displacement costs 0.54x its RVC bits. 10 bits covers 84.6%
           of direct `j` on sqlite and 97-98% on musl.

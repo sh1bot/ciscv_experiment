@@ -1,36 +1,36 @@
 # testcase0 (RV32)
 # --- file totals ---
-#   instructions: 21875  packets: 17715  pairs: 4160  solos: 13555
-#   pair rate:    23.5%  (8320/21875 instructions paired)
+#   instructions: 21875  packets: 17682  pairs: 4193  solos: 13489
+#   pair rate:    23.7%  (8386/21875 instructions paired)
 #   RVC-eligible: 40.2%  (8798/21875 instructions)
 #   nops: 1 (excluded from the counts)
 #   rule hits:
-#     rsd-alu-pair: 610
-#     alu-alu-chain: 344
+#     rsd-alu-pair: 533
+#     alu-alu-chain: 362
 #     load-alu-chain: 47
-#     addi-store-chain: 325
-#     alu-store-chain: 14
+#     addi-store-chain: 326
+#     alu-store-chain: 13
 #     load-sp-branch-pair: 0
 #     load-base-branch-pair: 48
 #     load0-load10-chain: 0
 #     load5-load5-chain: 0
-#     mem-sp-pair: 627
-#     mem-base-pair: 272
+#     mem-sp-pair: 628
+#     mem-base-pair: 275
 #     load-store-chain: 15
 #     addi-store-off-chain: 0
 #     load-call-chain: 0
 #     macro-op-pair: 9
 #     post-inc-pair: 52
-#     dual-setup-pair: 406
-#     li-branch-chain: 92
-#     inc-branch-pair: 130
+#     dual-setup-pair: 493
+#     li-branch-chain: 90
+#     inc-branch-pair: 129
 #     bit-test-branch-chain: 516
-#     prologue-pair: 129
-#     epilogue-pair: 64
+#     prologue-pair: 128
+#     epilogue-pair: 63
 #     czero-or-chain: 0
 #     li-czero-chain: 0
 #     index-mem-chain: 63
 #     pre-inc-pair: 0
-#     arith-jump-pair: 186
-#     setup-jump-pair: 108
-#     arg-call-pair: 103
+#     arith-jump-pair: 200
+#     setup-jump-pair: 99
+#     arg-call-pair: 104

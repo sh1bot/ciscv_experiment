@@ -220,9 +220,14 @@ def _backward_pair(packets: list) -> list:
     """Second pass: scan backwards over solos looking for branch B-slot pairs.
 
     For each solo branch, scan back through preceding solos for a valid A-slot
-    partner.  Only claim the pair if no intervening instruction reads the
-    candidate's output or writes any of its inputs (i.e. moving the candidate
-    later is safe).
+    partner.  Only claim the pair if moving the candidate later is safe: no
+    intervening instruction reads the candidate's output, writes any of its
+    inputs, or rewrites its output (a WAW — the branch would compare against
+    the wrong definition and the final register value would change); and the
+    candidate does not cross a barrier (call, atomic, fence, csr) or a
+    conflicting memory operation.  This mirrors the dependency-graph edges the
+    forward scheduler honours (RAW + WAR + WAW + memory + barrier); the
+    backward pass bypasses the graph, so it must re-check them itself.
     """
     # Work on a mutable copy; track which entries are consumed.
     result = list(packets)
@@ -243,10 +248,12 @@ def _backward_pair(packets: list) -> list:
             if not find_b_partners(cand, [branch]):
                 continue
 
-            # Safety check: nothing between k and j reads cand's output
-            # or writes any register cand reads.
+            # Safety check: nothing between k and j reads cand's output,
+            # writes any register cand reads, or redefines cand's output;
+            # and cand does not move across a barrier or a memory conflict.
             cand_rd   = cand.rd
             cand_uses = cand.uses_regs
+            cand_defs = cand.defs_regs
             conflict = False
             for m in range(k + 1, j):
                 if consumed[m]:
@@ -259,6 +266,18 @@ def _backward_pair(packets: list) -> list:
                         break
                     if insn.rd is not None and insn.rd in cand_uses:
                         conflict = True
+                        break
+                    if insn.rd is not None and insn.rd in cand_defs:
+                        conflict = True          # WAW: same destination
+                        break
+                    if (insn.is_call or insn.is_tail or insn.is_atomic
+                            or insn.is_fence or insn.is_csr
+                            or insn.mnemonic in ("ecall", "ebreak")):
+                        conflict = True          # barrier: nothing moves past
+                        break
+                    if cand.has_mem_operand and insn.has_mem_operand and (
+                            cand.writes_memory or insn.writes_memory):
+                        conflict = True          # possible aliasing
                         break
                 if conflict:
                     break

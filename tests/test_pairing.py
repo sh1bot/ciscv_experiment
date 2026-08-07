@@ -136,16 +136,45 @@ class TestRsdAluPair:
     def test_two_rsd_alu_ops_pair(self):
         """Two rsd-form ALU ops with supported mnemonics should pair."""
         a = make_insn("add", rd=10, rs1=10, rs2=11)   # is_rsd: rd==rs1
-        b = make_insn("and", rd=12, rs1=12, rs2=13)   # is_rsd: rd==rs1
+        b = make_insn("or", rd=12, rs1=12, rs2=13)    # is_rsd: rd==rs1
         assert can_pair(a, b) is None
 
-    def test_all_supported_mnemonics_pair(self):
-        """Every mnemonic in the supported set can appear in either slot."""
-        supported = ["add", "and", "or", "xor"]
-        for m in supported:
+    def test_ops_in_both_slots_pair(self):
+        """A mnemonic declared in BOTH slots pairs with itself."""
+        import scheduler.rules as _r
+        for m in sorted(_r._RSD_A_MN & _r._RSD_B_MN):
+            if m in ("addi", "slli"):        # immediate forms, covered below
+                continue
             a = make_insn(m, rd=10, rs1=10, rs2=11)
             b = make_insn(m, rd=12, rs1=12, rs2=13)
             assert can_pair(a, b) is None, f"{m}+{m} should pair"
+
+    def test_slots_are_asymmetric(self):
+        """The two slots declare DIFFERENT op sets, and the rule enforces it.
+
+        Range past the row's five drawn bits costs opcode entries, so weight
+        rather than op count is the budget; A spends its sixteen on breadth and
+        B on two deep immediates.  An op declared only in A must be refused in
+        B — if this ever passes symmetrically the frame has silently doubled
+        its cost.
+        """
+        import scheduler.rules as _r
+        a_only = _r._RSD_A_MN - _r._RSD_B_MN
+        assert a_only, "the slots are supposed to differ"
+        assert "mul" in a_only               # breadth bought for the A slot
+        a = make_insn("add", rd=10, rs1=10, rs2=11)
+        b = make_insn("mul", rd=12, rs1=12, rs2=13)
+        assert _rsd_accepts(a, b) is False, "mul must not be accepted in B"
+        assert _rsd_accepts(b, a) is True, "mul must be accepted in A"
+
+    def test_slot_immediate_widths_differ(self):
+        """`li` is five bits in A and eight in B, as the yaml declares."""
+        import scheduler.rules as _r
+        assert _r._RSD_A_W["li"] == 5 and _r._RSD_B_W["li"] == 8
+        wide = make_insn("addi", rd=11, rs1=0, imm=100)    # li, needs 8 bits
+        small = make_insn("add", rd=12, rs1=12, rs2=13)
+        assert _rsd_accepts(small, wide) is True, "8-bit li belongs in B"
+        assert _rsd_accepts(wide, small) is False, "A only declares li at 5 bits"
 
     def test_non_rsd_form_does_not_pair(self):
         """add with rd != rs1 and rd != rs2 is not rsd-form, should not pair."""
@@ -410,7 +439,7 @@ class TestDualOpPair:
 
     def test_shadd_store_reversed_is_pre_inc(self):
         """Reversed (shadd, store) is a pre-increment, not this frame."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
+        a = make_insn("sh3add", rd=12, rs1=13, rs2=12)   # a2 += a3*8
         b = make_insn("sd", rs1=12, rs2=13, imm=0)
         assert can_pair(a, b) is None
         assert _rule_reason("pre-inc-pair", a, b) is None
@@ -544,11 +573,13 @@ class TestIndepPair:
         b = make_insn("jalr", rd=0, rs1=15, imm=0)
         assert can_pair(a, b) is None
 
-    def test_epilogue_addi_jalr_nonzero_imm_pairs(self):
-        """jalr with nonzero 12-bit offset (PIC call pattern) also pairs."""
+    def test_epilogue_addi_jalr_nonzero_imm_no_pair(self):
+        """A nonzero jalr offset has no field: the row's rs2+rs1 columns carry
+        the sp adjustment and only the target register (rs1b) is drawn, so
+        `jalr x0, -92(ra)` cannot ride this frame (encoding.yaml epilogue-pair)."""
         a = make_insn("addi", rd=2, rs1=2, imm=96)
         b = make_insn("jalr", rd=0, rs1=1, imm=-92)
-        assert can_pair(a, b) is None
+        assert _rule_reason("epilogue-pair", a, b) is not None
 
     def test_epilogue_jalr_rd1_pairs(self):
         """jalr with rd=1 (link register) provisionally allowed."""
@@ -658,13 +689,13 @@ class TestPreIncPair:
 
     def test_sh2add_lw_rsd_pairs(self):
         """sh2add in RSD form updates pointer; lw loads from zero offset."""
-        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)  # a1 = a1*4 + a2
+        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)  # a2 += a3*4
         b = make_insn("lw", rd=10, rs1=12, imm=0)
         assert can_pair(a, b) is None
 
     def test_shadd_load_pairs(self):
-        """sh3add in RSD form scales an index; the qword load reads it."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=13)
+        """sh3add advances the pointer by a scaled stride; the qword load reads it."""
+        a = make_insn("sh3add", rd=12, rs1=13, rs2=12)
         b = make_insn("ld", rd=10, rs1=12, imm=0)
         assert _rule_reason("pre-inc-pair", a, b) is None
 
@@ -685,9 +716,18 @@ class TestPreIncPair:
 
     def test_shadd_width_must_match_scale(self):
         """sh2add scales by 4, so it pairs with word ops, not qword ones."""
-        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
+        a = make_insn("sh2add", rd=12, rs1=13, rs2=12)
         assert _rule_reason("pre-inc-pair", a, make_insn("lw", rd=10, rs1=12, imm=0)) is None
         assert _rule_reason("pre-inc-pair", a, make_insn("ld", rd=10, rs1=12, imm=0)) is not None
+
+    def test_shadd_in_place_scaling_form_no_pair(self):
+        """`shXadd a, a, x` (rd == rs1, scaling in place) is not this frame's
+        shape: the row encodes the scaled pointer walk `shXadd rsda, rs1a,
+        rsda` at the standard Zba ports, and one row decodes one operand
+        binding (encoding.yaml pre-inc-pair note)."""
+        a = make_insn("sh2add", rd=12, rs1=12, rs2=13)
+        b = make_insn("lw", rd=10, rs1=12, imm=0)
+        assert _rule_reason("pre-inc-pair", a, b) is not None
 
     def test_addi_ld_not_rsd_no_pair(self):
         """A does not update its own source: not RSD form."""
@@ -723,7 +763,7 @@ class TestPreIncPair:
 
     def test_shxadd_keeps_offset_field(self):
         """shXadd rows still draw the 5-bit scaled immb offset."""
-        a = make_insn("sh3add", rd=12, rs1=12, rs2=14)
+        a = make_insn("sh3add", rd=12, rs1=14, rs2=12)
         b = make_insn("ld", rd=10, rs1=12, imm=248)      # 31*8, fits 5b
         assert _rule_reason("pre-inc-pair", a, b) is None
         b = make_insn("ld", rd=10, rs1=12, imm=256)      # 32*8, over 5b
@@ -941,8 +981,8 @@ class TestChainAluPair:
         assert can_pair(a, b) is None
 
     def test_high_chain_register_pairs(self):
-        """The chain register dies within the pair and is not encoded, so it is
-        exempt from the x0..x15 range limit even when it is a high register."""
+        """The chain register dies within the pair and is never encoded, so a
+        high register is as good as a low one."""
         a = make_insn("add", rd=16, rs1=8, rs2=9)     # chain reg x16 (out of window)
         b = make_insn("add", rd=10, rs1=16, rs2=11)   # consumes x16; x16 dead after
         assert can_pair(a, b) is None
@@ -1176,6 +1216,17 @@ class TestBaseChainLoadOffPair:
             _r.set_xlen(old)
 
 
+def _rsd_accepts(a, b):
+    """Does rsd-alu-pair accept (a, b), honouring its per-slot MNEMONIC sets?
+
+    `_rule_reason` calls check() directly and so bypasses the mnemonic sets,
+    which is exactly where the A/B asymmetry lives.  rsd-alu-pair is RULES[0],
+    so if it accepts, it is the rule find_b_partners returns.
+    """
+    from scheduler.pairing import find_b_partners
+    return any(r.name == "rsd-alu-pair" for _b, r in find_b_partners(a, [b]))
+
+
 def _rule_reason(name, a, b):
     """Run a single named rule's check() directly; return None if it accepts or
     the NotPair reason string if it rejects."""
@@ -1378,14 +1429,15 @@ class TestProloguePair:
         b = make_insn("sd", rs1=2, rs2=1, imm=0)          # 0+8-16 != 0
         assert _rule_reason("prologue-pair", a, b) == "B-bad-delta"
 
-    def test_not_ra_source_no_prologue(self):
-        """prologue-pair is for saving ra; storing a0 is not one.
-
-        pre-inc-pair does claim it — adjusting sp then storing at an offset
-        from the new sp is a genuine pre-increment — so assert on this frame."""
+    def test_non_ra_source_pairs(self):
+        """The stored register is the drawn 5-bit `rs1b` field (encoding.yaml
+        row), so any register encodes — ra is the common case, not a
+        constraint.  (An earlier ra-only restriction pointed these pairs at
+        pre-inc-pair, but its addi rows now demand a zero access offset, so
+        they paired as nothing at all.)"""
         a = make_insn("addi", rd=2, rs1=2, imm=-16)
-        b = make_insn("sd", rs1=2, rs2=10, imm=8)         # stores a0, not ra
-        assert _rule_reason("prologue-pair", a, b) is not None
+        b = make_insn("sd", rs1=2, rs2=10, imm=8)         # stores a0
+        assert _rule_reason("prologue-pair", a, b) is None
 
     def test_positive_adjust_no_pair(self):
         a = make_insn("addi", rd=2, rs1=2, imm=16)        # positive → not a prologue
@@ -1530,12 +1582,23 @@ class TestLoadCallChain:
         assert _rule_reason("load-call-chain", a, b) is None
 
     def test_relocatable_offset_is_not_range_checked(self):
-        """The corpus value is an artifact, so it is not checked at all —
-        an offset far outside the field still pairs on this path."""
-        a = make_insn("lw", rd=31, rs1=31, imm=0x7ffff)
+        """The corpus MAGNITUDE is an artifact, so it is not checked — an
+        offset far outside the field still pairs on this path.  (It must
+        still be width-aligned: alignment is a property of the target and
+        survives relinking, unlike the magnitude.)"""
+        a = make_insn("lw", rd=31, rs1=31, imm=0x7fffc)
         b = make_insn("jalr", rd=1, rs1=31, imm=0)
         a.base_from_auipc = True
         assert _rule_reason("load-call-chain", a, b) is None
+
+    def test_relocatable_misaligned_target_no_pair(self):
+        """Target alignment survives relinking, so it IS checked: a pcrel
+        word load of an unaligned target cannot use the scaled field under
+        any layout."""
+        a = make_insn("lw", rd=31, rs1=31, imm=0x7ffff)
+        b = make_insn("jalr", rd=1, rs1=31, imm=0)
+        a.base_from_auipc = True
+        assert _rule_reason("load-call-chain", a, b) is not None
 
     def test_ordinary_load_still_range_checked(self):
         """The declaration is scoped to auipc-fed loads: a real displacement
@@ -1600,3 +1663,49 @@ class TestMacroOpCarry:
         b = make_insn("add", rd=10, rs1=12, rs2=13)
         b.live_out = {10}
         assert can_pair(a, b) is not None
+
+
+class TestJumpFrameLinkDeclarations:
+    """The jump frames declare which link register their B slot writes.
+
+    Their rows draw `rd: unused` -- the sentinel that selects them -- so the B
+    destination is NOT encoded in a field; the only thing that can say whether
+    ra is written is the op-select.  A bare `jalr` codepoint declares nothing,
+    so one codepoint covered both the linking and non-linking transfer with no
+    bit to tell them apart.  Split into `jalr_link_ra` (rd=x1) and `jr_any`
+    (rd=x0), the choice is a codepoint and the frames are unambiguous.
+    """
+
+    def _accepts(self, name, a, b):
+        from scheduler.pairing import find_b_partners
+        return any(r.name == name for _x, r in find_b_partners(a, [b]))
+
+    def test_both_transfer_kinds_are_declared(self):
+        from scheduler.imm_contracts import link_regs_for, link_regs_closed
+        for frame in ("arith-jump-pair", "setup-jump-pair"):
+            assert sorted(link_regs_for(frame, "b")) == [0, 1], frame
+            assert link_regs_closed(frame, "b"), frame
+
+    def test_linking_and_non_linking_both_pair(self):
+        a = make_insn("addi", rd=10, rs1=10, imm=4)
+        for rd in (0, 1):
+            b = make_insn("jalr", rd=rd, rs1=15, imm=0)
+            assert self._accepts("arith-jump-pair", a, b), f"rd=x{rd}"
+
+    def test_undeclared_link_register_does_not_pair(self):
+        """x6 is load-call-chain's second link register, not this frame's."""
+        a = make_insn("addi", rd=10, rs1=10, imm=4)
+        b = make_insn("jalr", rd=6, rs1=15, imm=0)
+        assert not self._accepts("arith-jump-pair", a, b)
+
+    def test_epilogue_never_links(self):
+        """An epilogue frees its frame and transfers away; linking would return
+        into the frame it just destroyed, so a register tail call is `jr`.  The
+        corpus has 8490 ret and 403 jr here and not one linking transfer."""
+        from scheduler.imm_contracts import link_regs_for
+        assert sorted(link_regs_for("epilogue-pair", "b")) == [0]
+        a = make_insn("addi", rd=2, rs1=2, imm=16)
+        assert self._accepts("epilogue-pair", a,
+                             make_insn("jalr", rd=0, rs1=15, imm=0))
+        assert not self._accepts("epilogue-pair", a,
+                                 make_insn("jalr", rd=1, rs1=15, imm=0))

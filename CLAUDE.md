@@ -19,10 +19,24 @@ derive (TODO A8).
 `python3 util/encoding_assign.py` assigns the opcode bit-patterns and emits the
 published `ciscv-proto.yml` data file: per frame, the ASCII-art layout with the
 identifier filled in, the opcode tables, and the bit-level meaning of every
-op-select (`o`) bit. `--text` gives the human report instead, `--decode WORD`
+op-select (`p`) bit. `--text` gives the human report instead, `--decode WORD`
 resolves a single selector word.
 
+In those layouts a box is a FIELD, not a grid column: adjoining columns fuse
+(`imma[9:5]` + `imma[4:0]` draws as one `imma[9:0]`, `p`+`p` as `p p`) and a
+column split between two operands divides (`imb│rdb`, with a `where` footnote
+for any name the narrower box could not spell). Every boundary still lands on
+a bit boundary and the drawing keeps its width, so anything reading the art by
+column position is safe; `tests/test_conformance.py` gates that.
+
 ## Measurement caveats — remind the user about these when relevant
+
+**`ACCOUNTING.md` §8 is the canonical register of every deliberate
+approximation** — the constraints the scheduler relaxes because the task is to
+measure what the scheme *could* achieve under a toolchain that targeted it
+(packet alignment vs the RVC-linked corpus, unresolved displacements, pcrel
+offsets, `measures_also` billing, dead-temp rewrites). The two below are the
+ones that most often surprise; consult §8 before quoting any number.
 
 - **RVC-eligibility (`[C]` / `rvc_eligible`) is an OPTIMISTIC ceiling, not actual
   compression.** Branch/jump offset ranges are NOT checked and there is no

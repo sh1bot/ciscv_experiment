@@ -337,29 +337,83 @@ capture vs 66.5% for a 6-bit base field at the same 256 codepoints — within
 **CONVENTION — all of these make numbers look better than reality.** Quote them
 when quoting the numbers.
 
+**This section is the canonical register of every deliberate approximation the
+scheduler makes.** The task is to measure what the encoding scheme *could*
+achieve if a compiler and linker targeted it deliberately, so the scheduler is
+allowed to relax constraints that are artifacts of the corpus build (RVC
+linkage, the linked layout, the compiler's cost model) — but each relaxation
+must be listed here, at the point where a rule applies one it says so in a
+comment, and where the yaml declares one it uses a named key
+(`accepts_pcrel_lo`, `measures_also`).
+
 - **Branch/jump displacements are never range-checked.** Labels are unresolved
   in the corpus, so branch immediates are neither measured nor failed. The yaml
   marks this `unbounded: true` for branches; direct `j`/`jal` targets are also
-  unchecked but not so marked.
+  unchecked but not so marked. Several frame notes quote the label-distance
+  study (10-bit fit near 100% for branches; ~15% over-range tail for direct
+  `j` on sqlite) — quote it with them.
+- **Targets are assumed packet-aligned (4-byte), because the corpus is not.**
+  The corpus was compiled and linked with RVC, so half its function entries
+  and labels sit on 2-byte boundaries. Under the packet ISA every target is
+  4-byte aligned by construction, so displacement checks test only the RANGE
+  and ignore the low two bits (`arg-call-pair` is the live case: its far-call
+  displacements are odd×2 in the corpus, and an alignment check would have
+  measured the frame at zero on the corpus it was built for). The same
+  assumption defines the link value `ra = packet + 4` used by the jump frames.
+- **`%pcrel_lo`/auipc-fed offsets: refused where the field is narrow,
+  accepted UNMEASURED where it spans the residue.** An offset whose base
+  register came straight from an `auipc` is `(target - pc_of_auipc) mod
+  4096` — a fact about the layout that binary was linked for, not a
+  displacement the program chose. Two facts decide what a rule may do with
+  it. (1) The *magnitude* does not survive relinking, so range-checking the
+  corpus value measures the old layout: a slot whose field CANNOT span the
+  full 12-bit residue refuses the tainted base outright (the code is
+  excluded from the numerator rather than counted as encodable). This
+  includes the lo-half `addi` reaching the ALU-immediate frames
+  (rsd-alu-pair, alu-alu-chain, arith-jump-pair, arg-call-pair's addi_rsd
+  row, addi-store-chain, addi-store-off-chain) — their 5–7-bit fields can
+  never hold "whatever lo the new layout produces". (2) A slot whose field
+  DOES span the residue — declared bits + log2(scale) ≥ 12 — accepts the
+  pair and skips the magnitude check entirely: any lo the new link step
+  computes fits by construction. Signedness imposes nothing, because the
+  toolchain biases the auipc's hi half to land the residual in whatever
+  range the field has (RISC-V's own +0x800 bias, generalised). The one fact
+  that DOES survive relinking is the target's *alignment* — a property of
+  the object — so a scaled field's alignment requirement is still checked
+  against the corpus value; the rv64 "0–7% not 8-aligned" residue is
+  thereby excluded per-site rather than assumed away. Frames on the accept
+  path declare `accepts_pcrel_lo` in the yaml (`load-call-chain`,
+  `pre-inc-pair`'s addi rows), and `tests/test_conformance.py` pins each
+  declaration to the field arithmetic that justifies it. The accepted
+  pairs remain a *relaxation* in the §8 sense — the packed layout is
+  assumed to exist and link — but not an unmeasured-immediate gamble: the
+  field provably holds every value the claim needs.
+- **`measures_also` mnemonics are billed to the frame without a codepoint.**
+  Declared per-frame in the yaml and honoured by `rules_conform`. The live
+  cases: `addiw` counted as the full-width `inc`/`dec`/`addi`
+  (inc-branch-pair, arg-call-pair) — provable for signed counters (overflow
+  is UB), optimistic for unsigned ones on rv64 (defined wrap is not
+  width-equivalent); and the signed loads `lb`/`lh`/`lwu` in
+  load-store-chain — pure canonicalisation, not optimism: feeding a
+  same-width store, signed and unsigned loads store identical bytes.
+- **Dead-temporary rewrites are counted as encodable.** When the chain
+  temporary dies inside the packet, a value-changing rewrite is licensed
+  structurally (the `equivalences` section's `tmp` rule): bit-test-branch-chain
+  encodes `andi tmp, 2^n-1` / `-(2^n)` masks as shifts (E1/E2), and
+  li-branch-chain encodes a constant on the left of an asymmetric compare by
+  the K→K+1 swap (`blt K, rs` → `bge rs, K+1`). These are canonicalisations —
+  the packet computes the same predicate — but the emitted asm is not the
+  corpus asm.
 - **RVC-eligibility is a ceiling**, not achieved compression: no offset-range
   check, no RV32/RV64 gating, float RVC out of scope. See `CLAUDE.md`.
-- **`%pcrel_lo`/auipc-fed loads never pair**, so relocation-bearing code is
-  excluded from the denominator rather than counted as a miss — *except* in a
-  frame that declares `accepts_pcrel_lo`, where they pair and their offset is
-  not range-checked at all. Only `load-call-chain` declares it today. The
-  argument is that the corpus offset is `(target - pc_of_auipc) & 0xfff`, an
-  artifact of the layout that binary was linked for, so the number says nothing
-  about the packed layout; the frame's field spans the whole 4096-byte pcrel-lo
-  range, so whatever the link step computes will fit. This is the same class of
-  claim as the branch displacements above — an unmeasured immediate assumed to
-  fit — and it is optimistic in the same way. It also assumes an UNBIASED split
-  (RISC-V's +0x800 exists only because its I-type immediate is sign-extended;
-  these fields are unsigned), and on rv64 it hides a width-scaling residue of
-  0–7% (offsets not 8-aligned). Quantified at the frame's yaml note.
 - **Packets claim the RVC encoding quadrant** (2-bit `10` marker), so packets and
   literal RVC compete for the same space rather than composing. The RVC rate is a
   comparison baseline, not additive headroom.
 - **§2's skew-maximising attribution**, if adopted, joins this list.
+- **A11's compiler-cost-model artifacts** (LSR-disguised pointer bumps, RVC
+  register clustering, the clang/GCC gap) are the converse: reachable value
+  the corpus HIDES. They make the measured numbers pessimistic, and are
+  recorded in `TODO.md` §A11 rather than here.
 
 ---
 
