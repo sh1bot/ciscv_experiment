@@ -1295,6 +1295,10 @@ doc:
           displacement is netted): +169 / +429 / +216 pairs.  Part of the
           gain is displacement -- rsd-alu-pair gives back up to 110,
           li-branch-chain up to 50 -- which the totals already count.
+          Re-measured 2026-08-07 on the merged operand-position baseline
+          (post jalr-split and pcrel reworks, which absorbed part of the
+          original gain): +144 / +249 on musl-gcc-rv32 / sqlite-rv64.
+          Still positive at no block cost.
         - >-
           `addi4spn` deliberately does NOT get the split: its wide
           destinations are a coin flip on musl+sqlite (129 arg vs 135 other

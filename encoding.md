@@ -612,7 +612,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
    gcc-rv32 / sqlite-rv64 / cpp-rv32, corpus TOTALS so displacement is
    netted): +169 / +429 / +216 pairs. Part of the gain is displacement --
    rsd-alu-pair gives back up to 110, li-branch-chain up to 50 -- which
-   the totals already count.
+   the totals already count. Re-measured 2026-08-07 on the merged
+   operand-position baseline (post jalr-split and pcrel reworks, which
+   absorbed part of the original gain): +144 / +249 on musl-gcc-rv32 /
+   sqlite-rv64. Still positive at no block cost.
  * `addi4spn` deliberately does NOT get the split: its wide destinations
    are a coin flip on musl+sqlite (129 arg vs 135 other at 7 bits) and
    splitting it regressed musl-gcc while paying on cpp (+375/-71
