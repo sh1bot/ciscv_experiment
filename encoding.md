@@ -469,7 +469,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 *Set up an argument, then call through a hard-coded base register.*
 
-    mv      rda, rs1a
+    mv      rda, rs2a
     jalr_ra ra, 4*immb(ra)
 
     li      rda, imma
@@ -490,7 +490,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│g│immb[9:5]│   rda   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│immb[9:5]│  rs2a   │   rda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│g│immb[9:5]│imma[4:0]│imma+rda │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│g│immb[9:5]│  rs2a   │imma[4:0]│ fn3 │immb[4:0]│ opcode5 │1 0│
 
@@ -582,23 +582,23 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 *Two independent small moves or constants -- argument marshalling.*
 
-    mv      rda, rs1a
+    mv      rda, rs2a
     mv/li   rdb, rs2b/immb
 
     li      rda, imma
     li      rdb, immb
 
     li      arda, imma
-    mv/li   rdb, rs1b/immb
+    mv/li   rdb, rs2b/immb
 
 ┌─┬─┬─────────┬─────────┬─────────┬─────┬─────────┬─────────────┐
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
-│h│g│   rda   │  rs2b   │  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│g│   rda   │immb[4:0]│  rs1a   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│g│   rda   │imma[4:0]│immb[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
-│h│g│imma+rda │imma[4:0]│  rs1b   │ fn3 │   rdb   │ opcode5 │1 0│
-│h│g│imma+rda │imma[4:0]│immb[4:0]│ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│  rs2b   │  rs2a   │   rda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│  rs2a   │   rda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│imma[4:0]│   rda   │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│  rs2b   │imma[4:0]│imma+rda │ fn3 │   rdb   │ opcode5 │1 0│
+│h│g│immb[4:0]│imma[4:0]│imma+rda │ fn3 │   rdb   │ opcode5 │1 0│
 
  * THE WIDE BAND IS ARGUMENT-DESTINED, measured (2026-08-05). With the
    width caps relaxed to ten bits, wide `li` destinations are argument
@@ -632,14 +632,14 @@ No general register block is reserved at present. Earlier drafts held out a cont
    it actually is; rules.py stays slot-agnostic, accepting the wide op in
    either stream position.
  * A-SIDE, NOT B-SIDE, and the two are not interchangeable in shape even
-   though they are in capture. A wide imma sits at funct5+rs2, the
-   truncated I-type position the discipline gives every A immediate, and
-   the two bits it needs come out of funct5 -- the column rda already
-   occupies when free, so the split is local to one column. A B-side band
-   has nowhere comparable: immb would straddle rs1 and the top of rd.
-   Each side also costs exactly one canonical-order inversion (A-side
-   spells (wide li, mv) li-first; a B-side band would spell (addi4spn,
-   wide li) spn-first), so that is not a discriminator.
+   though they are in capture. The spare bits are in rs1: it is the
+   destination port, rda is the only operand drawn there, and narrowing
+   rda to a0-a7 frees two bits for imma without touching another column
+   -- which is arg-call-pair row 2 exactly. Slot B has nothing
+   equivalent, since rd holds rdb alone and immb would have to straddle
+   two columns. Each side also costs exactly one canonical-order
+   inversion (A-side spells (wide li, mv) li-first; a B-side band would
+   spell (addi4spn, wide li) spn-first), so that is not a discriminator.
  * PRICED 13 BY THE MODEL, ~19 BY HAND, in the same 32-block.
    opcode_codepoints scores each op against the slot's WIDEST row, so
    slot B's split rows (7-bit field) hide addi4spn's sixth bit there,
@@ -739,7 +739,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
 
 *Set up an argument or return value, then transfer control.*
 
-    mv      rda, rs1a
+    mv      rda, rs2a
     jr_any/jalr_link_ra rs1b
 
     load    rda, k*imma(rs1a)
@@ -748,7 +748,7 @@ No general register block is reserved at present. Earlier drafts held out a cont
     li      rda, imma
     jr_any/jalr_link_ra rs1b
 
-    mv      rda, rs1a
+    mv      rda, rs2a
     j       4*immb
 
     load    rda, 0(rs1a)
@@ -761,8 +761,10 @@ No general register block is reserved at present. Earlier drafts held out a cont
 │h│g│ funct5  │   rs2   │   rs1   │ fn3 │   rd    │   opcode    │
 └─┴─┴─────────┴─────────┴─────────┴─────┴─────────┴─────────────┘
 │h│g│  rs1b   │imma[4:0]│  rs1a   │ fn3 │   rda   │ opcode5 │1 0│
+│h│g│  rs1b   │  rs2a   │  free   │ fn3 │   rda   │ opcode5 │1 0│
 │h│g│imma[9:5]│imma[4:0]│  rs1b   │ fn3 │   rda   │ opcode5 │1 0│
 │h│g│immb[9:5]│   rda   │  rs1a   │ fn3 │immb[4:0]│ opcode5 │1 0│
+│h│g│immb[9:5]│  rs2a   │   rda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 │h│g│immb[9:5]│imma[4:0]│   rda   │ fn3 │immb[4:0]│ opcode5 │1 0│
 
  * `j` covers `jal x0`; a jal with a real destination is a call and is

@@ -106,9 +106,21 @@ pseudo_ops:
     requires: resolved-immediate
   mv:
     base: addi
-    encode: {op: add, rs2: x0}           # add rd, x0, rs -- NOT addi rd,rs,0
+    # `add rd, x0, rs2` -- the SOURCE IS rs2, deliberately against RISC-V's
+    # `mv rd, rs` = `addi rd, rs, 0`, which puts it in rs1.  The reason is the
+    # operand-position discipline: the rs1 column is this encoding's
+    # destination port wherever a frame can spare it -- every rsd op draws
+    # `rsda` there (rd == rs1, read and written), and arg-call-pair draws a
+    # plain `rda` there beside its widened imma.  Spelling the move's source
+    # as rs2 keeps rs1 free for the destination, so `mv` lays out like the
+    # rsd family instead of competing with it, and a frame pairing two moves
+    # has two distinct source ports to draw from rather than one.
+    # Costs one thing, paid in setup-jump-pair: `mv rda, rs1a` was the load
+    # row with the offset ignored, and a move whose source is rs2 no longer
+    # fits that row, so the frame draws a second one.
+    encode: {op: add, rs1: x0}           # add rd, x0, rs2 -- NOT addi rd,rs,0
     match:  [{op: addi, imm: 0},         # the assembler's spelling
-             {op: add,  rs2: x0},        # the canonical form, either operand
+             {op: add,  rs2: x0},        # either operand, on input
              {op: add,  rs1: x0}]
     requires: resolved-immediate
   addi4spn:
@@ -1072,7 +1084,7 @@ doc:
       budget: 16
       level: 2
       templates:
-        - ["mv      rda, rs1a",         "jalr_ra ra, 4*immb(ra)"]
+        - ["mv      rda, rs2a",         "jalr_ra ra, 4*immb(ra)"]
         - ["li      rda, imma",         "jalr_ra ra, 4*immb(ra)"]
         - ["addi4spn rda, 4*imma",      "jalr_ra ra, 4*immb(ra)"]
         - ["load    rda, k*imma(sp)",   "jalr_ra ra, 4*immb(ra)"]
@@ -1108,7 +1120,7 @@ doc:
         - {a: {op: addi, rd: 10, rs1: 8, imm: 0},
            b: {op: jalr, rd: 0, rs1: 6, imm: 16}}
       rows:
-        - {funct5: "immb[9:5]", rs2: rda, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[9:5]", rs2: rs2a, rs1: rda, rd: "immb[4:0]"}
         - funct5: "immb[9:5]"
           rs2: "imma[4:0]"
           rs1:
@@ -1245,15 +1257,13 @@ doc:
       # `li` comes in two bands: the bare 5-bit field with a full rd, and an
       # 8-bit band on the SPLIT-rda rows -- seven drawn bits and one opcode
       # repeat, with the DESTINATION RESTRICTED TO a0-a7.  This is
-      # arg-call-pair's trick, and it is spelled the same way: narrow that
-      # frame's A destination to three bits and spend the two freed bits on
-      # imma.  The band is A-SIDE for the same reason arg-call's is -- the
-      # operand-position discipline puts an A immediate at funct5+rs2 (the
-      # truncated I-type position), and rda is the operand that already
-      # takes funct5 when free, so the two bits come out of the column the
-      # immediate is growing into.  A B-side band would have to park immb
-      # across rs1 and the top of rd, which is no position the discipline
-      # names.
+      # arg-call-pair's trick, spelled in the same columns: `rda` narrowed
+      # to three bits in the rs1 column with `imma[6:5]` beside it, and
+      # `imma[4:0]` in rs2.  The band is A-SIDE because that is where the
+      # spare bits are -- rs1 is the destination port and rda is the only
+      # operand in it, so narrowing rda is a local trade.  A B-side band has
+      # nothing equivalent: rd holds rdb alone and immb would have to
+      # straddle two columns.
       #
       # Only imma widens, so at most one of the pair may be wide, and mutual
       # independence lets the encoder put the wide one in A.  In the ops
@@ -1263,28 +1273,28 @@ doc:
       budget: 32
       level: 1
       templates:
-        - ["mv      rda, rs1a", "mv/li   rdb, rs2b/immb"]
+        - ["mv      rda, rs2a", "mv/li   rdb, rs2b/immb"]
         - ["li      rda, imma", "li      rdb, immb"]
-        - ["li      arda, imma", "mv/li   rdb, rs1b/immb"]
+        - ["li      arda, imma", "mv/li   rdb, rs2b/immb"]
       ops:
         - {a: [mv],  b: [mv, li, *addi4spn_u6]}
         - {a: [*li_8s], b: [mv, li, *addi4spn_u6]}
         - {a: [*addi4spn_u6],  b: [*addi4spn_u6]}
       rows:
-        - {funct5: rda, rs2: rs2b, rs1: rs1a, rd: rdb}
-        - {funct5: rda, rs2: "immb[4:0]", rs1: rs1a, rd: rdb}
-        - {funct5: rda, rs2: "imma[4:0]", rs1: "immb[4:0]", rd: rdb}
-        - funct5:
+        - {funct5: rs2b, rs2: rs2a, rs1: rda, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: rs2a, rs1: rda, rd: rdb}
+        - {funct5: "immb[4:0]", rs2: "imma[4:0]", rs1: rda, rd: rdb}
+        - funct5: rs2b
+          rs2: "imma[4:0]"
+          rs1:
             - {bits: 2, value: "imma[6:5]"}
             - {bits: 3, value: rda}
-          rs2: "imma[4:0]"
-          rs1: rs1b
           rd: rdb
-        - funct5:
+        - funct5: "immb[4:0]"
+          rs2: "imma[4:0]"
+          rs1:
             - {bits: 2, value: "imma[6:5]"}
             - {bits: 3, value: rda}
-          rs2: "imma[4:0]"
-          rs1: "immb[4:0]"
           rd: rdb
       notes:
         - >-
@@ -1326,15 +1336,15 @@ doc:
           the wide op in either stream position.
         - >-
           A-SIDE, NOT B-SIDE, and the two are not interchangeable in shape
-          even though they are in capture.  A wide imma sits at
-          funct5+rs2, the truncated I-type position the discipline gives
-          every A immediate, and the two bits it needs come out of funct5
-          -- the column rda already occupies when free, so the split is
-          local to one column.  A B-side band has nowhere comparable: immb
-          would straddle rs1 and the top of rd.  Each side also costs
-          exactly one canonical-order inversion (A-side spells (wide li,
-          mv) li-first; a B-side band would spell (addi4spn, wide li)
-          spn-first), so that is not a discriminator.
+          even though they are in capture.  The spare bits are in rs1: it
+          is the destination port, rda is the only operand drawn there, and
+          narrowing rda to a0-a7 frees two bits for imma without touching
+          another column -- which is arg-call-pair row 2 exactly.  Slot B
+          has nothing equivalent, since rd holds rdb alone and immb would
+          have to straddle two columns.  Each side also costs exactly one
+          canonical-order inversion (A-side spells (wide li, mv) li-first;
+          a B-side band would spell (addi4spn, wide li) spn-first), so that
+          is not a discriminator.
         - >-
           PRICED 13 BY THE MODEL, ~19 BY HAND, in the same 32-block.
           opcode_codepoints scores each op against the slot's WIDEST row, so
@@ -1464,10 +1474,10 @@ doc:
       budget: 32
       level: 2
       templates:
-        - ["mv      rda, rs1a", "jr_any/jalr_link_ra rs1b"]
+        - ["mv      rda, rs2a", "jr_any/jalr_link_ra rs1b"]
         - ["load    rda, k*imma(rs1a)", "jr_any/jalr_link_ra rs1b"]
         - ["li      rda, imma", "jr_any/jalr_link_ra rs1b"]
-        - ["mv      rda, rs1a", "j       4*immb"]
+        - ["mv      rda, rs2a", "j       4*immb"]
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
       ops:
@@ -1476,9 +1486,14 @@ doc:
         - {a: [mv, lbu, lw, ld], b: [{op: j, imm: {bits: 10, signed: true, scale: 4}}]}
         - {a: [li], b: [j]}
       rows:
+        # A move's source is rs2 (pseudo_ops.mv), so it can no longer ride the
+        # load row with the offset ignored -- rows 2 and 5 are its own.  The
+        # load rows are unchanged: a load base IS architecturally rs1.
         - {funct5: rs1b, rs2: "imma[4:0]", rs1: rs1a, rd: rda}
+        - {funct5: rs1b, rs2: rs2a, rd: rda}
         - {funct5: "imma[9:5]", rs2: "imma[4:0]", rs1: rs1b, rd: rda}
         - {funct5: "immb[9:5]", rs2: rda, rs1: rs1a, rd: "immb[4:0]"}
+        - {funct5: "immb[9:5]", rs2: rs2a, rs1: rda, rd: "immb[4:0]"}
         - {funct5: "immb[9:5]", rs2: "imma[4:0]", rs1: rda, rd: "immb[4:0]"}
       notes:
         - >-
