@@ -704,7 +704,9 @@ def frame_body_lines(frame, colwidths):
             continue
         if approx:
             out.append("    (closest-fit encoding — this frame shares rows across forms)")
-        for row, tag in hits:
+        for i, (row, tag) in enumerate(hits):
+            if i:                        # blank line between EVERY A-B pair,
+                out.append("")           # not just between templates
             rops = row_operands(row, _GRID)
             toks = _tokens(row, w, frame.get("sentinel"))
             a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
@@ -744,6 +746,7 @@ def load(path=None):
             "budget": budget, "opsel": opsel_bits(budget),
             "fmt": fmt, "a_rank": _FMT_RANK[fmt],
             "role": rd_column_role(f, grid),
+            "doc_order": len(frames),
         })
 
     complaints = []
@@ -813,7 +816,10 @@ def load(path=None):
         if f["used"] > f["space"]:
             overfull.append(f["name"])
 
-    frames.sort(key=lambda f: (f["base_cp"], -f["opsel"]))
+    # Emission order is the frame's order in encoding.yaml, not its codepoint —
+    # allocation had to sort by (-opsel, a_rank, name) to buddy-place blocks,
+    # but the reader wants the document's own order back, not the namespace's.
+    frames.sort(key=lambda f: f["doc_order"])
     info = {
         "grid": grid, "reserved": reserved, "W": W, "blocks": len(order),
         "opsets": spec.get("opsets") or {},
