@@ -54,10 +54,11 @@ funct3 already draws `p p p`) and a column split between two operands divides
 (`imb│rdb`, footnoted under the layout). Both keep the drawing's width and
 every boundary on a bit boundary — see `cells`.
 
-For each frame the tool prints its bare form, then walks the frame's asm
-templates and, for each, reprints the matching encoding row TWICE — once for the
-A instruction and once for the B instruction — blanking the fields that slot
-does not use, so it is visible which fields each slot owns and which they share.
+For each frame the tool prints its bare form, then its `templates:` — per asm
+pair, the A slot and the B slot as structured YAML: the fields each one draws
+(name, bits, type — rs/rd/rsd/imm) plus any register the line hard-codes
+outright rather than encoding (`implicit`), so it is visible which fields each
+slot owns, which they share, and which registers are fixed by the opcode.
 
 Usage:
     python3 util/encoding_assign.py                 # the ciscv-proto.yml data file
@@ -666,16 +667,6 @@ _ABI_REGS = {
 _REG_TOKEN = re.compile(r"\b\w+\b")
 
 
-def implicit_regs(line):
-    """Hardcoded registers a template line names literally, in the order they
-    first appear -- e.g. `tmp` in `alu tmp, rs1a, rs2a`, `t1` in
-    `jalr_link_t1 t1, 0(tmp)`. These never show up in the row's fields, so
-    without this they read as silently erased rather than fixed."""
-    _, _, rest = line.partition(" ")
-    return ", ".join(dict.fromkeys(t for t in _REG_TOKEN.findall(rest)
-                                    if t in _ABI_REGS))
-
-
 def matches(row, tag, a_ops, b_ops, sp_template, has_sp_rows):
     """A row realises a template when every field the row encodes is an operand
     of the template, and (for frames that distinguish them) its SP-relative
@@ -687,25 +678,53 @@ def matches(row, tag, a_ops, b_ops, sp_template, has_sp_rows):
     return True
 
 
-def frame_body_lines(frame, colwidths):
-    """The frame's plain form, then, per template, the encoding twice — once
-    keeping only the A-slot's fields and once only the B-slot's — with the asm
-    instruction on the right. Fields used by both slots survive both copies,
-    exposing the shared operands."""
+def field_type(stem):
+    """rs/rd/rsd/imm, from the field-name convention this codebase already
+    uses everywhere else (imm_contracts.py's `stem.startswith(("rd","rsd"))`,
+    encoding_render.py's rd-column test): `rsd*` reads and writes the same
+    register, `rd*` only writes, `imm*` is an immediate, everything else
+    (`rs1*`, `rs2*`, `rbase`) only reads."""
+    if stem.startswith("rsd"):
+        return "rsd"
+    if stem.startswith("rd"):
+        return "rd"
+    if stem.startswith("imm"):
+        return "imm"
+    return "rs"
+
+
+def slot_fields(row, grid, ops):
+    """[{name, bits, type}] for the fields `ops` names, row order, a split
+    field's pieces summed into the width it draws as a whole."""
+    order, bits = [], {}
+    for _field, stem, w, _raw in row_parts(row, grid):
+        if stem not in ops:
+            continue
+        if stem not in bits:
+            order.append(stem)
+        bits[stem] = bits.get(stem, 0) + w
+    return [{"name": s, "bits": bits[s], "type": field_type(s)} for s in order]
+
+
+def slot_implicit(line):
+    """[{name, type: rsd}] for the registers a template line hard-codes --
+    fixed by the opcode (`beqz`'s zero, `jalr_link_t1`'s t1) or by convention
+    (the `tmp` scratch register), never by an encoded field. Tagged `rsd`
+    because it's the PAIR, not the line, that decides whether it's read or
+    written -- `tmp` is a destination in one slot and a source in the other."""
+    _, _, rest = line.partition(" ")
+    names = dict.fromkeys(t for t in _REG_TOKEN.findall(rest) if t in _ABI_REGS)
+    return [{"name": n, "type": "rsd"} for n in names]
+
+
+def frame_templates(frame, grid):
+    """Per template, per matching row: the A and B slots as field lists --
+    encoded fields (name, bits, type) plus any hard-coded register the line
+    names outright (`implicit`) -- and the specialized asm each slot runs."""
     spec = frame["spec"]
-    w = word_chars(frame)
-    o5 = " ".join(w[0:5])
     rows = frame_rows(spec)
     has_sp = any(tag == "SP-relative" for _, tag in rows)
     out = []
-
-    for row, tag in rows:                           # the form as it stands
-        line = render_line(_tokens(row, w, frame.get("sentinel")), o5, colwidths)
-        out.append(line + (f" ({tag})" if tag else ""))
-
-    impl_w = max([len(implicit_regs(ln))
-                  for pair in spec["templates"] for ln in pair] + [0])
-
     for pair in spec["templates"]:
         a_line, b_line = pair[0].strip(), pair[1].strip()
         a_ops, b_ops = line_ops(pair[0]), line_ops(pair[1])
@@ -719,29 +738,74 @@ def frame_body_lines(frame, colwidths):
             # template's operands. Fall back to the single best-overlap row.
             cand = [(r, t) for r, t in rows
                     if not (has_sp and sp_t != (t == "SP-relative"))]
-            cand.sort(key=lambda rt: -len(row_operands(rt[0], _GRID)
+            cand.sort(key=lambda rt: -len(row_operands(rt[0], grid)
                                           & (a_ops | b_ops)))
-            if cand and row_operands(cand[0][0], _GRID) & (a_ops | b_ops):
+            if cand and row_operands(cand[0][0], grid) & (a_ops | b_ops):
                 hits, approx = [cand[0]], True
-        out.append("")
         if not hits:
-            out.append(f"    (no row realises: {a_line} ; {b_line})")
+            out.append({"a": {"template": a_line}, "b": {"template": b_line},
+                       "unrealised": True})
             continue
-        if approx:
-            out.append("    (closest-fit encoding — this frame shares rows across forms)")
-        for i, (row, tag) in enumerate(hits):
-            if i:                        # blank line between EVERY A-B pair,
-                out.append("")           # not just between templates
-            rops = row_operands(row, _GRID)
-            toks = _tokens(row, w, frame.get("sentinel"))
-            a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
-            b = render_line(toks, o5, colwidths, keep=lambda base: base in b_ops)
-            a_impl = f"{_center(implicit_regs(a_line), impl_w)}│" if impl_w else ""
-            b_impl = f"{_center(implicit_regs(b_line), impl_w)}│" if impl_w else ""
-            out.append(f"A: {a}{a_impl}   {specialize(a_line, rops)}")
-            out.append(f"B: {b}{b_impl}   {specialize(b_line, rops)}")
-    while out and not out[-1].strip():
-        out.pop()
+        for row, tag in hits:
+            rops = row_operands(row, grid)
+            entry = {
+                "a": {"fields": slot_fields(row, grid, a_ops),
+                      "implicit": slot_implicit(a_line),
+                      "template": specialize(a_line, rops)},
+                "b": {"fields": slot_fields(row, grid, b_ops),
+                      "implicit": slot_implicit(b_line),
+                      "template": specialize(b_line, rops)},
+            }
+            if tag:
+                entry["tag"] = tag
+            if approx:
+                entry["approx"] = True
+            out.append(entry)
+    return out
+
+
+def _slot_yaml_lines(slot):
+    """One `a:`/`b:` mapping's content as YAML text lines (unindented)."""
+    lines = [f"fields: {_flow(slot['fields'])}"]
+    if slot.get("implicit"):
+        lines.append(f"implicit: {_flow(slot['implicit'])}")
+    lines.append(f"template: {_q(slot['template'])}")
+    return lines
+
+
+def frame_templates_lines(frame, grid):
+    """The frame's `templates:` field breakdown as YAML text lines
+    (unindented -- callers nest them under the frame's own indent)."""
+    entries = frame_templates(frame, grid)
+    if not entries:
+        return []
+    out = ["templates:"]
+    for e in entries:
+        if e.get("unrealised"):
+            out.append("- unrealised: true")
+            out.append(f"  a: {{template: {_q(e['a']['template'])}}}")
+            out.append(f"  b: {{template: {_q(e['b']['template'])}}}")
+            continue
+        out.append("- a:")
+        out.extend("    " + ln for ln in _slot_yaml_lines(e["a"]))
+        out.append("  b:")
+        out.extend("    " + ln for ln in _slot_yaml_lines(e["b"]))
+        if e.get("tag"):
+            out.append(f"  tag: {_q(e['tag'])}")
+        if e.get("approx"):
+            out.append("  approx: true")
+    return out
+
+
+def frame_body_lines(frame, colwidths):
+    """The frame's plain form: the header row's bit pattern, once per row."""
+    spec = frame["spec"]
+    w = word_chars(frame)
+    o5 = " ".join(w[0:5])
+    out = []
+    for row, tag in frame_rows(spec):
+        line = render_line(_tokens(row, w, frame.get("sentinel")), o5, colwidths)
+        out.append(line + (f" ({tag})" if tag else ""))
     notes = frame_notes(frame, colwidths)
     if notes:
         out.append("")
@@ -1080,6 +1144,8 @@ def emit_yaml(frames, info):
         out.append("  layout: |")
         for line in frame_body_lines(f, widths):
             out.append(("    " + line).rstrip())
+        for line in frame_templates_lines(f, info["grid"]):
+            out.append("  " + line)
         out.append("  opcodes:")
         for c in f["tables"]:
             out.append(f"  - select: {_q(cluster_word(f, c))}")
@@ -1175,12 +1241,14 @@ def report(frames, info):
     if info["unhosted"]:
         print(f"⚠ Sentinel frames with no host large enough: "
               f"{', '.join(info['unhosted'])}\n")
-    print("Each frame prints its form, then per template the encoding twice — the\n"
-          "A instruction then the B — with the fields that slot does NOT use erased.\n"
-          "A field kept in both copies is shared by both instructions.  A box is one\n"
-          "FIELD, not one column: columns holding adjoining bits of one thing are\n"
-          "drawn fused, a column split between two operands is drawn divided, and any\n"
-          "name a box is too narrow to spell is given in a `where` line below it.\n")
+    print("Each frame prints its form, then its templates: per matched asm pair, the\n"
+          "A slot and the B slot as field lists (name, bits, type) plus any register\n"
+          "the line hard-codes rather than encodes (`implicit`, always type rsd —\n"
+          "the pair, not the line, decides whether it's read or written). A box in\n"
+          "the form is one FIELD, not one column: columns holding adjoining bits of\n"
+          "one thing are drawn fused, a column split between two operands is drawn\n"
+          "divided, and any name a box is too narrow to spell is given in a `where`\n"
+          "line below it.\n")
     print("Then its op tables: which op-select index selects which pair of opcodes.\n"
           "Constant bits pick the ops cluster, 'a'/'b' index that cluster's two op\n"
           "tables, 'i' carries a shared immediate's high bits.  An op spanning\n"
@@ -1214,6 +1282,10 @@ def report(frames, info):
         print()
         print("\n".join(header))
         print("\n".join(frame_body_lines(f, widths)))
+        tmpl_lines = frame_templates_lines(f, info["grid"])
+        if tmpl_lines:
+            print()
+            print("\n".join("    " + ln for ln in tmpl_lines))
         print()
         print_tables(f)
         print()
