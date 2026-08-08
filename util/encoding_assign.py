@@ -654,6 +654,28 @@ def specialize(line, row_ops):
     return _ALT.sub(repl, line)
 
 
+# Registers a template line can name literally rather than through a field the
+# frame encodes -- fixed by the opcode (`beqz`'s zero, `jalr_link_t1`'s t1) or
+# by convention (the `tmp` scratch register). The standard RISC-V ABI names
+# plus `tmp` cover every register a template could hard-code.
+_ABI_REGS = {
+    "zero", "ra", "sp", "gp", "tp", "fp", "tmp",
+    *(f"t{i}" for i in range(7)), *(f"s{i}" for i in range(12)),
+    *(f"a{i}" for i in range(8)), *(f"x{i}" for i in range(32)),
+}
+_REG_TOKEN = re.compile(r"\b\w+\b")
+
+
+def implicit_regs(line):
+    """Hardcoded registers a template line names literally, in the order they
+    first appear -- e.g. `tmp` in `alu tmp, rs1a, rs2a`, `t1` in
+    `jalr_link_t1 t1, 0(tmp)`. These never show up in the row's fields, so
+    without this they read as silently erased rather than fixed."""
+    _, _, rest = line.partition(" ")
+    return ", ".join(dict.fromkeys(t for t in _REG_TOKEN.findall(rest)
+                                    if t in _ABI_REGS))
+
+
 def matches(row, tag, a_ops, b_ops, sp_template, has_sp_rows):
     """A row realises a template when every field the row encodes is an operand
     of the template, and (for frames that distinguish them) its SP-relative
@@ -680,6 +702,9 @@ def frame_body_lines(frame, colwidths):
     for row, tag in rows:                           # the form as it stands
         line = render_line(_tokens(row, w, frame.get("sentinel")), o5, colwidths)
         out.append(line + (f" ({tag})" if tag else ""))
+
+    impl_w = max([len(implicit_regs(ln))
+                  for pair in spec["templates"] for ln in pair] + [0])
 
     for pair in spec["templates"]:
         a_line, b_line = pair[0].strip(), pair[1].strip()
@@ -711,8 +736,10 @@ def frame_body_lines(frame, colwidths):
             toks = _tokens(row, w, frame.get("sentinel"))
             a = render_line(toks, o5, colwidths, keep=lambda base: base in a_ops)
             b = render_line(toks, o5, colwidths, keep=lambda base: base in b_ops)
-            out.append(f"{a}   {specialize(a_line, rops)}")
-            out.append(f"{b}   {specialize(b_line, rops)}")
+            a_impl = f"{_center(implicit_regs(a_line), impl_w)}│" if impl_w else ""
+            b_impl = f"{_center(implicit_regs(b_line), impl_w)}│" if impl_w else ""
+            out.append(f"A: {a}{a_impl}   {specialize(a_line, rops)}")
+            out.append(f"B: {b}{b_impl}   {specialize(b_line, rops)}")
     while out and not out[-1].strip():
         out.pop()
     notes = frame_notes(frame, colwidths)
