@@ -1191,7 +1191,7 @@ doc:
       budget: 2
       level: 2
       templates:
-        - ["addi    sp, 16*imm", "jr_any  rs1b"]
+        - ["addi    sp, 16*imm", "jr      rs1b"]
       ops:
         # NO linking spelling.  An epilogue tears the frame down and transfers
         # away; a `jalr ra` here would return into the frame it just freed, so
@@ -1346,8 +1346,8 @@ doc:
       # residue are now handled per-site instead of assumed away.
       accepts_pcrel_lo: true
       templates:
-        - ["load    tmp, k*imma(rs1a)", "jalr_link_ra ra, 0(tmp)"]
-        - ["load    tmp, k*imma(rs1a)", "jalr_link_t1 t1, 0(tmp)"]
+        - ["load    tmp, k*imma(rs1a)", "jalr    ra, 0(tmp)"]
+        - ["load    tmp, k*imma(rs1a)", "jalr    t1, 0(tmp)"]
       ops:
         - {a: [{op: lw, imm: {bits: 10, signed: false}},
                {op: ld, imm: {bits: 10, signed: false}}],
@@ -1390,12 +1390,12 @@ doc:
       budget: 16
       level: 2
       templates:
-        - ["mv      rda, rs2a",         "jalr_ra ra, 4*immb(ra)"]
-        - ["li      rda, imma",         "jalr_ra ra, 4*immb(ra)"]
-        - ["addi4spn rda, 4*imma",      "jalr_ra ra, 4*immb(ra)"]
-        - ["load    rda, k*imma(sp)",   "jalr_ra ra, 4*immb(ra)"]
-        - ["store   rs2a, k*imma(sp)",  "jalr_ra ra, 4*immb(ra)"]
-        - ["addi_rsd rda, imma",        "jr_t1   4*immb(t1)"]
+        - ["mv      rda, rs2a",         "jalr    ra, 4*immb(ra)"]
+        - ["li      rda, imma",         "jalr    ra, 4*immb(ra)"]
+        - ["addi4spn rda, 4*imma",      "jalr    ra, 4*immb(ra)"]
+        - ["load    rda, k*imma(sp)",   "jalr    ra, 4*immb(ra)"]
+        - ["store   rs2a, k*imma(sp)",  "jalr    ra, 4*immb(ra)"]
+        - ["addi_rsd rda, imma",        "jr      4*immb(t1)"]
       ops:
         - a: [mv, {op: li, imm: {bits: 7}}, {op: addi4spn, imm: {bits: 7, scale: 4, signed: false}},
               {op: lw, imm: {bits: 7, signed: false}},
@@ -1472,9 +1472,9 @@ doc:
       budget: 32
       level: 2
       templates:
-        - ["mv      rda, rs2a", "jr_any/jalr_link_ra rs1b"]
-        - ["load    rda, k*imma(rs1a)", "jr_any/jalr_link_ra rs1b"]
-        - ["li      rda, imma", "jr_any/jalr_link_ra rs1b"]
+        - ["mv      rda, rs2a", "jr/jalr rs1b"]
+        - ["load    rda, k*imma(rs1a)", "jr/jalr rs1b"]
+        - ["li      rda, imma", "jr/jalr rs1b"]
         - ["mv      rda, rs2a", "j       4*immb"]
         - ["load    rda, 0(rs1a)", "j       4*immb"]
         - ["li      rda, imma", "j       4*immb"]
@@ -1523,8 +1523,8 @@ doc:
       # 16 x 4) and `mv rsda, rs2a` is neither RSD nor li, so rules.py does
       # not match it either.  `li` rides addi's codepoints (rs1 = x0).
       templates:
-        - ["alu     rsda, rsda, rs2a/imma", "jr_any/jalr_link_ra rs1b"]
-        - ["li     rsda, imma", "jr_any/jalr_link_ra rs1b"]
+        - ["alu     rsda, rsda, rs2a/imma", "jr/jalr rs1b"]
+        - ["li     rsda, imma", "jr/jalr rs1b"]
       ops:
         - {a: *rsd_alu_j, b: [ret, jalr_link_ra, jr_any, j]}
       rows:

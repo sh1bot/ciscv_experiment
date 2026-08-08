@@ -656,7 +656,7 @@ def specialize(line, row_ops):
 
 
 # Registers a template line can name literally rather than through a field the
-# frame encodes -- fixed by the opcode (`beqz`'s zero, `jalr_link_t1`'s t1) or
+# frame encodes -- fixed by the opcode (`beqz`'s zero, `jalr t1, ...`'s t1) or
 # by convention (the `tmp` scratch register). The standard RISC-V ABI names
 # plus `tmp` cover every register a template could hard-code.
 _ABI_REGS = {
@@ -709,7 +709,7 @@ def slot_fields(row, grid, ops):
 # Mnemonics used in templates that never write a register -- a store's target
 # is memory, branches don't write, and `jr`-style jumps drop the link. Every
 # operand position in one of these lines is a read.
-_NO_DEST_MNEMS = {"bXX", "beqz", "bnez", "j", "jr_any", "jr_t1", "store"}
+_NO_DEST_MNEMS = {"bXX", "beqz", "bnez", "j", "jr", "store"}
 
 
 def _operand_roles(pos, mnem, n_operands):
@@ -727,11 +727,11 @@ def _operand_roles(pos, mnem, n_operands):
 
 def slot_implicit(line):
     """[{name, type}] for the registers a template line hard-codes -- fixed
-    by the opcode (`beqz`'s zero, `jalr_link_t1`'s t1) or by convention (the
+    by the opcode (`beqz`'s zero, `jalr t1, ...`'s t1) or by convention (the
     `tmp` scratch register), never by an encoded field. `type` is read from
     how THIS line actually uses each one: `tmp` is rd where `alu tmp, ...`
     writes it and rs where `alu rdb, tmp, ...` reads it back; `ra` is rsd on
-    `jalr_ra ra, imm(ra)`, which both writes the link register and reads the
+    `jalr ra, imm(ra)`, which both writes the link register and reads the
     same register as its own base -- one name naming both roles in one line."""
     mnem, _, rest = line.partition(" ")
     operands = [o.strip() for o in rest.split(",")] if rest else []
@@ -1281,10 +1281,10 @@ def report(frames, info):
           "A slot and the B slot as field lists (name, bits, type) plus any register\n"
           "the line hard-codes rather than encodes (`implicit`, typed rs/rd/rsd from\n"
           "how THAT line uses it -- a name naming both a write and a read in one line,\n"
-          "like jalr_ra's own base register, is rsd). A box in the form is one FIELD,\n"
-          "not one column: columns holding adjoining bits of one thing are drawn\n"
-          "fused, a column split between two operands is drawn divided, and any name\n"
-          "a box is too narrow to spell is given in a `where` line below it.\n")
+          "like `jalr ra, imm(ra)`'s own base register, is rsd). A box in the form is\n"
+          "one FIELD, not one column: columns holding adjoining bits of one thing are\n"
+          "drawn fused, a column split between two operands is drawn divided, and any\n"
+          "name a box is too narrow to spell is given in a `where` line below it.\n")
     print("Then its op tables: which op-select index selects which pair of opcodes.\n"
           "Constant bits pick the ops cluster, 'a'/'b' index that cluster's two op\n"
           "tables, 'i' carries a shared immediate's high bits.  An op spanning\n"
