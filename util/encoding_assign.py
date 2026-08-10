@@ -756,10 +756,20 @@ def slot_implicit(line):
 def frame_templates(frame, grid):
     """Per template, per matching row: the A and B slots as field lists --
     encoded fields (name, bits, type) plus any hard-coded register the line
-    names outright (`implicit`) -- and the specialized asm each slot runs."""
+    names outright (`implicit`) -- and the specialized asm each slot runs.
+
+    Every entry also carries the frame's own assigned bits: `id` (the
+    constant identifier -- may run past opcode5 into funct3 for a frame
+    whose identifier is longer than 5 bits) and `opcode` (opcode5[4:0]
+    itself, '0'/'1' where the identifier reaches it, 'p' where it's still
+    this frame's own op-select -- the same string `layout:`'s rows draw,
+    repeated here since a `templates:` entry no longer sits next to one)."""
     spec = frame["spec"]
     rows = frame_rows(spec)
     has_sp = any(tag == "SP-relative" for _, tag in rows)
+    idl = frame["id_len"]
+    const_bits = format(frame["id_val"], f"0{idl}b") if idl else ""
+    opcode_bits = " ".join(word_chars(frame)[0:5])
     out = []
     for pair in spec["templates"]:
         a_line, b_line = pair[0].strip(), pair[1].strip()
@@ -779,12 +789,15 @@ def frame_templates(frame, grid):
             if cand and row_operands(cand[0][0], grid) & (a_ops | b_ops):
                 hits, approx = [cand[0]], True
         if not hits:
-            out.append({"a": {"template": a_line}, "b": {"template": b_line},
+            out.append({"id": const_bits, "opcode": opcode_bits,
+                       "a": {"template": a_line}, "b": {"template": b_line},
                        "unrealised": True})
             continue
         for row, tag in hits:
             rops = row_operands(row, grid)
             entry = {
+                "id": const_bits,
+                "opcode": opcode_bits,
                 "a": {"fields": slot_fields(row, grid, a_ops),
                       "implicit": slot_implicit(a_line),
                       "template": specialize(a_line, rops)},
@@ -817,12 +830,14 @@ def frame_templates_lines(frame, grid):
         return []
     out = ["templates:"]
     for e in entries:
+        out.append(f"- id: {_q(e['id'])}")
+        out.append(f"  opcode: {_q(e['opcode'])}")
         if e.get("unrealised"):
-            out.append("- unrealised: true")
+            out.append("  unrealised: true")
             out.append(f"  a: {{template: {_q(e['a']['template'])}}}")
             out.append(f"  b: {{template: {_q(e['b']['template'])}}}")
             continue
-        out.append("- a:")
+        out.append("  a:")
         out.extend("    " + ln for ln in _slot_yaml_lines(e["a"]))
         out.append("  b:")
         out.extend("    " + ln for ln in _slot_yaml_lines(e["b"]))
