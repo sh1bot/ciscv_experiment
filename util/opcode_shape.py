@@ -50,6 +50,30 @@ OPCODE5_BITS = 5
 OPCODE5_VALUES = 1 << OPCODE5_BITS                        # 32
 CAP_PER_VALUE = 1 << (ea.WBITS - OPCODE5_BITS)             # 32 (funct3+g+h)
 
+
+def bin_pack(remainders, cap):
+    """Minimum number of cap-sized bins needed to pack these leftover amounts
+    together -- exact via full search (the item counts here are always tiny,
+    at most a handful of B-shapes per A-shape). This is what makes a funct3
+    code shared/asymmetric: two B-shapes' leftovers, each too small alone to
+    justify a whole code, packed into ONE code together when their sum still
+    fits its capacity, rather than each rounding up to its own full code."""
+    best = len(remainders)
+    def search(items, bins):
+        nonlocal best
+        if not items:
+            best = min(best, len(bins))
+            return
+        if len(bins) >= best:
+            return
+        item, rest = items[0], items[1:]
+        for i, b in enumerate(bins):
+            if b + item <= cap:
+                search(rest, bins[:i] + [b + item] + bins[i + 1:])
+        search(rest, bins + [item])
+    search(sorted((r for r in remainders if r), reverse=True), [])
+    return best
+
 # --- base-ISA operand format (the only hardcoded knowledge here) -----------
 # (needs_rs1, needs_rs2, needs_imm), independent of rd. Everything else in
 # the corpus resolves down to one of these through encoding.yaml's own
@@ -336,27 +360,33 @@ def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
           "leftover bits and g/h are only for whatever a funct3 code's own\n"
           "content doesn't fit, not for B's shape itself. Modeled as a real\n"
           "2-stage mux: funct3 selects one of 8 codes, each code's own inner\n"
-          "mux is uniformly (opcode5-leftover + g + h) wide -- no power-of-2\n"
-          "rounding required PER symbol (a mux just repeats an input across\n"
-          "as many codes as its content needs; boundaries don't need to\n"
-          "align), only the total code count has to fit funct3's 8 slots:\n")
+          "mux is uniformly (opcode5-leftover + g + h) wide. Each B-shape\n"
+          "claims whole codes for its bulk; where two B-shapes both have a\n"
+          "leftover too small alone to justify a full code, they SHARE one\n"
+          "(an asymmetric/split code, marked *) rather than each rounding up\n"
+          "-- the busiest B-shape's own full codes stay simple and uniform,\n"
+          "only the small remainder has to be irregular:\n")
     a_idl = {sf["name"]: sf["id_len"] for sf in a_shape_order}
     for a_shp in sorted(a_weight, key=lambda s: -a_weight[s]):
         sub = {b: w for (a, b), w in joint.items() if a == a_shp}
         opcode5_left = OPCODE5_BITS - a_idl[a_shp]
         per_code_cap = 1 << (opcode5_left + 2)          # opcode5-leftover + g + h
-        codes_needed = {b: math.ceil(w / per_code_cap) for b, w in sub.items()}
-        total_codes = sum(codes_needed.values())
+        full = {b: w // per_code_cap for b, w in sub.items()}
+        rem = {b: w % per_code_cap for b, w in sub.items()}
+        baseline = sum(full.values())
+        shared = bin_pack(list(rem.values()), per_code_cap)
+        total_codes = baseline + shared
         fits = total_codes <= 8
         verdict = (f"fits ({8 - total_codes} funct3 code(s) spare)" if fits else
                    f"does NOT fit -- short by {total_codes - 8} funct3 code(s) "
-                   f"(the shortfall is real content that doesn't fit ANY assignment "
-                   f"of funct3 codes at this per-code capacity, not a rounding artifact)")
+                   f"even with sharing")
         print(f"  A={a_shp:6} weight={a_weight[a_shp]:>5}   per-funct3-code capacity="
-              f"{per_code_cap}   {total_codes}/8 funct3 codes needed -> {verdict}")
+              f"{per_code_cap}   {baseline} full + {shared} shared* = "
+              f"{total_codes}/8 funct3 codes -> {verdict}")
         for b_shp, w in sorted(sub.items(), key=lambda kv: -kv[1]):
-            print(f"      B={b_shp:6} weight={w:>5}  needs {codes_needed[b_shp]} "
-                  f"code(s) ({100*w/a_weight[a_shp]:.1f}% of this A-shape)")
+            note = f" + shares a code* ({rem[b_shp]} left over)" if rem[b_shp] else ""
+            print(f"      B={b_shp:6} weight={w:>5}  {full[b_shp]} full code(s)"
+                  f"{note}  ({100*w/a_weight[a_shp]:.1f}% of this A-shape)")
     print()
 
 
