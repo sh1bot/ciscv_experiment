@@ -33,10 +33,12 @@ any existing output. Rerun after editing encoding.yaml to see the updated
 partition, or run --check to fail loudly if something no longer fits.
 
 Usage:
-    python3 util/opcode_shape.py            # the partition report
-    python3 util/opcode_shape.py --check    # exit nonzero on overflow/unknown op
+    python3 util/opcode_shape.py                 # the partition report
+    python3 util/opcode_shape.py -o FILE.md       # ... written to FILE.md
+    python3 util/opcode_shape.py --check          # exit nonzero on overflow/unknown op
 """
 import argparse
+import contextlib
 import math
 import os
 import sys
@@ -289,17 +291,57 @@ def partition(entries):
 
 
 # --- report ------------------------------------------------------------
+def frame_index(frames, pseudo_ops, xlen_switchable):
+    """{frame_name: {does, a_shapes, b_shapes, weight}} -- a per-frame rollup
+    for quick lookup, since a single frame's own clusters can straddle more
+    than one A-shape or B-shape (e.g. alu-alu-chain has both RI- and
+    RR-shaped A ops)."""
+    pairs = catalog_pairs(frames, pseudo_ops, xlen_switchable)
+    by_name = {f["name"]: f for f in frames if not f.get("host")}
+    idx = {}
+    for e in pairs:
+        row = idx.setdefault(e["frame"], {"a_shapes": set(), "b_shapes": set(), "weight": 0})
+        row["a_shapes"].add(e["a_shape"])
+        row["b_shapes"].add(e["b_shape"])
+        row["weight"] += e["n"]
+    for name, row in idx.items():
+        row["does"] = by_name[name]["spec"].get("does", "")
+    return idx
+
+
+def print_frame_index(frames, pseudo_ops, xlen_switchable):
+    idx = frame_index(frames, pseudo_ops, xlen_switchable)
+    print("## Frame index\n")
+    print("| frame | does | A-shape(s) | B-shape(s) | weight |")
+    print("|---|---|---|---|---|")
+    for name in sorted(idx, key=lambda n: -idx[n]["weight"]):
+        row = idx[name]
+        a = "/".join(sorted(row["a_shapes"]))
+        b = "/".join(sorted(row["b_shapes"]))
+        print(f"| `{name}` | {row['does']} | {a} | {b} | {row['weight']} |")
+    print()
+
+
 def report(frames, info):
     pseudo_ops, xlen_switchable = info["pseudo_ops"], info["opsets"].get("xlen_switchable") or {}
     entries = catalog(frames, pseudo_ops, xlen_switchable)
     total = sum(e["n"] for e in entries)
     shape_order, shape_reserved, shape_W, overflow, frame_order_by_shape = partition(entries)
 
-    print(f"Slot A operand shape -- rs1/rs2/imm readiness, opcode5-partitioned\n")
+    print(f"# Slot A operand shape -- opcode5-partitioned encoding\n")
+    print(f"rs1/rs2/imm readiness (\"shape\") for the A slot, resolved dynamically\n"
+          f"from encoding.yaml, partitioned across the packet's opcode5 field the\n"
+          f"same way real RISC-V's opcode[6:2] determines instruction FORMAT before\n"
+          f"funct3 picks the specific operation. rd is out of scope. See\n"
+          f"`util/opcode_shape.py`'s module docstring for the full methodology.\n")
     print(f"{total} codepoints catalogued across "
           f"{len({e['frame'] for e in entries})} frames.\n")
     print(f"opcode5 values used: {shape_reserved}/{OPCODE5_VALUES}"
           + ("  *** OVERFLOW ***" if overflow else "") + "\n")
+
+    print_frame_index(frames, pseudo_ops, xlen_switchable)
+
+    print("## A-shape partition\n")
 
     for sf in shape_order:
         block = 1 << sf["opsel"]
@@ -308,18 +350,19 @@ def report(frames, info):
         w = sum(e["n"] for e in entries if e["shape"] == sf["name"])
         tag = "  *** OVERFLOW ***" if sf["_overflow"] else ""
         buddy_tag = " (buddy-rounded sub-alloc overflows too)" if sf["_overflow_buddy"] and not sf["_overflow"] else ""
-        print(f"## {sf['name']:6} opcode5={prefix}{'x' * (5 - idl)}  "
-              f"block={block:>2}/32 values ({block * CAP_PER_VALUE} codepoints, "
+        print(f"### {sf['name']} -- opcode5={prefix}{'x' * (5 - idl)}\n")
+        print(f"block={block}/32 values ({block * CAP_PER_VALUE} codepoints, "
               f"{sf['_capacity'] - sf['_frame_exact']} spare exact / "
-              f"{sf['_capacity'] - sf['_frame_reserved']} spare buddy-rounded)  "
-              f"content={w}{tag}{buddy_tag}")
+              f"{sf['_capacity'] - sf['_frame_reserved']} spare buddy-rounded), "
+              f"content={w}{tag}{buddy_tag}\n")
+        print("```")
         for mf in sf["_frame_order"]:
             fidl = mf["id_len"]
             fprefix = format(mf["id_val"], f"0{fidl}b") if fidl else ""
             fw = sf["_frame_weight"][mf["name"]]
-            print(f"      {mf['name']:24} weight={fw:>4}  "
+            print(f"{mf['name']:24} weight={fw:>4}  "
                   f"sub-id={fprefix or '(none)'}")
-        print()
+        print("```\n")
 
     print_b_and_contention(frames, pseudo_ops, xlen_switchable, shape_order)
     return overflow or any(sf["_overflow"] for sf in shape_order)
@@ -339,10 +382,11 @@ def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
     b_weight = {}
     for e in pairs:
         b_weight[e["b_shape"]] = b_weight.get(e["b_shape"], 0) + e["n"]
-    print("Slot B operand shape, independent of A (marginal):\n")
+    print("## Slot B operand shape, independent of A (marginal)\n")
+    print("```")
     for shape, w in sorted(b_weight.items(), key=lambda kv: -kv[1]):
-        print(f"  {shape:6} weight={w:>4}  ({100*w/total:.1f}%)")
-    print()
+        print(f"{shape:6} weight={w:>4}  ({100*w/total:.1f}%)")
+    print("```\n")
 
     b_only = catalog_b(frames, pseudo_ops, xlen_switchable)
     b_shape_order, b_reserved, _, b_overflow, _ = partition(b_only)
@@ -356,7 +400,8 @@ def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
         key = (e["a_shape"], e["b_shape"])
         joint[key] = joint.get(key, 0) + e["n"]
 
-    print("Contention: funct3 is ALWAYS B's shape field, full stop -- opcode5's\n"
+    print("## funct3 partition and contention\n")
+    print("funct3 is ALWAYS B's shape field, full stop -- opcode5's\n"
           "leftover bits and g/h are only for whatever a funct3 code's own\n"
           "content doesn't fit, not for B's shape itself. Modeled as a real\n"
           "2-stage mux: funct3 selects one of 8 codes, each code's own inner\n"
@@ -366,6 +411,7 @@ def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
           "(an asymmetric/split code, marked *) rather than each rounding up\n"
           "-- the busiest B-shape's own full codes stay simple and uniform,\n"
           "only the small remainder has to be irregular:\n")
+    print("```")
     a_idl = {sf["name"]: sf["id_len"] for sf in a_shape_order}
     for a_shp in sorted(a_weight, key=lambda s: -a_weight[s]):
         sub = {b: w for (a, b), w in joint.items() if a == a_shp}
@@ -380,19 +426,20 @@ def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
         verdict = (f"fits ({8 - total_codes} funct3 code(s) spare)" if fits else
                    f"does NOT fit -- short by {total_codes - 8} funct3 code(s) "
                    f"even with sharing")
-        print(f"  A={a_shp:6} weight={a_weight[a_shp]:>5}   per-funct3-code capacity="
+        print(f"A={a_shp:6} weight={a_weight[a_shp]:>5}   per-funct3-code capacity="
               f"{per_code_cap}   {baseline} full + {shared} shared* = "
               f"{total_codes}/8 funct3 codes -> {verdict}")
         for b_shp, w in sorted(sub.items(), key=lambda kv: -kv[1]):
             note = f" + shares a code* ({rem[b_shp]} left over)" if rem[b_shp] else ""
-            print(f"      B={b_shp:6} weight={w:>5}  {full[b_shp]} full code(s)"
+            print(f"    B={b_shp:6} weight={w:>5}  {full[b_shp]} full code(s)"
                   f"{note}  ({100*w/a_weight[a_shp]:.1f}% of this A-shape)")
-    print()
+    print("```")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--yaml", default=os.path.join(ROOT, "encoding.yaml"))
+    ap.add_argument("-o", "--output", help="write the report (markdown) here instead of stdout")
     ap.add_argument("--check", action="store_true",
                      help="exit nonzero on overflow or an unclassifiable op; print nothing on success")
     args = ap.parse_args()
@@ -405,6 +452,10 @@ def main():
             entries = catalog(frames, pseudo_ops, xlen_switchable)
             shape_order, _, _, overflow, _ = partition(entries)
             bad = overflow or any(sf["_overflow"] for sf in shape_order)
+            return 1 if bad else 0
+        elif args.output:
+            with open(args.output, "w") as fh, contextlib.redirect_stdout(fh):
+                bad = report(frames, info)
             return 1 if bad else 0
         else:
             return 1 if report(frames, info) else 0
