@@ -78,10 +78,16 @@ SHAPE_LABELS = {
     (True, False, True): "RI",
     (True, True, False): "RR",
     (True, True, True): "RRI",
-    (False, False, True): "IMM",
-    (True, False, False): "R1",
-    (False, True, False): "R2",
-    (False, False, False): "NONE",
+    # Single-operand and no-operand modes fold into RI: an implementation
+    # can just ignore the argument it doesn't need. Preferring an unused
+    # immediate over an unused register (rather than folding into RR) keeps
+    # the folded-away slot free of any real register-file read -- an unused
+    # immediate is just a wire nobody looks at, but an unused register slot
+    # is still a register index someone has to decide not to act on.
+    (False, False, True): "RI",   # imm-only (li, addi4spn): rs1 unused
+    (True, False, False): "RI",   # rs1-only (inc, dec): imm unused
+    (False, True, False): "RI",   # rs2-only (mv): imm unused
+    (False, False, False): "RI",  # no operands at all (ret): both unused
 }
 
 
@@ -237,11 +243,22 @@ def partition(entries):
         members = [_pseudo_frame(name, ea.opsel_bits(w)) for name, w in by_frame.items()]
         capacity = (1 << sf["opsel"]) * CAP_PER_VALUE
         order, reserved, W = ea.allocate_blocks(members)
+        # `reserved` (buddy-rounded, one power-of-2 block per frame) is what a
+        # canonical-prefix decoder would need; it's not what a flat lookup/mux
+        # needs. Nothing outside this A-shape's own block competes for these
+        # bits, so there's no reason each frame's slice has to be its own
+        # power-of-2-aligned region -- a mux just routes however many raw
+        # index values a frame's content needs to its input, repeated as
+        # necessary, boundaries anywhere. The real constraint is the SUM of
+        # real content fitting the capacity, not the sum of rounded blocks.
+        exact = sum(by_frame.values())
         sf["_frame_weight"] = by_frame
         sf["_frame_order"] = order
         sf["_frame_reserved"] = reserved
+        sf["_frame_exact"] = exact
         sf["_capacity"] = capacity
-        sf["_overflow"] = reserved > capacity
+        sf["_overflow_buddy"] = reserved > capacity
+        sf["_overflow"] = exact > capacity
         frame_order_by_shape[shape] = order
 
     return shape_order, shape_reserved, shape_W, overflow, frame_order_by_shape
@@ -266,10 +283,12 @@ def report(frames, info):
         prefix = format(sf["id_val"], f"0{idl}b") if idl else ""
         w = sum(e["n"] for e in entries if e["shape"] == sf["name"])
         tag = "  *** OVERFLOW ***" if sf["_overflow"] else ""
+        buddy_tag = " (buddy-rounded sub-alloc overflows too)" if sf["_overflow_buddy"] and not sf["_overflow"] else ""
         print(f"## {sf['name']:6} opcode5={prefix}{'x' * (5 - idl)}  "
               f"block={block:>2}/32 values ({block * CAP_PER_VALUE} codepoints, "
-              f"{sf['_capacity'] - sf['_frame_reserved']} spare)  "
-              f"content={w}{tag}")
+              f"{sf['_capacity'] - sf['_frame_exact']} spare exact / "
+              f"{sf['_capacity'] - sf['_frame_reserved']} spare buddy-rounded)  "
+              f"content={w}{tag}{buddy_tag}")
         for mf in sf["_frame_order"]:
             fidl = mf["id_len"]
             fprefix = format(mf["id_val"], f"0{fidl}b") if fidl else ""
@@ -313,26 +332,31 @@ def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
         key = (e["a_shape"], e["b_shape"])
         joint[key] = joint.get(key, 0) + e["n"]
 
-    print("Contention: B-shape distribution WITHIN each A-shape partition,\n"
-          "and whether pinning it fits in THAT A-shape's own leftover opcode5\n"
-          "bits, or has to spill into funct3 (a per-A-shape fact, not a fixed\n"
-          "bit position -- this is the number that decides whether \"where do I\n"
-          "find B's shape\" can be one rule for the whole decoder):\n")
+    print("Contention: funct3 is ALWAYS B's shape field, full stop -- opcode5's\n"
+          "leftover bits and g/h are only for whatever a funct3 code's own\n"
+          "content doesn't fit, not for B's shape itself. Modeled as a real\n"
+          "2-stage mux: funct3 selects one of 8 codes, each code's own inner\n"
+          "mux is uniformly (opcode5-leftover + g + h) wide -- no power-of-2\n"
+          "rounding required PER symbol (a mux just repeats an input across\n"
+          "as many codes as its content needs; boundaries don't need to\n"
+          "align), only the total code count has to fit funct3's 8 slots:\n")
     a_idl = {sf["name"]: sf["id_len"] for sf in a_shape_order}
     for a_shp in sorted(a_weight, key=lambda s: -a_weight[s]):
         sub = {b: w for (a, b), w in joint.items() if a == a_shp}
-        extra_bits = ea.opsel_bits(len(sub)) if len(sub) > 1 else 0
         opcode5_left = OPCODE5_BITS - a_idl[a_shp]
-        fits = extra_bits <= opcode5_left
-        verdict = (f"fits in opcode5 ({opcode5_left - extra_bits} bit(s) left over)"
-                   if fits else
-                   f"does NOT fit -- {extra_bits - opcode5_left} bit(s) must spill into funct3")
-        print(f"  A={a_shp:6} weight={a_weight[a_shp]:>5}   {len(sub)} distinct "
-              f"B-shape(s) -> {extra_bits} extra bit(s) needed, "
-              f"{opcode5_left} left in opcode5 -> {verdict}")
+        per_code_cap = 1 << (opcode5_left + 2)          # opcode5-leftover + g + h
+        codes_needed = {b: math.ceil(w / per_code_cap) for b, w in sub.items()}
+        total_codes = sum(codes_needed.values())
+        fits = total_codes <= 8
+        verdict = (f"fits ({8 - total_codes} funct3 code(s) spare)" if fits else
+                   f"does NOT fit -- short by {total_codes - 8} funct3 code(s) "
+                   f"(the shortfall is real content that doesn't fit ANY assignment "
+                   f"of funct3 codes at this per-code capacity, not a rounding artifact)")
+        print(f"  A={a_shp:6} weight={a_weight[a_shp]:>5}   per-funct3-code capacity="
+              f"{per_code_cap}   {total_codes}/8 funct3 codes needed -> {verdict}")
         for b_shp, w in sorted(sub.items(), key=lambda kv: -kv[1]):
-            print(f"      B={b_shp:6} weight={w:>5}  "
-                  f"({100*w/a_weight[a_shp]:.1f}% of this A-shape)")
+            print(f"      B={b_shp:6} weight={w:>5}  needs {codes_needed[b_shp]} "
+                  f"code(s) ({100*w/a_weight[a_shp]:.1f}% of this A-shape)")
     print()
 
 
