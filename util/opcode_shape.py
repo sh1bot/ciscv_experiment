@@ -146,6 +146,61 @@ def catalog(frames, pseudo_ops, xlen_switchable):
     return entries
 
 
+def catalog_b(frames, pseudo_ops, xlen_switchable):
+    """[{frame, cluster, op, n, shape}] for every B-side entry, mirroring
+    catalog() exactly but for B -- its own shape, independent of which A op
+    it happens to be paired with."""
+    entries = []
+    for f in frames:
+        if f.get("host"):
+            continue
+        for ci, c in enumerate(f["tables"]):
+            if c["diagonal"]:
+                for p in c["pairs"]:
+                    shape = a_shape(p["b"]["op"], pseudo_ops, xlen_switchable)
+                    entries.append({"frame": f["name"], "cluster": ci,
+                                     "op": p["b"]["op"], "n": p["n"], "shape": shape})
+            else:
+                a_total = sum(ea_["n"] for ea_ in c["a"])
+                for eb in c["b"]:
+                    shape = a_shape(eb["op"], pseudo_ops, xlen_switchable)
+                    entries.append({"frame": f["name"], "cluster": ci,
+                                     "op": eb["op"], "n": eb["n"] * a_total,
+                                     "shape": shape})
+    return entries
+
+
+def catalog_pairs(frames, pseudo_ops, xlen_switchable):
+    """[{frame, cluster, a_op, b_op, n, a_shape, b_shape}] for every reachable
+    (opA, opB) combination, weighted by real codepoint coverage -- the joint
+    catalog catalog()/catalog_b() each aggregate away one side of. This is
+    what lets B's shape be measured against A's, not just on its own."""
+    entries = []
+    for f in frames:
+        if f.get("host"):
+            continue
+        for ci, c in enumerate(f["tables"]):
+            if c["diagonal"]:
+                for p in c["pairs"]:
+                    entries.append({
+                        "frame": f["name"], "cluster": ci,
+                        "a_op": p["a"]["op"], "b_op": p["b"]["op"], "n": p["n"],
+                        "a_shape": a_shape(p["a"]["op"], pseudo_ops, xlen_switchable),
+                        "b_shape": a_shape(p["b"]["op"], pseudo_ops, xlen_switchable),
+                    })
+            else:
+                for ea_ in c["a"]:
+                    for eb in c["b"]:
+                        entries.append({
+                            "frame": f["name"], "cluster": ci,
+                            "a_op": ea_["op"], "b_op": eb["op"],
+                            "n": ea_["n"] * eb["n"],
+                            "a_shape": a_shape(ea_["op"], pseudo_ops, xlen_switchable),
+                            "b_shape": a_shape(eb["op"], pseudo_ops, xlen_switchable),
+                        })
+    return entries
+
+
 # --- partition: buddy-allocate opcode5 across shapes, then frames within ---
 def _pseudo_frame(name, opsel, a_rank=0):
     return {"name": name, "opsel": opsel, "a_rank": a_rank}
@@ -223,7 +278,62 @@ def report(frames, info):
                   f"sub-id={fprefix or '(none)'}")
         print()
 
+    print_b_and_contention(frames, pseudo_ops, xlen_switchable, shape_order)
     return overflow or any(sf["_overflow"] for sf in shape_order)
+
+
+def print_b_and_contention(frames, pseudo_ops, xlen_switchable, a_shape_order):
+    """B's own shape distribution (same resolver, applied to B-side ops,
+    independent of which A op it's paired with), then the actual contention
+    figure: how many distinct B-shapes show up WITHIN each A-shape's already-
+    claimed opcode5 partition, and whether pinning B's shape down fits in
+    THAT A-shape's remaining opcode5 bits or has to spill into funct3 --
+    which is what decides whether "where do I find B's shape" can be one
+    uniform rule or has to vary by A-shape."""
+    pairs = catalog_pairs(frames, pseudo_ops, xlen_switchable)
+    total = sum(e["n"] for e in pairs)
+
+    b_weight = {}
+    for e in pairs:
+        b_weight[e["b_shape"]] = b_weight.get(e["b_shape"], 0) + e["n"]
+    print("Slot B operand shape, independent of A (marginal):\n")
+    for shape, w in sorted(b_weight.items(), key=lambda kv: -kv[1]):
+        print(f"  {shape:6} weight={w:>4}  ({100*w/total:.1f}%)")
+    print()
+
+    b_only = catalog_b(frames, pseudo_ops, xlen_switchable)
+    b_shape_order, b_reserved, _, b_overflow, _ = partition(b_only)
+    print(f"If B got first pick of its own 32-value field (a reference point,\n"
+          f"not something that physically exists): {b_reserved}/{OPCODE5_VALUES} "
+          f"values" + ("  *** OVERFLOW ***" if b_overflow else "") + "\n")
+
+    a_weight, joint = {}, {}
+    for e in pairs:
+        a_weight[e["a_shape"]] = a_weight.get(e["a_shape"], 0) + e["n"]
+        key = (e["a_shape"], e["b_shape"])
+        joint[key] = joint.get(key, 0) + e["n"]
+
+    print("Contention: B-shape distribution WITHIN each A-shape partition,\n"
+          "and whether pinning it fits in THAT A-shape's own leftover opcode5\n"
+          "bits, or has to spill into funct3 (a per-A-shape fact, not a fixed\n"
+          "bit position -- this is the number that decides whether \"where do I\n"
+          "find B's shape\" can be one rule for the whole decoder):\n")
+    a_idl = {sf["name"]: sf["id_len"] for sf in a_shape_order}
+    for a_shp in sorted(a_weight, key=lambda s: -a_weight[s]):
+        sub = {b: w for (a, b), w in joint.items() if a == a_shp}
+        extra_bits = ea.opsel_bits(len(sub)) if len(sub) > 1 else 0
+        opcode5_left = OPCODE5_BITS - a_idl[a_shp]
+        fits = extra_bits <= opcode5_left
+        verdict = (f"fits in opcode5 ({opcode5_left - extra_bits} bit(s) left over)"
+                   if fits else
+                   f"does NOT fit -- {extra_bits - opcode5_left} bit(s) must spill into funct3")
+        print(f"  A={a_shp:6} weight={a_weight[a_shp]:>5}   {len(sub)} distinct "
+              f"B-shape(s) -> {extra_bits} extra bit(s) needed, "
+              f"{opcode5_left} left in opcode5 -> {verdict}")
+        for b_shp, w in sorted(sub.items(), key=lambda kv: -kv[1]):
+            print(f"      B={b_shp:6} weight={w:>5}  "
+                  f"({100*w/a_weight[a_shp]:.1f}% of this A-shape)")
+    print()
 
 
 def main():
