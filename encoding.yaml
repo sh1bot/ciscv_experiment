@@ -228,13 +228,13 @@ opsets:
   rsd_alu:  &rsd_alu
     - {op: addi, imm: {bits: 7, signed: true}}    # 4 codepoints; the RSD form
     - {op: li,   imm: {bits: 7, signed: true}}    # 4 codepoints; rd != rs1
-    - add
     - {op: addiw, imm: {bits: 5, signed: true}}
-    - and
     - {op: andi,  imm: {bits: 5, signed: true}}
-    - or
     - {op: slli,  imm: {bits: 5, signed: false}}
     - {op: srli,  imm: {bits: 5, signed: false}}
+    - add
+    - and
+    - or
     - xor
 
   # Same ops for arith-jump-pair, but addi/li capped at the 5 bits its row
@@ -247,13 +247,13 @@ opsets:
   rsd_alu_j: &rsd_alu_j
     - {op: addi, imm: {bits: 6, signed: true}}
     - {op: li,   imm: {bits: 6, signed: true}}
-    - add
     - {op: addiw, imm: {bits: 6, signed: true}}
-    - and
     - {op: andi,  imm: {bits: 6, signed: true}}
-    - or
     - {op: slli,  imm: {bits: 6, signed: false}}
     - {op: srli,  imm: {bits: 6, signed: false}}
+    - add
+    - and
+    - or
     - xor
 
   # The ALU set shared by the three CHAIN frames (alu-alu-chain,
@@ -1126,18 +1126,18 @@ doc:
       templates:
         - ["alu rsda, rsda, rs2a/imma", "alu rsdb, rsdb, rs2b/immb"]
       ops:
-        - a: [add, sub, mul, or, sh1add, sh2add, sh3add, czero.nez,
-              {op: addi,  imm: {bits: 5, signed: true}},
+        - a: [{op: addi,  imm: {bits: 5, signed: true}},
               {op: li,    imm: {bits: 5, signed: true}},
               {op: addiw, imm: {bits: 5, signed: true}},
               {op: andi,  imm: {bits: 5, signed: true}},
               {op: slli,  imm: {bits: 6, signed: false}},
               {op: slliw, imm: {bits: 5, signed: false}},
-              {op: srli,  imm: {bits: 5, signed: false}}]
-          b: [add, or, czero.eqz,
-              {op: li,   imm: {bits: 8, signed: true}},
+              {op: srli,  imm: {bits: 5, signed: false}},
+              add, sub, mul, or, sh1add, sh2add, sh3add, czero.nez,]
+          b: [{op: li,   imm: {bits: 8, signed: true}},
               {op: addi, imm: {bits: 7, signed: true}},
-              {op: slli, imm: {bits: 5, signed: false}}]
+              {op: slli, imm: {bits: 5, signed: false}},
+              add, or, czero.eqz,]
       rows:
         - {funct5: rs2b, rs2: rs2a, rs1: rsda, rd: rsdb}
         - {funct5: rs2b, rs2: "imma[4:0]", rs1: rsda, rd: rsdb}
