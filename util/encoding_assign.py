@@ -665,6 +665,7 @@ _ABI_REGS = {
     *(f"a{i}" for i in range(8)), *(f"x{i}" for i in range(32)),
 }
 _REG_TOKEN = re.compile(r"\b\w+\b")
+_VALUE_RANGE = re.compile(r"\[(\d+):(\d+)\]")
 
 
 def matches(row, tag, a_ops, b_ops, sp_template, has_sp_rows):
@@ -693,17 +694,134 @@ def field_type(stem):
     return "rs"
 
 
+def _part_ranges(row, grid):
+    """Every row part with its concrete packet bit range.
+
+    Split fields are written most-significant first in encoding.yaml.  Turn that
+    structural width back into the actual machine-word interval each piece owns,
+    so generated consumers never have to recover bit positions from the art.
+    """
+    for field in grid_columns(grid):
+        v = row.get(field)
+        if v is None:
+            continue
+        hi, lo = grid["fields"][field]["bits"]
+        if isinstance(v, list):
+            cursor = hi
+            for part in v:
+                w = int(part["bits"])
+                raw = str(part["value"])
+                m = _VALUE_RANGE.search(raw)
+                value_range = [int(m.group(1)), int(m.group(2))] if m else None
+                yield (field, raw.split("[")[0], w, raw,
+                       [cursor, cursor - w + 1], value_range)
+                cursor -= w
+        else:
+            raw = str(v)
+            m = _VALUE_RANGE.search(raw)
+            value_range = [int(m.group(1)), int(m.group(2))] if m else None
+            yield (field, raw.split("[")[0], field_width(grid, field), raw,
+                   [hi, lo], value_range)
+
+
+def _value_slice_name(stem, pieces, whole):
+    """Name a repeated non-contiguous slice as stem[hi:lo] when possible."""
+    if whole:
+        return stem
+    slices = [p["value_range"] for p in pieces if p.get("value_range")]
+    if slices:
+        return f"{stem}[{max(s[0] for s in slices)}:{min(s[1] for s in slices)}]"
+    return stem
+
+
+def _field_name(fields):
+    return fields[0] if len(fields) == 1 else fields
+
+
+def _field_groups(stem, pieces):
+    """Consolidate adjacent packet pieces; repeat entries for gaps.
+
+    A grouped field has one concrete packet `range`.  If that range spans
+    multiple grid fields, `field` is the ordered list of those fields.  If the
+    encoded value is not packet-contiguous, each repeated entry is named with a
+    value-slice qualifier (`imm[9:5]`) so consumers can place it unambiguously.
+    """
+    groups = []
+    for p in pieces:
+        if groups and p["range"][0] == groups[-1]["range"][1] - 1:
+            groups[-1]["pieces"].append(p)
+            groups[-1]["range"][1] = p["range"][1]
+            if p["field"] not in groups[-1]["fields"]:
+                groups[-1]["fields"].append(p["field"])
+        else:
+            groups.append({"pieces": [p], "range": list(p["range"]),
+                           "fields": [p["field"]]})
+    whole = len(groups) == 1
+    out = []
+    for g in groups:
+        out.append({"name": _value_slice_name(stem, g["pieces"], whole),
+                    "bits": sum(p["bits"] for p in g["pieces"]),
+                    "type": field_type(stem),
+                    "field": _field_name(g["fields"]),
+                    "range": g["range"]})
+    return out
+
+
 def slot_fields(row, grid, ops):
-    """[{name, bits, type}] for the fields `ops` names, row order, a split
-    field's pieces summed into the width it draws as a whole."""
-    order, bits = [], {}
-    for _field, stem, w, _raw in row_parts(row, grid):
+    """[{name, bits, type, field, range}] for fields `ops` names, row order.
+
+    Adjacent packet pieces are consolidated into one `range`, with `field` as
+    either one grid field or an ordered list of the grid fields spanned.  If an
+    encoded value is not packet-contiguous, it is repeated as multiple entries
+    whose names carry `[n:m]` value-slice qualifiers.
+    """
+    order, pieces = [], {}
+    for field, stem, w, _raw, rng, value_range in _part_ranges(row, grid):
         if stem not in ops:
             continue
-        if stem not in bits:
+        if stem not in pieces:
             order.append(stem)
-        bits[stem] = bits.get(stem, 0) + w
-    return [{"name": s, "bits": bits[s], "type": field_type(s)} for s in order]
+            pieces[stem] = []
+        pieces[stem].append({"field": field, "bits": w, "range": rng,
+                             "value_range": value_range})
+    out = []
+    for stem in order:
+        out.extend(_field_groups(stem, pieces[stem]))
+    return out
+
+
+_SELECTOR_RANGES = [
+    ("opcode5", [6, 2]),
+    ("funct3", [14, 12]),
+    ("g", [30, 30]),
+    ("h", [31, 31]),
+]
+
+
+def frame_fixed_fields(frame, grid):
+    """Frame constants and variable selector slices with packet positions.
+
+    Emitted once per frame and repeated by reference for templates: consumers
+    can draw all fixed/selector-owned fields with one loop over the same shape
+    used for operands (`name`, `value`, `range`).
+    """
+    out = []
+    chars = word_chars(frame)
+    offset = 0
+    for name, bits in _SELECTOR_RANGES:
+        width = bits[0] - bits[1] + 1
+        value = " ".join(chars[offset:offset + width])
+        out.append({"name": name, "value": value, "type": "selector",
+                    "field": name, "range": bits})
+        offset += width
+    marker = grid["fields"]["marker"]
+    out.append({"name": "marker", "value": MARKER, "type": "constant",
+                "field": "marker", "range": marker["bits"]})
+    if frame.get("sentinel"):
+        rd = grid["fields"]["rd"]
+        out.append({"name": "rd", "value": SENTINEL_PATTERNS[frame["sentinel"]],
+                    "type": "sentinel", "field": "rd", "range": rd["bits"]})
+    return out
 
 
 # Mnemonics used in templates that never write a register -- a store's target
@@ -1056,6 +1174,11 @@ PREAMBLE = """\
 # `select` on a frame spells the whole 10-bit selector word: '0'/'1' are the
 # identifier, 'p' the op-select bits, '.' a bit the frame does not reach.
 # `block` is how many op-select indices the frame has — 2^(number of 'p's).
+# `fixed` gives every selector/constant/sentinel slice in the same structured
+# shape: a `value` plus one concrete packet `range` (`[hi, lo]`).  Template
+# operand fields carry matching `range` entries; when one encoded value spans
+# adjacent grid fields, `field` is an array, and when it is not packet-contiguous
+# the value is repeated with `[n:m]` qualifiers in its `name`.
 #
 # RESOLVING AN INDEX TO A PAIR OF OPCODES
 #
@@ -1192,6 +1315,7 @@ def emit_yaml(frames, info):
         out.append(f"  block: {f['space']}"
                    f"          # op-select indices; {f['used']} used, "
                    f"{f['space'] - f['used']} free")
+        out.append(f"  fixed: {_flow(frame_fixed_fields(f, info['grid']))}")
         out.append("  layout: |")
         for line in frame_body_lines(f, widths):
             out.append(("    " + line).rstrip())

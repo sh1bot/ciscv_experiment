@@ -64,8 +64,16 @@ def test_proto_yaml_emits():
     assert data["selector"]["bits"] == 10
     frames = data["frames"]
     assert len(frames) > 20
+    saw_field_array = False
+    saw_qualified_name = False
     for f in frames:
         assert f["layout"].strip(), f["name"]
+        assert f["fixed"], f["name"]
+        for fixed in f["fixed"]:
+            assert "value" in fixed, (f["name"], fixed)
+            assert len(fixed["range"]) == 2, (f["name"], fixed)
+            assert "ranges" not in fixed, (f["name"], fixed)
+            assert "field" in fixed, (f["name"], fixed)
         # the layout's op-select bits and the tables' index must agree in width
         # ('p' in a frame's `select`; a cluster's re-letters the same bits by
         # role, so 'p' means the pairs table there and is counted separately)
@@ -82,6 +90,20 @@ def test_proto_yaml_emits():
             else:
                 for slot in ("a", "b"):
                     assert sum(e["n"] for e in c[slot]) <= 1 << c["select"].count(slot)
+        for t in f.get("templates", []):
+            if t.get("unrealised"):
+                continue
+            for slot in ("a", "b"):
+                for field in t[slot]["fields"]:
+                    assert len(field["range"]) == 2, (f["name"], field)
+                    assert "ranges" not in field, (f["name"], field)
+                    assert "field" in field, (f["name"], field)
+                    hi, lo = field["range"]
+                    assert field["bits"] == hi - lo + 1, (f["name"], field)
+                    saw_field_array |= isinstance(field["field"], list)
+                    saw_qualified_name |= "[" in field["name"]
+    assert saw_field_array
+    assert saw_qualified_name
 
 
 def test_layout_art_stays_on_the_bit_grid():
